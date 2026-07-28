@@ -40,9 +40,9 @@ function parseMacedonianNumber(text) {
     'sesti': 6, 'sedmi': 7, 'osmi': 8, 'devetti': 9
   };
 
-  for (const [word, num] of Object.entries(words)) {
-    // B10: text.includes(word) causes "dvanaeset" to match "dva" instead of "dvanaeset"
-    // because "dva" is a substring of "dvanaeset" and appears first in the map!
+  // Sort by word length descending so 'dvanaeset' matches before 'dva'
+  const sorted = Object.entries(words).sort((a, b) => b[0].length - a[0].length);
+  for (const [word, num] of sorted) {
     if (text.includes(word)) return num;
   }
   return null;

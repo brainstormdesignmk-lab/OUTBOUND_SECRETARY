@@ -315,7 +315,9 @@ function parseMacedonianNumber(text) {
     'sesti': 6, 'sedmi': 7, 'osmi': 8, 'devetti': 9
   };
   
-  for (const [word, num] of Object.entries(words)) {
+  // Longest-first sort: 'dvanaeset' (12) must match before 'dva' (2) is found as substring
+  const sorted = Object.entries(words).sort((a, b) => b[0].length - a[0].length);
+  for (const [word, num] of sorted) {
     if (text.includes(word)) return num;
   }
   return null;
