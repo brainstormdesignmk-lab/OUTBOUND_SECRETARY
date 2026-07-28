@@ -1,0 +1,259 @@
+import Groq from "groq-sdk";
+import { readFileSync } from 'fs';
+import { config } from './config.js';
+import { getNextMissingField, getQuestion } from './workflow.js';
+import { getPitchMessage, getCloseMessage } from './deal-terms.js';
+import { cleanResponse } from './guardrails.js';
+import { join, dirname } from 'path';
+import { fileURLToPath } from 'url';
+import dotenv from 'dotenv';
+dotenv.config();
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+
+const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
+
+export function generateFirstMessage(lead) {
+
+  const title = (lead.title || '').toLowerCase();
+
+  let propertyType = 'apartment';
+  let propertyLabel = 'имотот';
+
+  if (/stan|стан/i.test(title)) {
+    propertyType = 'apartment';
+    propertyLabel = 'станот';
+  }
+  else if (/kuk|куќ|house|villa|vila/i.test(title)) {
+    propertyType = 'house';
+    propertyLabel = 'куќата';
+  }
+  else if (/plac|плац|land/i.test(title)) {
+    propertyType = 'land';
+    propertyLabel = 'плацот';
+  }
+  else if (/lokal|дукан|office|kancelarija|commercial/i.test(title)) {
+    propertyType = 'commercial';
+    propertyLabel = 'локалот';
+  }
+
+  const transactionType =
+    /издава|изнајмува|rent|rental|kratok prestoj|short stay/i.test(title)
+      ? 'rent'
+      : 'sale';
+
+  let text;
+
+  if (transactionType === 'rent') {
+
+    text =
+      `Здраво, јас сум Ана од Metropolis агенција за недвижности. Ве контактирам во врска со огласот за ${propertyLabel} што се издава. Дали е сѐ уште достапен и дали би биле заинтересирани за соработка?`;
+
+  } else {
+
+    text =
+      `Здраво, јас сум Ана од Metropolis агенција за недвижности. Ве контактирам во врска со огласот за ${propertyLabel} што се продава. Дали е сѐ уште достапен и дали би биле заинтересирани за соработка без провизија за вас како сопственик?`;
+
+  }
+
+  return {
+    text,
+    type: "GREETING",
+    memory: {
+      transactionType,
+      propertyType,
+      propertyLabel,
+      title: lead.title
+    }
+  };
+}
+
+export async function generateResponse(session, userInput) {
+  try {
+    const isPitch = session.state === 'awaiting_pitch_response';
+
+    const conv = session.messages
+      .filter(m => m.text?.length > 0)
+      .map(m => `${m.role === 'model' ? 'Ана' : 'Сопственик'}: ${m.text}`)
+      .join('\n');
+
+    const known = { ...session.adMemory, ...session.collectedData };
+
+const nextField = getNextMissingField(known);
+const nextQuestion = nextField
+  ? getQuestion(nextField, known.propertyType || 'apartment')
+  : null;
+
+// =====================================
+// MEMORY EXTRACTION
+// =====================================
+
+const u = userInput.toLowerCase();
+
+// AVAILABLE
+if (
+  /dostapen|достапен|уште е достапен|се уште е достапен|ima go|го има/.test(u)
+) {
+  session.collectedData.available = true;
+}
+
+if (
+  /prodaden|продаден|izdaden|издаден|не е достапен/.test(u)
+) {
+  session.collectedData.available = false;
+}
+
+// PRICE
+const priceMatch = u.match(/(\d{4,7})\s*(евра|eur|euro|€)?/i);
+if (priceMatch && !session.collectedData.cleanPrice) {
+  session.collectedData.cleanPrice = parseInt(priceMatch[1]);
+}
+
+// SQUARE METERS
+const sqmMatch = u.match(/(\d{2,4})\s*(m2|м2|квадрати)/i);
+if (sqmMatch) {
+  session.collectedData.totalSqm = parseInt(sqmMatch[1]);
+}
+
+// FLOOR
+const floorMatch = u.match(/(\d{1,2})\s*(kat|кат)/i);
+if (floorMatch) {
+  session.collectedData.floor = parseInt(floorMatch[1]);
+}
+
+// ELEVATOR
+if (/lift|лифт/.test(u)) {
+  session.collectedData.elevator = true;
+}
+
+if (/bez lift|без лифт/.test(u)) {
+  session.collectedData.elevator = false;
+}
+
+// AC
+if (/klima|клима/.test(u)) {
+  session.collectedData.ac = true;
+}
+
+// PARKING
+if (/parking|паркинг|гаража/.test(u)) {
+  session.collectedData.parking = true;
+}
+
+// HEATING
+if (/parno|парно/.test(u)) {
+  session.collectedData.heating = "central";
+}
+
+if (/struja|струја/.test(u)) {
+  session.collectedData.heating = "electric";
+}
+
+console.log("MEMORY:", session.collectedData);
+
+const prompt = `
+Разговор:
+${conv || "Почеток"}
+
+Сопственик:
+${userInput}
+
+Познати податоци:
+${Object.entries(known)
+  .filter(([,v]) => v !== null && v !== undefined && v !== '')
+  .map(([k,v]) => `${k}=${v}`)
+  .join(' | ') || 'ништо'}
+
+Следно прашање:
+${nextQuestion || 'нема'}
+
+Ти си Ана од Metropolis Real Estate.
+
+Ако сопственикот поставил прашање:
+- одговори кратко и директно
+
+Потоа постави го ТОЧНО ова прашање:
+
+${nextQuestion || ''}
+
+Не измислувај други прашања.
+Не менувај редослед.
+Не прескокнувај чекори.
+
+Максимум 3 реченици.
+Македонски јазик.
+`;
+
+    console.log(`[Prompt length: ${prompt.length} chars]`);
+    console.log("MODEL USED:", config.MODEL);
+    const result = await groq.chat.completions.create({
+  messages: [
+    {
+      role: "system",
+      content: `Ти си Ана од Metropolis Real Estate Скопје.
+
+Ти си вистински агент за недвижности.
+
+Правила:
+- Одговарај само на македонски
+- Одговарај директно на прашањето на сопственикот
+- Без размислување
+- Без think тагови
+- Без објаснување на логика
+- Без емоџи
+- Без префикс "Ана:"
+- Максимум 3 реченици`
+    },
+    {
+      role: "user",
+      content: prompt
+    }
+  ],
+  model: config.MODEL,
+  temperature: 0.2,
+  max_tokens: 120
+});
+
+    let raw_content = result.choices[0]?.message?.content || '';
+    console.log('RAW GROQ:', JSON.stringify(raw_content));
+    let response = raw_content.trim();
+    console.log('BEFORE CLEAN:', JSON.stringify(response));
+    const before_clean_len = response.length;
+    response = cleanResponse(response, '');
+    console.log('AFTER CLEAN:', JSON.stringify(response), '(was', before_clean_len, 'chars)');
+    response = response.replace(/^Ана:?\s*/i, '').trim();
+    response = cleanResponse(response, '');
+
+    console.log(`[LLM RAW: ${response.substring(0, 150)}${response.length > 150 ? '...' : ''}]`);
+
+    if (!response || response.length < 10) {
+      console.log("[Fallback]");
+      const next = getNextMissingField(known);
+      response = next ? getQuestion(next, known.propertyType) : getCloseMessage();
+    }
+
+    if (isPitch) {
+      const u = userInput.toLowerCase();
+      if (/ne mi treba|ne sakam|nemam|ostavi|ne interesira/i.test(u)) {
+        return { text: response, type: "NO_INTEREST" };
+      }
+      if (/da|moze|interes|ok|ajde|soglasen/i.test(u)) {
+        session.markOwnerInterested();
+        return { text: response, type: "QUESTION" };
+      }
+      return { text: response, type: "PITCH" };
+    }
+
+    return { 
+      text: response, 
+      type: nextField ? "QUESTION" : "NORMAL", 
+      nextField 
+    };
+
+  } catch (e) {
+    console.error("ERR:", e.message);
+    const fb = getNextMissingField({ ...session.adMemory, ...session.collectedData });
+    return { text: fb ? getQuestion(fb, 'apartment') : "Се извинувам.", type: "ERROR" };
+  }
+}

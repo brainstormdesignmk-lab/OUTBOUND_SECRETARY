@@ -1,0 +1,13 @@
+{
+  "name": "metropolis-ana-outbound",
+  "version": "2.1.0",
+  "type": "module",
+  "main": "service.js",
+  "scripts": {
+    "test": "node test-ana.js"
+  },
+  "dependencies": {
+    "dotenv": "^16.6.1",
+    "groq-sdk": "^0.15.0"
+  }
+}
