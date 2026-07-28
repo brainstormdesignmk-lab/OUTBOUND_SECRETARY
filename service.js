@@ -515,6 +515,42 @@ function extractFirstNumber(text) {
 }
 
 // ========================================
+// HELPER: Count bedrooms by counting room-type word mentions
+// Handles: "една голема спална и една детска" = 2
+// ========================================
+function countBedrooms(text) {
+  const u = text.toLowerCase();
+  
+  // 1. Apartment type check
+  if (/garsonjera|гарсонера|гарсоњера|garsoniera|гарсониера/i.test(u)) return 0;
+  if (/dvosoben|двособен/i.test(u)) return 1;
+  if (/trisoben|трисобен|trosoben/i.test(u)) return 2;
+  if (/cetvorosoben|четирисобен|cetvortosoben/i.test(u)) return 3;
+  if (/petsoben|петсобен/i.test(u)) return 4;
+  
+  // 2. Room-word counting — only for multi-room descriptions
+  // e.g. "една голема спална и една детска" → 2
+  const roomWords = ['spalna', 'спална', 'detska', 'детска', 'gostinska', 'гостинска'];
+  let roomCount = 0;
+  for (const word of roomWords) {
+    const matches = u.match(new RegExp(word, 'gi'));
+    if (matches) roomCount += matches.length;
+  }
+  if (roomCount >= 2) return roomCount;
+  
+  // 3. Fall back to number extraction (handles "2 spalni", "tri spalni")
+  const wordNum = parseMacedonianNumber(u);
+  if (wordNum !== null && wordNum >= 0 && wordNum <= 10) return wordNum;
+  const firstNum = extractFirstNumber(u);
+  if (firstNum !== null && firstNum >= 0 && firstNum <= 20) return firstNum;
+  
+  // 4. Single room word with no number (e.g. just "спална")
+  if (roomCount === 1) return 1;
+  
+  return null;
+}
+
+// ========================================
 // HELPER: Extract price (FIXED — handles all formats)
 // ========================================
 function extractPrice(text) {
@@ -1248,26 +1284,10 @@ if (/kako bi sorabotuvale|како би соработувале|како да �
 
     // === bedrooms ===
     if (nextField === 'bedrooms') {
-      const firstNum = extractFirstNumber(u);
-      if (firstNum !== null && firstNum >= 0 && firstNum <= 10) {
-        session.collectedData.bedrooms = firstNum;
+      const bdCount = countBedrooms(u);
+      if (bdCount !== null && bdCount >= 0 && bdCount <= 20) {
+        session.collectedData.bedrooms = bdCount;
         console.log(`[BEDROOMS: ${session.collectedData.bedrooms}]`);
-      }
-      const wordNum = parseMacedonianNumber(u);
-      if (wordNum !== null && wordNum >= 0 && wordNum <= 10) {
-        session.collectedData.bedrooms = wordNum;
-        console.log(`[BEDROOMS: ${session.collectedData.bedrooms}]`);
-      }
-      if (/garsonjera|гарсонера|гарсоњера/i.test(u)) {
-        session.collectedData.bedrooms = 0;
-      } else if (/dvosoben|двособен/i.test(u)) {
-        session.collectedData.bedrooms = 1;
-      } else if (/trisoben|трисобен|trosoben/i.test(u)) {
-        session.collectedData.bedrooms = 2;
-      } else if (/cetvorosoben|четирисобен/i.test(u)) {
-        session.collectedData.bedrooms = 3;
-      } else if (/petsoben|петсобен/i.test(u)) {
-        session.collectedData.bedrooms = 4;
       }
     }
 

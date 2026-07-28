@@ -351,6 +351,41 @@ function extractFirstNumber(text) {
 }
 
 // ============================================================
+// FIXTURE: countBedrooms
+// ============================================================
+function countBedrooms(text) {
+  const u = text.toLowerCase();
+  
+  // 1. Apartment type check
+  if (/garsonjera|гарсонера|гарсоњера|garsoniera|гарсониера/i.test(u)) return 0;
+  if (/dvosoben|двособен/i.test(u)) return 1;
+  if (/trisoben|трисобен|trosoben/i.test(u)) return 2;
+  if (/cetvorosoben|четирисобен|cetvortosoben/i.test(u)) return 3;
+  if (/petsoben|петсобен/i.test(u)) return 4;
+  
+  // 2. Room-word counting — only for multi-room descriptions
+  // e.g. "една голема спална и една детска" → 2
+  const roomWords = ['spalna', 'спална', 'detska', 'детска', 'gostinska', 'гостинска'];
+  let roomCount = 0;
+  for (const word of roomWords) {
+    const matches = u.match(new RegExp(word, 'gi'));
+    if (matches) roomCount += matches.length;
+  }
+  if (roomCount >= 2) return roomCount;
+  
+  // 3. Fall back to number extraction (handles "2 spalni", "tri spalni")
+  const wordNum = parseMacedonianNumber(u);
+  if (wordNum !== null && wordNum >= 0 && wordNum <= 10) return wordNum;
+  const firstNum = extractFirstNumber(u);
+  if (firstNum !== null) return firstNum;
+  
+  // 4. Single room word with no number
+  if (roomCount === 1) return 1;
+  
+  return null;
+}
+
+// ============================================================
 // FIXTURE: extractTerraceNumber
 // ============================================================
 function extractTerraceNumber(text) {
@@ -638,6 +673,37 @@ assertEqual(extractFirstNumber("105000 evra"), 1050, "'105000 evra' → 1050 (re
 assertEqual(extractFirstNumber("3 kvadrata"), 3, "'3 kvadrata' → 3");
 assertEqual(extractFirstNumber("65m2"), 65, "'65m2' → 65");
 assertEqual(extractFirstNumber("nema broj"), null, "'nema broj' → null");
+
+// ============================================================
+// TEST GROUP: countBedrooms
+// ============================================================
+console.log(`\n📦 GROUP: countBedrooms`);
+
+// B5: "една голема спална и една детска" = 2
+assertEqual(countBedrooms("EDNA GOLEMA SPALNA I EDNA DETSKA"), 2, "B5: 'EDNA GOLEMA SPALNA I ENA DETSKA' → 2");
+
+// Known apartment types
+assertEqual(countBedrooms("garsonjera"), 0, "garsonjera → 0");
+assertEqual(countBedrooms("dvosoben stan"), 1, "dvosoben stan → 1");
+assertEqual(countBedrooms("trisoben"), 2, "trisoben → 2");
+
+// Simple number-based (handled by parseMacedonianNumber/extractFirstNumber fallback)
+assertEqual(countBedrooms("2 spalni"), 2, "'2 spalni' → 2");
+assertEqual(countBedrooms("tri spalni"), 3, "'tri spalni' → 3");
+
+// Single bedroom word (roomCount=1, no number → returns 1)
+assertEqual(countBedrooms("ima edna spalna"), 1, "'ima edna spalna' → 1");
+
+// Compound: spalni doesn't match 'spalna', detska matches once → roomCount=1 < 2
+// Falls through to parseMacedonianNumber: 'dve'=2 → returns 2
+assertEqual(countBedrooms("dve spalni i detska"), 2, "'dve spalni i detska' → 2 (dve=2 via fallback)");
+
+// Fallback to number word
+assertEqual(countBedrooms("cetiri"), 4, "'cetiri' → 4 (fallback)");
+
+// Multiple room-words: спална + детска = 2 (caught by roomCount >= 2)
+assertEqual(countBedrooms("edna spalna i edna detska"), 2, "'edna spalna i edna detska' → 2 (room words)");
+assertEqual(countBedrooms("spalna, detska i gostinska"), 3, "'spalna, detska i gostinska' → 3 (3 room words)");
 
 // ============================================================
 // TEST GROUP: parseOrientation
