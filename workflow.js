@@ -62,6 +62,9 @@ export function getNextMissingField(data) {
 
     if (data.renovated === false && field === 'renovationYear') continue;
 
+    // When terrace is confirmed but size unknown, skip terraceSqm
+    if (data.hasTerrace === true && field === 'terraceSqm') continue;
+
     if (data[field] === undefined || data[field] === null || data[field] === "") {
       return field;
     }

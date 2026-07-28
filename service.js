@@ -1255,29 +1255,36 @@ if (/kako bi sorabotuvale|како би соработувале|како да �
 
     // === terraceSqm (FIXED — handles ALL cases) ===
     if (nextField === 'terraceSqm') {
-      // Case 1: No terrace
-      if (/nema|нема|без|bez|ne|не|nema terasa|нема тераса|nema|нема|bez terasa|без тераса/i.test(u)) {
-        session.collectedData.hasTerrace = false;
-        session.collectedData.terraceSqm = 0;
-        console.log(`[TERRACE: none]`);
-      } 
-      // Case 2: Has terrace but unknown size (explicitly says "ne znam")
-      else if (/ima|има/i.test(u) && /ne znam|не знам|незнам|neznam|не знам точно|не сум сигурен|ne sum siguren|ne znam tocno|не знам точно/i.test(u)) {
+      // Case 1: No terrace (use word boundaries to avoid "ne" matching "ne znam")
+      // First check if this is a "ne znam" reply (follow-up from Case 3)
+      if (/ne znam|не знам|незнам|neznam|ne znam tocno|не знам точно|ne sum siguren|не сум сигурен/i.test(u)) {
         session.collectedData.hasTerrace = true;
         session.collectedData.terraceSqm = null;
         console.log(`[TERRACE: yes, size unknown]`);
       }
-      // Case 3: Has terrace with size — use extractTerraceNumber
-      else if (/ima|има|terasa|тераса|terrace|тераса|kv|кв|kvadrati|квадрати|m2|m²/i.test(u) || isPositive(u)) {
+      // True negative responses (numeric "0", explicit "nema")
+      else if (/^0$|nema terasa|нема тераса|nema|нема|без|bez|nema|нема|bez terasa|без тераса|nema parking|нема паркинг/i.test(u) && !/ima|има|kv|кв|m2|м2|kvadrat|квадрат/i.test(u)) {
+        session.collectedData.hasTerrace = false;
+        session.collectedData.terraceSqm = 0;
+        console.log(`[TERRACE: none]`);
+      } 
+      // Case 2: Has terrace with size — use extractTerraceNumber
+      else if (/ima|има|terasa|тераса|terrace|kv|кв|kvadrati|квадрати|m2|m²/i.test(u) || isPositive(u)) {
         const firstNum = extractTerraceNumber(u);
         if (firstNum !== null && firstNum > 0 && firstNum < 100) {
           session.collectedData.hasTerrace = true;
           session.collectedData.terraceSqm = firstNum;
           console.log(`[TERRACE: ${firstNum}m2]`);
         } else {
-          session.collectedData.hasTerrace = true;
-          session.collectedData.terraceSqm = null;
-          console.log(`[TERRACE: yes, size unknown]`);
+          // Owner confirmed terrace but no size — ask follow-up
+          // NOTE: Don't set hasTerrace=true here! Let getNextMissingField
+          // still return 'terraceSqm' so the follow-up reply is processed
+          // by this same handler (not by the next field's handler).
+          console.log(`[TERRACE: yes, size unknown — asking follow-up]`);
+          return {
+            text: 'Дали знаете колку квадрати е терасата?',
+            type: "QUESTION"
+          };
         }
       }
     }
