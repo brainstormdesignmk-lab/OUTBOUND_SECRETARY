@@ -312,7 +312,9 @@ function parseMacedonianNumber(text) {
     'devetnaeset': 19, 'деветнаесет': 19,
     'ses': 6, 'cetri': 4, 'cetiri': 4,
     'vtor': 2, 'tret': 3, 'cetvrt': 4, 'petti': 5,
-    'sesti': 6, 'sedmi': 7, 'osmi': 8, 'devetti': 9
+    'sesti': 6, 'sedmi': 7, 'osmi': 8, 'devetti': 9,
+    // B3: Irregular tens — "seeset" = 60 (consonant mutation: sest → see)
+    'seeset': 60, 'шеесет': 60
   };
   
   // Longest-first sort: 'dvanaeset' (12) must match before 'dva' (2) is found as substring

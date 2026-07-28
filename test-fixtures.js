@@ -37,7 +37,9 @@ function parseMacedonianNumber(text) {
     'devetnaeset': 19, 'деветнаесет': 19,
     'ses': 6, 'cetri': 4, 'cetiri': 4,
     'vtor': 2, 'tret': 3, 'cetvrt': 4, 'petti': 5,
-    'sesti': 6, 'sedmi': 7, 'osmi': 8, 'devetti': 9
+    'sesti': 6, 'sedmi': 7, 'osmi': 8, 'devetti': 9,
+    // B3: Irregular tens — "seeset" = 60 (consonant mutation: sest → see)
+    'seeset': 60, 'шеесет': 60
   };
 
   // Sort by word length descending so 'dvanaeset' matches before 'dva'
@@ -599,8 +601,8 @@ function assertNull(actual, label) {
 // ============================================================
 console.log(`\n📦 GROUP: parseMacedonianNumber`);
 
-// B3: "seeset" not in map
-assertEqual(parseMacedonianNumber("seeset"), null, "B3: 'seeset' → null (не препознава — needs fix!)");
+// B3: "seeset" = 60 (now fixed with irregular tens)
+assertEqual(parseMacedonianNumber("seeset"), 60, "B3: 'seeset' → 60 (fixed!)");
 
 // B6/B10: substring issue — "dvanaeset" should be 12, not 2
 assertEqual(parseMacedonianNumber("dvanaeset"), 12, "B6/B10: 'dvanaeset' → 12 (⚠ current: 2 — substring match bug!)");
