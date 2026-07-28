@@ -805,7 +805,111 @@ function parseYearBuilt(text) {
     if (/nekoja|некоја|nekoi|некои|неколку|некое|nekoe/i.test(text)) return 1985;
     return 1980;
   }
-  
+
+  // ========================================
+  // B11: Macedonian word-based year parsing
+  // e.g., "dveiljadiidvanaesta" = 2012, "dveidvanaesta" = 2012, "dveiljadi" = 2000
+  // ========================================
+  const yearWordMap = {
+    // Units (1-9)
+    'eden': 1, 'edna': 1, 'edno': 1,
+    'dva': 2, 'dve': 2,
+    'tri': 3,
+    'cetiri': 4, 'четири': 4,
+    'pet': 5, 'пет': 5,
+    'sest': 6, 'шест': 6,
+    'sedum': 7, 'седум': 7,
+    'osum': 8, 'осум': 8,
+    'devet': 9, 'девет': 9,
+    // Teens — cardinal
+    'deset': 10, 'десет': 10,
+    'edinaeset': 11, 'единаесет': 11,
+    'dvanaeset': 12, 'дванаесет': 12,
+    'trinaeset': 13, 'тринаесет': 13,
+    'cetirinaeset': 14, 'четиринаесет': 14,
+    'petnaeset': 15, 'петнаесет': 15,
+    'sesnaeset': 16, 'шеснаесет': 16,
+    'sedumnaeset': 17, 'седумнаесет': 17,
+    'osumnaeset': 18, 'осумнаесет': 18,
+    'devetnaeset': 19, 'деветнаесет': 19,
+    // Teens — ordinal feminine (colloquial, common in year context)
+    'edinaesta': 11, 'dvanaesta': 12, 'trinaesta': 13,
+    'cetirinaesta': 14, 'petnaesta': 15, 'sesnaesta': 16,
+    'sedumnaesta': 17, 'osumnaesta': 18, 'devetnaesta': 19,
+    // Teens — ordinal masculine
+    'edinaesti': 11, 'dvanaesti': 12, 'trinaesti': 13,
+    'cetirinaesti': 14, 'petnaesti': 15, 'sesnaesti': 16,
+    'sedumnaesti': 17, 'osumnaesti': 18, 'devetnaesti': 19,
+    // Teens — full ordinal suffix
+    'edinaesetta': 11, 'dvanaesetta': 12, 'trinaesetta': 13,
+    'cetirinaesetta': 14, 'petnaesetta': 15, 'sesnaesetta': 16,
+    'sedumnaesetta': 17, 'osumnaesetta': 18, 'devetnaesetta': 19,
+    'edinaesetti': 11, 'dvanaesetti': 12, 'trinaesetti': 13,
+    'cetirinaesetti': 14, 'petnaesetti': 15, 'sesnaesetti': 16,
+    'sedumnaesetti': 17, 'osumnaesetti': 18, 'devetnaesetti': 19,
+  };
+  const sortedYearWords = Object.entries(yearWordMap)
+    .sort((a, b) => b[0].length - a[0].length);
+
+  const uw = text.toLowerCase().replace(/\s+/g, '');
+
+  // Pattern 1: {units}(iljadi/илјади)(i/и){suffix}
+  // e.g., "dveiljadiidvanaesta" = 2012, "dveiljadi" = 2000
+  const iljadiMatch = uw.match(/([a-zа-я]{1,4})(iljadi|илјади)([iи]?)([a-zа-я]*)/i);
+  if (iljadiMatch && iljadiMatch.index === 0) {
+    const unitsStr = iljadiMatch[1];
+    const suffixStr = iljadiMatch[4];
+
+    let thousands = null;
+    for (const [word, num] of sortedYearWords) {
+      if (unitsStr === word && num >= 1 && num <= 9) {
+        thousands = num * 1000;
+        break;
+      }
+    }
+
+    if (thousands !== null) {
+      let suffix = null;
+      if (suffixStr.length > 0) {
+        for (const [word, num] of sortedYearWords) {
+          if (suffixStr.startsWith(word)) {
+            suffix = num;
+            break;
+          }
+        }
+      }
+
+      const year = thousands + (suffix || 0);
+      if (year >= 1900 && year <= 2099) return year;
+    }
+  }
+
+  // Pattern 2: {units}(i/и){suffix} (without iljadi)
+  // e.g., "dveidvanaesta" = 2012
+  const iMatch = uw.match(/(edna|edno|eden|dva|dve|tri|cetiri|pet|sest|sedum|osum|devet)([iи])([a-zа-я]+)/i);
+  if (iMatch && iMatch.index === 0) {
+    const unitsStr = iMatch[1];
+    const suffixStr = iMatch[3];
+
+    let thousands = null;
+    for (const [word, num] of sortedYearWords) {
+      if (unitsStr === word && num >= 1 && num <= 9) {
+        thousands = num * 1000;
+        break;
+      }
+    }
+
+    if (thousands !== null && suffixStr.length > 0) {
+      for (const [word, num] of sortedYearWords) {
+        if (suffixStr.startsWith(word)) {
+          const year = thousands + num;
+          if (year >= 1900 && year <= 2099) return year;
+          break;
+        }
+      }
+    }
+  }
+
   return null;
 }
 
