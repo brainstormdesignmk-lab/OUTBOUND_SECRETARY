@@ -92,6 +92,17 @@ function parseNumberWords(text) {
   // =============================================
   // TENS
   // =============================================
+
+  // Irregular tens forms with consonant mutation:
+  const irregularTens = {
+    'triest': 30, 'триест': 30,
+    'pedeset': 50, 'педесет': 50,
+    'seeset': 60, 'шеесет': 60
+  };
+  for (const [word, val] of Object.entries(irregularTens)) {
+    if (u.includes(word)) return val;
+  }
+
   const tensPatterns = [
     /(dva|dve|tri|cetiri|pet|sest|sedum|osum|devet)\s*(eset|есет)/i,
     /(dva|dve|tri|cetiri|pet|sest|sedum|osum|devet)eset/i,
@@ -457,12 +468,12 @@ assertEqual(parseNumberWords("petstodvaeset"), 520, "petstodvaeset → 520");
 const parsed125 = parseNumberWords("stodvaesetipet");
 assert(parsed125 === null, "B1: 'stodvaesetipet' → null (parseNumberWords не парсира 'i pet' суфикс)", null, parsed125);
 
-// B2 critical — "seesetipet" should be 65
-const parsed65 = parseNumberWords("seesetipet");
-assert(parsed65 === null, "B2: 'seesetipet' → null (parseNumberWords не парсира 'seeset' + 'i pet')", null, parsed65);
+// "seeset" = 60 variant — NOW FIXED
+assertEqual(parseNumberWords("seeset"), 60, "B2/B3: 'seeset' → 60 (fixed!)");
 
-// "seeset" = 60 variant
-assertEqual(parseNumberWords("seeset"), null, "B2/B3: 'seeset' → null (не препознава)");
+// B2: "seesetipet" should be 65 — still needs 'i pet' suffix parsing
+const parsed65 = parseNumberWords("seesetipet");
+assert(parsed65 === 60, "B2: 'seesetipet' → 60 (seeset parsed, 'i pet' suffix still pending)", 60, parsed65);
 
 // ============================================================
 // TEST GROUP: extractPrice

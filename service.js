@@ -380,6 +380,20 @@ function parseNumberWords(text) {
   // ========================================
   // TENS — "dvaeset", "dvajset", "dvadeset", "дваесет"
   // ========================================
+
+  // Irregular tens forms with consonant mutation:
+  //   triest (триест) = 30 (tri + est, shortened from trieset)
+  //   pedeset (педесет) = 50 (pet→ped + eset)
+  //   seeset (шеесет) = 60 (sest→see + set)
+  const irregularTens = {
+    'triest': 30, 'триест': 30,
+    'pedeset': 50, 'педесет': 50,
+    'seeset': 60, 'шеесет': 60
+  };
+  for (const [word, val] of Object.entries(irregularTens)) {
+    if (u.includes(word)) return val;
+  }
+
   const tensPatterns = [
     /(dva|dve|tri|cetiri|pet|sest|sedum|osum|devet)\s*(eset|есет)/i,
     /(dva|dve|tri|cetiri|pet|sest|sedum|osum|devet)eset/i,
