@@ -834,10 +834,21 @@ const OBJECTION_RESPONSES = {
   }
 };
 
-function matchObjection(text) {
+function matchObjection(text, isRent) {
   for (const [key, obj] of Object.entries(OBJECTION_RESPONSES)) {
     if (obj.pattern.test(text)) {
-      return { key, response: obj.response };
+      let response = obj.response;
+      // Use rent-appropriate response when isRent
+      if (isRent) {
+        if (key === 'commission' || key === 'who_pays') {
+          response = 'Разликата помеѓу вашата барана кирија и она што закупецот го плаќа е провизија за агенцијата. Дали ви е појасно?';
+        } else if (key === 'faster_sale') {
+          response = 'Агенцијата има голема база на потенцијални клиенти кои се спремни да изнајмат, ако нешто им се допадне. Дали би пробале агенциски третман за вашата недвижност?';
+        } else if (key === 'example') {
+          response = 'На пример, ако вие барате 500 евра кирија, а ние најдеме закупец за 550 евра, вие ги добивате вашите 500 евра, а разликата е наша провизија. Дали ви помогна примерот?';
+        }
+      }
+      return { key, response };
     }
   }
   return null;
@@ -906,7 +917,7 @@ export function generateFirstMessage(lead) {
     propertyLabel = 'локалот';
   }
 
-  const transactionType = /издава|изнајмува|rent|rental/i.test(title) ? 'rent' : 'sale';
+  const transactionType = /издава|изнајмува|izdava|izdavam|kirija|кирија|под кирија|pod kirija|za izdavanje|за издавање|rent|rental|iznajmuva|изнајмувам/i.test(title) ? 'rent' : 'sale';
 
   const text = transactionType === 'rent'
     ? `Здраво, јас сум Ана од Metropolis. Ве контактирам за огласот за ${propertyLabel} што се издава. Дали е сѐ уште достапен и дали сте заинтересирани за соработка?`
@@ -945,13 +956,22 @@ export async function generateResponse(session, userInput) {
                             session.adMemory?.propertyType === 'land' ? 'плацот' :
                             session.adMemory?.propertyType === 'commercial' ? 'локалот' : 'имотот';
       
-      const responses = [
-        `Драго ми е што ${propertyLabel} е сè уште достапен. Дали би сакале да го понудиме на нашите клиенти, без провизија за вас?`,
-        `Драго ми е што ${propertyLabel} е сè уште достапен. Дали би сакале да го продадеме во најкраток можен рок, без никакви давачки за вас?`,
-        `Драго ми е што ${propertyLabel} е сè уште достапен. Дали би сакале нашата агенција да се погрижи за професионална продажба, без никакви обврски од ваша страна?`
-      ];
-      
-      const response = responses[Math.floor(Math.random() * responses.length)];
+      let response;
+      if (isRent) {
+        const rentResponses = [
+          `Драго ми е што ${propertyLabel} е сè уште достапен. Дали би сакале да го понудиме на нашите клиенти за издавање, без провизија за вас?`,
+          `Драго ми е што ${propertyLabel} е сè уште достапен. Дали би сакале да го издадеме во најкраток можен рок, без никакви давачки за вас?`,
+          `Драго ми е што ${propertyLabel} е сè уште достапен. Дали би сакале нашата агенција да се погрижи за професионално издавање, без никакви обврски од ваша страна?`
+        ];
+        response = rentResponses[Math.floor(Math.random() * rentResponses.length)];
+      } else {
+        const saleResponses = [
+          `Драго ми е што ${propertyLabel} е сè уште достапен. Дали би сакале да го понудиме на нашите клиенти, без провизија за вас?`,
+          `Драго ми е што ${propertyLabel} е сè уште достапен. Дали би сакале да го продадеме во најкраток можен рок, без никакви давачки за вас?`,
+          `Драго ми е што ${propertyLabel} е сè уште достапен. Дали би сакале нашата агенција да се погрижи за професионална продажба, без никакви обврски од ваша страна?`
+        ];
+        response = saleResponses[Math.floor(Math.random() * saleResponses.length)];
+      }
       
       // Store that we already acknowledged availability
       session.availabilityAcknowledged = true;
@@ -991,7 +1011,7 @@ export async function generateResponse(session, userInput) {
     // HARDCODED: How does it work?
     if (isAskingHowItWorks(u)) {
       return {
-        text: "Секоја недвижнина се внесува во системот на агенцијата со податоци за неа, се организираат посети и продажба. Како ви звучи ова?",
+        text: isRent ? "Секоја недвижнина се внесува во системот на агенцијата со податоци за неа, се организираат посети. Како ви звучи ова?" : "Секоја недвижнина се внесува во системот на агенцијата со податоци за неа, се организираат посети и продажба. Како ви звучи ова?",
         type: "NORMAL"
       };
     }
@@ -1007,7 +1027,7 @@ export async function generateResponse(session, userInput) {
    // HARDCODED: "za kakva sorabotka prasuvas?"
 if (/za kakva sorabotka|каква соработка|kakva sorabotka|за каква соработка/i.test(u)) {
   return {
-    text: 'Соработката значи дека ние го промовираме вашиот стан на нашите канали и наоѓаме купувач, а вие ја добивате вашата цена. Дали ви се допаѓа идејата?',
+    text: isRent ? 'Соработката значи дека ние го промовираме вашиот стан на нашите канали и наоѓаме закупец, а вие ја добивате вашата кирија. Дали ви се допаѓа идејата?' : 'Соработката значи дека ние го промовираме вашиот стан на нашите канали и наоѓаме купувач, а вие ја добивате вашата цена. Дали ви се допаѓа идејата?',
     type: "NORMAL"
   };
 }
@@ -1015,7 +1035,7 @@ if (/za kakva sorabotka|каква соработка|kakva sorabotka|за ка�
    // HARDCODED: "kako bi sorabotuvale?"
 if (/kako bi sorabotuvale|како би соработувале|како да соработуваме|kako da sorabotuvaме/i.test(u)) {
   return {
-    text: 'Соработката е едноставна: ние го промовираме имотот, доведуваме заинтересирани купувачи, а вие одлучувате дали да прифатите понуда. Како ви звучи?',
+    text: isRent ? 'Соработката е едноставна: ние го промовираме имотот, доведуваме заинтересирани закупци, а вие одлучувате дали да прифатите понуда. Како ви звучи?' : 'Соработката е едноставна: ние го промовираме имотот, доведуваме заинтересирани купувачи, а вие одлучувате дали да прифатите понуда. Како ви звучи?',
     type: "NORMAL"
   };
 }
@@ -1051,29 +1071,27 @@ if (/kako bi sorabotuvale|како би соработувале|како да �
         };
       }
       
-      const objection = matchObjection(u);
+      const objection = matchObjection(u, isRent);
       if (objection) {
         session.commissionExplained = true;
         return {
           text: objection.response,
           type: "NORMAL"
         };
-      }
-      
-      if (!session.commissionExplained) {
+      }        if (!session.commissionExplained) {
         session.commissionExplained = true;
         return {
-          text: 'Разликата меѓу вашата чиста цена и постигнатата купопродажна цена е провизија за агенцијата.',
+          text: isRent ? 'За издавање, разликата помеѓу вашата барана кирија и она што закупецот го плаќа е провизија за агенцијата.' : 'Разликата меѓу вашата чиста цена и постигнатата купопродажна цена е провизија за агенцијата.',
           type: "NORMAL"
         };
       } else if (isAskingForExplanation(u)) {
         return {
-          text: 'На пример, ако вие барате 120.000 евра, а ние најдеме купувач за 122.000 евра, вие ги добивате вашите 120.000 евра, а разликата е наша провизија.',
+          text: isRent ? 'На пример, ако вие барате 500 евра кирија, а ние најдеме закупец за 550 евра, вие ги добивате вашите 500 евра, а разликата е наша провизија.' : 'На пример, ако вие барате 120.000 евра, а ние најдеме купувач за 122.000 евра, вие ги добивате вашите 120.000 евра, а разликата е наша провизија.',
           type: "NORMAL"
         };
       } else {
         return {
-          text: 'Разликата меѓу вашата чиста цена и постигнатата купопродажна цена е провизија за агенцијата. Дали ви е појасно?',
+          text: isRent ? 'За издавање, разликата помеѓу вашата барана кирија и она што закупецот го плаќа е провизија за агенцијата. Дали ви е појасно?' : 'Разликата меѓу вашата чиста цена и постигнатата купопродажна цена е провизија за агенцијата. Дали ви е појасно?',
           type: "NORMAL"
         };
       }
@@ -1124,12 +1142,12 @@ if (/kako bi sorabotuvale|како би соработувале|како да �
         
         if (session.rejectionCount === 1) {
           return {
-            text: "Агенцијата не зема ништо од вас за услугата. Само ви ги зголемува шансите за побрза продажба на вашиот имот. Да пробаме?",
+            text: isRent ? "Агенцијата не зема ништо од вас за услугата. Само ви ги зголемува шансите за побрзо издавање на вашиот имот. Да пробаме?" : "Агенцијата не зема ништо од вас за услугата. Само ви ги зголемува шансите за побрза продажба на вашиот имот. Да пробаме?",
             type: "NORMAL"
           };
         } else if (session.rejectionCount === 2) {
           return {
-            text: "Не ве разбирам. Сакате да продадете, експерти ви ја нудат својата услуга без надокнада од ваша страна, а вие одбивате. Што велите да се обидеме?",
+            text: isRent ? "Не ве разбирам. Сакате да издадете, експерти ви ја нудат својата услуга без надокнада од ваша страна, а вие одбивате. Што велите да се обидеме?" : "Не ве разбирам. Сакате да продадете, експерти ви ја нудат својата услуга без надокнада од ваша страна, а вие одбивате. Што велите да се обидеме?",
             type: "NORMAL"
           };
         } else {
@@ -1804,8 +1822,11 @@ ${conv}
         }
       }
     }
-    // HARD FILTER: NEVER mention buyer
+    // HARD FILTER: NEVER mention buyer (sale) or tenant (rent) — let LLM be generic
     response = response.replace(/купувач|купувачот|купувачи|kupuvac|kupuvacot/gi, '');
+    if (isRent) {
+      response = response.replace(/продажб|продаде|продава|prodazb|prodade|prodava/gi, 'издавањ');
+    }
     response = response.replace(/\s+/g, ' ').trim();
     
     return { text: response, type: "NORMAL" };
