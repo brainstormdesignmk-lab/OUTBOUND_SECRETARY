@@ -351,6 +351,31 @@ function parseNumberWords(text) {
   }
   
   // ========================================
+  // COMPOUND NUMBERS — "petstodvaeset" (520)
+  // Must check BEFORE hundreds so "petsto" doesn't greedily match first
+  // ========================================
+  const rootMap = {
+    'eden': 1, 'edna': 1, 'edno': 1,
+    'dva': 2, 'dve': 2,
+    'tri': 3,
+    'cetiri': 4,
+    'pet': 5,
+    'sest': 6,
+    'sedum': 7,
+    'osum': 8,
+    'devet': 9
+  };
+  const rootGroup = '(eden|edna|edno|dva|dve|tri|cetiri|pet|sest|sedum|osum|devet)';
+  const compoundMatch = u.match(new RegExp(
+    rootGroup + '\\s*(sto|сто)?\\s*' + rootGroup + '\\s*(eset|есет|ajset|ајсет)', 'i'
+  ));
+  if (compoundMatch) {
+    const hundreds = rootMap[compoundMatch[1].toLowerCase()] || 0;
+    const tens = rootMap[compoundMatch[3].toLowerCase()] || 0;
+    return (hundreds * 100) + (tens * 10);
+  }
+
+  // ========================================
   // HUNDREDS — "petsto", "pesto", "pet sto"
   // ========================================
   const hundredPatterns = [
@@ -362,18 +387,7 @@ function parseNumberWords(text) {
   for (const pattern of hundredPatterns) {
     const match = u.match(pattern);
     if (match) {
-      const map = {
-        'eden': 1, 'edna': 1, 'edno': 1,
-        'dva': 2, 'dve': 2,
-        'tri': 3,
-        'cetiri': 4,
-        'pet': 5,
-        'sest': 6,
-        'sedum': 7,
-        'osum': 8,
-        'devet': 9
-      };
-      return map[match[1].toLowerCase()] * 100;
+      return rootMap[match[1].toLowerCase()] * 100;
     }
   }
   
@@ -405,39 +419,8 @@ function parseNumberWords(text) {
   for (const pattern of tensPatterns) {
     const match = u.match(pattern);
     if (match) {
-      const map = {
-        'dva': 2, 'dve': 2,
-        'tri': 3,
-        'cetiri': 4,
-        'pet': 5,
-        'sest': 6,
-        'sedum': 7,
-        'osum': 8,
-        'devet': 9
-      };
-      return map[match[1].toLowerCase()] * 10;
+      return rootMap[match[1].toLowerCase()] * 10;
     }
-  }
-  
-  // ========================================
-  // COMPOUND NUMBERS — "petstodvaeset", "pestodvajset"
-  // ========================================
-  const compoundMatch = u.match(/(eden|edna|edno|dva|dve|tri|cetiri|pet|sest|sedum|osum|devet)\s*(sto|сто)?\s*(dva|dve|tri|cetiri|pet|sest|sedum|osum|devet)\s*(eset|есет|ajset|ајсет)/i);
-  if (compoundMatch) {
-    const map = {
-      'eden': 1, 'edna': 1, 'edno': 1,
-      'dva': 2, 'dve': 2,
-      'tri': 3,
-      'cetiri': 4,
-      'pet': 5,
-      'sest': 6,
-      'sedum': 7,
-      'osum': 8,
-      'devet': 9
-    };
-    const hundreds = map[compoundMatch[1].toLowerCase()] || 0;
-    const tens = map[compoundMatch[3].toLowerCase()] || 0;
-    return (hundreds * 100) + (tens * 10);
   }
   
   return null;
