@@ -350,10 +350,6 @@ function parseNumberWords(text) {
     }
   }
   
-  // ========================================
-  // COMPOUND NUMBERS — "petstodvaeset" (520)
-  // Must check BEFORE hundreds so "petsto" doesn't greedily match first
-  // ========================================
   const rootMap = {
     'eden': 1, 'edna': 1, 'edno': 1,
     'dva': 2, 'dve': 2,
@@ -366,61 +362,108 @@ function parseNumberWords(text) {
     'devet': 9
   };
   const rootGroup = '(eden|edna|edno|dva|dve|tri|cetiri|pet|sest|sedum|osum|devet)';
+  let result = 0;
+  let found = false;
+  let consumedLength = 0;
+
+  // Track "sto\/сто" prefix (100) — added to result later regardless of which pattern matched
+  const stoPrefix = /^(sto|сто)/i.test(u) ? 100 : 0;
+
+  // ========================================
+  // COMPOUND NUMBERS — "petstodvaeset" (520)
+  // Must check BEFORE hundreds so "petsto" doesn't greedily match first
+  // ========================================
   const compoundMatch = u.match(new RegExp(
     rootGroup + '\\s*(sto|сто)?\\s*' + rootGroup + '\\s*(eset|есет|ajset|ајсет)', 'i'
   ));
   if (compoundMatch) {
     const hundreds = rootMap[compoundMatch[1].toLowerCase()] || 0;
     const tens = rootMap[compoundMatch[3].toLowerCase()] || 0;
-    return (hundreds * 100) + (tens * 10);
+    result = (hundreds * 100) + (tens * 10);
+    consumedLength = compoundMatch.index + compoundMatch[0].length;
+    found = true;
   }
 
   // ========================================
   // HUNDREDS — "petsto", "pesto", "pet sto"
   // ========================================
-  const hundredPatterns = [
-    /(eden|edna|edno|dva|dve|tri|cetiri|pet|sest|sedum|osum|devet)\s*(sto|сто)/i,
-    /(eden|edna|edno|dva|dve|tri|cetiri|pet|sest|sedum|osum|devet)sto/i,
-    /(eden|edna|edno|dva|dve|tri|cetiri|pet|sest|sedum|osum|devet)сто/i,
-  ];
-  
-  for (const pattern of hundredPatterns) {
-    const match = u.match(pattern);
-    if (match) {
-      return rootMap[match[1].toLowerCase()] * 100;
+  if (!found) {
+    const hundredPatterns = [
+      /(eden|edna|edno|dva|dve|tri|cetiri|pet|sest|sedum|osum|devet)\s*(sto|сто)/i,
+      /(eden|edna|edno|dva|dve|tri|cetiri|pet|sest|sedum|osum|devet)sto/i,
+      /(eden|edna|edno|dva|dve|tri|cetiri|pet|sest|sedum|osum|devet)сто/i,
+    ];
+    for (const pattern of hundredPatterns) {
+      const match = u.match(pattern);
+      if (match) {
+        result = rootMap[match[1].toLowerCase()] * 100;
+        consumedLength = match.index + match[0].length;
+        found = true;
+        break;
+      }
     }
   }
   
   // ========================================
   // TENS — "dvaeset", "dvajset", "dvadeset", "дваесет"
   // ========================================
+  if (!found) {
+    // Irregular tens first
+    const irregularTens = {
+      'triest': 30, 'триест': 30,
+      'pedeset': 50, 'педесет': 50,
+      'seeset': 60, 'шеесет': 60
+    };
+    for (const [word, val] of Object.entries(irregularTens)) {
+      const idx = u.indexOf(word);
+      if (idx !== -1) {
+        result = val;
+        consumedLength = idx + word.length;
+        found = true;
+        break;
+      }
+    }
 
-  // Irregular tens forms with consonant mutation:
-  //   triest (триест) = 30 (tri + est, shortened from trieset)
-  //   pedeset (педесет) = 50 (pet→ped + eset)
-  //   seeset (шеесет) = 60 (sest→see + set)
-  const irregularTens = {
-    'triest': 30, 'триест': 30,
-    'pedeset': 50, 'педесет': 50,
-    'seeset': 60, 'шеесет': 60
-  };
-  for (const [word, val] of Object.entries(irregularTens)) {
-    if (u.includes(word)) return val;
+    if (!found) {
+      const tensPatterns = [
+        /(dva|dve|tri|cetiri|pet|sest|sedum|osum|devet)\s*(eset|есет)/i,
+        /(dva|dve|tri|cetiri|pet|sest|sedum|osum|devet)eset/i,
+        /(dva|dve|tri|cetiri|pet|sest|sedum|osum|devet)есет/i,
+        /(dva|dve|tri|cetiri|pet|sest|sedum|osum|devet)ajset/i,
+        /(dva|dve|tri|cetiri|pet|sest|sedum|osum|devet)ајсет/i,
+      ];
+      for (const pattern of tensPatterns) {
+        const match = u.match(pattern);
+        if (match) {
+          result = rootMap[match[1].toLowerCase()] * 10;
+          consumedLength = match.index + match[0].length;
+          found = true;
+          break;
+        }
+      }
+    }
   }
 
-  const tensPatterns = [
-    /(dva|dve|tri|cetiri|pet|sest|sedum|osum|devet)\s*(eset|есет)/i,
-    /(dva|dve|tri|cetiri|pet|sest|sedum|osum|devet)eset/i,
-    /(dva|dve|tri|cetiri|pet|sest|sedum|osum|devet)есет/i,
-    /(dva|dve|tri|cetiri|pet|sest|sedum|osum|devet)ajset/i,
-    /(dva|dve|tri|cetiri|pet|sest|sedum|osum|devet)ајсет/i,
-  ];
-  
-  for (const pattern of tensPatterns) {
-    const match = u.match(pattern);
-    if (match) {
-      return rootMap[match[1].toLowerCase()] * 10;
+  // ========================================
+  // SUFFIX: "i {broj}" — e.g. "stodvaesetipet" = 120 + 5 = 125
+  // Also handles standalone: "sto" = 100 even without a tens part
+  // ========================================
+  if (!found) {
+    // Standalone "sto/сто" = 100 (no tens part)
+    const stoMatch = u.match(/^\s*(sto|сто)\s*$/i);
+    if (stoMatch) return 100;
+  }
+
+  if (found) {
+    // Check for "i {broj}" suffix after the consumed portion
+    const remaining = u.slice(consumedLength).trim();
+    const iBrojMatch = remaining.match(/^i\s*(eden|edna|edno|dva|dve|tri|cetiri|pet|sest|sedum|osum|devet|deset)\s*$/i);
+    if (iBrojMatch) {
+      result += rootMap[iBrojMatch[1].toLowerCase()] || 0;
     }
+    // Add "sto" prefix (100) if text started with "sto"/"сто"
+    result += stoPrefix;
+    return result;
   }
   
   return null;
