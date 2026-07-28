@@ -196,93 +196,75 @@ function saveToCSV(data, phone, propertyId) {
 }
 
 // ========================================
-// HELPER: Intent Classification via LLM
+// HELPER: Intent Classification — Finite State Machine (B12)
 // ========================================
-async function classifyIntent(userInput, conversation) {
-  try {
-    const prompt = `
-Оцени го интересот на сопственикот за соработка со агенција за недвижности.
+// Replaces LLM-based classification with deterministic rule-based FSM.
+// Priority: REJECTED > ACCEPTED > INTERESTED > AMBIGUOUS
+// All patterns support BOTH Latin and Cyrillic (Macedonian owners use both).
+function classifyIntent(userInput, conversation) {
+  const u = userInput.toLowerCase().trim();
 
-ПРЕТХОДЕН РАЗГОВОР:
-${conversation || "Нема претходен разговор"}
+  // ==========================================
+  // 1. REJECTED — explicit no/refusal
+  // ==========================================
+  if (/^(ne|не)$/i.test(u)) return { intent: "REJECTED", confidence: 0.95, reason: "standalone ne" };
+  if (/(ne|не)\s*sum\s*(zainteresiran|заинтересиран)/i.test(u)) return { intent: "REJECTED", confidence: 0.95, reason: "ne sum zainteresiran" };
+  if (/(ne|не)\s*me\s*(interesira|интересира)/i.test(u)) return { intent: "REJECTED", confidence: 0.95, reason: "ne me interesira" };
+  if (/(ne|не)\s*(sakam|сакам)/i.test(u)) return { intent: "REJECTED", confidence: 0.95, reason: "ne sakam" };
+  if (/(ne|не)\s*mi\s*(treba|треба)/i.test(u)) return { intent: "REJECTED", confidence: 0.95, reason: "ne mi treba" };
+  if (/(ostavi|остави)\s*(me|ме)/i.test(u)) return { intent: "REJECTED", confidence: 0.95, reason: "ostavi me" };
+  if (/(izvini|извини),?\s*(ne|не)/i.test(u)) return { intent: "REJECTED", confidence: 0.9, reason: "izvini ne" };
+  if (/(nemam|немам)\s*(namera|намера)/i.test(u)) return { intent: "REJECTED", confidence: 0.9, reason: "nemam namera" };
+  if (/(nema|нема)\s*(potreba|потреба)/i.test(u)) return { intent: "REJECTED", confidence: 0.85, reason: "nema potreba" };
+  if (/(ne|не)\s*(bake|бате)/i.test(u)) return { intent: "REJECTED", confidence: 0.9, reason: "ne bake" };
+  if (/(ne|не)\s*(mislam|мислам)\s*da/i.test(u)) return { intent: "REJECTED", confidence: 0.85, reason: "ne mislam da" };
+  if (/(ne|не)\s*(moze|може)\s*da/i.test(u)) return { intent: "REJECTED", confidence: 0.8, reason: "ne moze da" };
 
-ПОСЛЕДНА ПОРАКА ОД СОПСТВЕНИКОТ:
-"${userInput}"
+  // ==========================================
+  // 2. ACCEPTED — explicit yes/agreement
+  // ==========================================
+  if (/^(da|да)$/i.test(u)) return { intent: "ACCEPTED", confidence: 0.95, reason: "standalone da" };
+  if (/^(da|да|ajde|ајде|moze|може|dobro|добро)([,.\s]|$)/i.test(u)) return { intent: "ACCEPTED", confidence: 0.9, reason: "affirmative start" };
+  if (/(ajde|ајде)/i.test(u) && !/(ne|не)/i.test(u)) return { intent: "ACCEPTED", confidence: 0.9, reason: "ajde" };
+  if (/(probame|пробаме)/i.test(u)) return { intent: "ACCEPTED", confidence: 0.9, reason: "probame" };
+  if (/(sorabotuvame|соработуваме)/i.test(u)) return { intent: "ACCEPTED", confidence: 0.95, reason: "sorabotuvame" };
+  if (/vo\s*(red|ред)/i.test(u)) return { intent: "ACCEPTED", confidence: 0.9, reason: "vo red" };
+  if (/se\s*(soglasuvam|согласувам)/i.test(u)) return { intent: "ACCEPTED", confidence: 0.95, reason: "se soglasuvam" };
+  if (/(prifakjam|прифаќам)/i.test(u)) return { intent: "ACCEPTED", confidence: 0.95, reason: "prifakjam" };
+  if (/(zosto|зошто)\s*da\s*(ne|не)/i.test(u)) return { intent: "ACCEPTED", confidence: 0.9, reason: "zosto da ne" };
+  if (/(ako|ако)\s*(e|е)\s*(taka|така)/i.test(u) && /(moze|може)/i.test(u)) return { intent: "ACCEPTED", confidence: 0.85, reason: "ako e taka moze" };
+  if (/(ke|ќе)\s*(probam|пробам)/i.test(u)) return { intent: "ACCEPTED", confidence: 0.85, reason: "ke probam" };
+  if (/(dogovor|договор)/i.test(u)) return { intent: "ACCEPTED", confidence: 0.9, reason: "dogovor" };
 
-Врати само JSON со овој формат:
-{
-  "intent": "REJECTED" | "INTERESTED" | "ACCEPTED",
-  "confidence": 0.0-1.0,
-  "reason": "кратко објаснување зошто"
-}
+  // ==========================================
+  // 3. INTERESTED — questions, uncertainty, engagement
+  // ==========================================
+  if (/\?/i.test(u)) return { intent: "INTERESTED", confidence: 0.8, reason: "question mark" };
+  if (/(kako|како)\s*(raboti|работи)/i.test(u)) return { intent: "INTERESTED", confidence: 0.85, reason: "kako raboti" };
+  if (/(kako|како)\s*(funkcionira|функционира)/i.test(u)) return { intent: "INTERESTED", confidence: 0.85, reason: "kako funkcionira" };
+  if (/(sto|што)\s*(znaci|значи)/i.test(u)) return { intent: "INTERESTED", confidence: 0.85, reason: "sto znaci" };
+  if (/(sto|shto|што)\s*(e|е)/i.test(u)) return { intent: "INTERESTED", confidence: 0.8, reason: "sto e" };
+  if (/(koi|кои|kakvi|какви)\s*(se|се)/i.test(u)) return { intent: "INTERESTED", confidence: 0.8, reason: "koi se" };
+  if (/(kakva|каква)\s*(sorabotka|соработка)/i.test(u)) return { intent: "INTERESTED", confidence: 0.85, reason: "kakva sorabotka" };
+  if (/(kako|како)\s*(vie|вие)/i.test(u)) return { intent: "INTERESTED", confidence: 0.75, reason: "kako vie" };
+  if (/(primer|пример|objasni|објасни)/i.test(u)) return { intent: "INTERESTED", confidence: 0.8, reason: "asking for example" };
+  if (/(znaci|значи)/i.test(u)) return { intent: "INTERESTED", confidence: 0.7, reason: "znaci" };
+  if (/(uslovi|услови)/i.test(u)) return { intent: "INTERESTED", confidence: 0.85, reason: "uslovi" };
+  // Uncertainty
+  if (/(mozebi|можеби)/i.test(u)) return { intent: "INTERESTED", confidence: 0.7, reason: "mozebi" };
+  if (/(razmisluvam|размислувам|ke razmislam|ќе размислам)/i.test(u)) return { intent: "INTERESTED", confidence: 0.7, reason: "razmisluvam" };
+  if (/(ne|не)\s*sum\s*(siguren|сигурен)/i.test(u)) return { intent: "INTERESTED", confidence: 0.7, reason: "ne sum siguren" };
+  if (/(da|да)\s*(vidime|видиме)/i.test(u)) return { intent: "INTERESTED", confidence: 0.7, reason: "da vidime" };
+  if (/(interesno|интересно)/i.test(u)) return { intent: "INTERESTED", confidence: 0.75, reason: "interesno" };
+  if (/(moze|може)\s*da\s*(probame|пробаме)/i.test(u)) return { intent: "INTERESTED", confidence: 0.7, reason: "moze da probame" };
+  // Trust issues -> INTERESTED (not rejection)
+  if (/(ne|не)\s*(veruvam|верувам)/i.test(u)) return { intent: "INTERESTED", confidence: 0.6, reason: "ne veruvam" };
+  if (/(nemam|немам)\s*(doverba|доверба)/i.test(u)) return { intent: "INTERESTED", confidence: 0.6, reason: "nemam doverba" };
 
-ПРАВИЛА ЗА КЛАСИФИКАЦИЈА:
-
-ACCEPTED (јасна согласност, confidence > 0.8):
-- "ајде", "може", "добро", "пробаме", "соработуваме"
-- "во ред", "се согласувам", "прифаќам"
-- "да" (кога е самостоен одговор)
-- "ако е така може да пробаме"
-- "pod vakvi uslovi", "zosto da ne", "zašto da ne", "зошто да не"
-
-INTERESTED (отворен, но се уште не се согласил, confidence 0.3-0.8):
-- "можеби", "размислувам", "не сум сигурен"
-- "како работи?", "кои се условите?"
-- "ќе размислам", "да видиме"
-- "интересно", "може да биде"
-
-REJECTED (јасно одбивање, confidence > 0.8):
-- "не ми треба", "не сакам", "не сум заинтересиран"
-- "остави ме", "не ме интересира"
-- "извини, не"
-- "не" (кога е самостоен одговор)
-
-ВАЖНО:
-- Ако пораката содржи прашање, веројатно е INTERESTED
-- "не верувам на агенции" → INTERESTED
-- "може да размислам" → INTERESTED
-- "да, ајде" → ACCEPTED
-- "значи ништо не земате" → INTERESTED (прашање, не одбивање)
-`;
-
-    const result = await groq.chat.completions.create({
-      messages: [
-        { 
-          role: "system", 
-          content: "Ти си класификатор за недвижности. Враќај само валиден JSON. Без објаснувања, без друг текст." 
-        },
-        { role: "user", content: prompt }
-      ],
-      model: config.MODEL || "llama3-70b-8192",
-      temperature: 0.15,
-      frequency_penalty: 0.15,
-      max_tokens: 150
-    });
-
-    const content = result.choices[0]?.message?.content || '{"intent":"INTERESTED","confidence":0.5,"reason":"fallback"}';
-    
-    let parsed;
-    try {
-      parsed = JSON.parse(content);
-    } catch (e) {
-      const jsonMatch = content.match(/\{.*\}/s);
-      if (jsonMatch) {
-        parsed = JSON.parse(jsonMatch[0]);
-      } else {
-        parsed = { intent: "INTERESTED", confidence: 0.5, reason: "parse fallback" };
-      }
-    }
-    
-    return {
-      intent: parsed.intent || "INTERESTED",
-      confidence: parsed.confidence || 0.5,
-      reason: parsed.reason || "unknown"
-    };
-    
-  } catch (e) {
-    console.error("[CLASSIFY ERROR]:", e.message);
-    return { intent: "INTERESTED", confidence: 0.5, reason: "error fallback" };
-  }
+  // ==========================================
+  // 4. AMBIGUOUS default — mild interest
+  // ==========================================
+  return { intent: "INTERESTED", confidence: 0.5, reason: "ambiguous default" };
 }
 
 // ========================================
@@ -1267,7 +1249,7 @@ if (/kako bi sorabotuvale|како би соработувале|како да �
     let phase = "PERSUASION";
     
     if (!alreadyInDataCollection) {
-      classification = await classifyIntent(u, conv);
+      classification = classifyIntent(u, conv);
       console.log(`[INTENT: ${classification.intent}, CONFIDENCE: ${classification.confidence}]`);
       
       if (classification.intent === "ACCEPTED" && classification.confidence > 0.7) {

@@ -546,6 +546,81 @@ function matchObjection(text) {
 }
 
 // ============================================================
+// FIXTURE: classifyIntent (B12 — Finite State Machine)
+// ============================================================
+function classifyIntent(userInput, conversation) {
+  const u = userInput.toLowerCase().trim();
+
+  // 1. REJECTED — with Cyrillic support
+  if (/^(ne|не)$/i.test(u)) return { intent: "REJECTED", confidence: 0.95, reason: "standalone ne" };
+  if (/(ne|не)\s*sum\s*(zainteresiran|заинтересиран)/i.test(u)) return { intent: "REJECTED", confidence: 0.95, reason: "ne sum zainteresiran" };
+  if (/(ne|не)\s*me\s*(interesira|интересира)/i.test(u)) return { intent: "REJECTED", confidence: 0.95, reason: "ne me interesira" };
+  if (/(ne|не)\s*(sakam|сакам)/i.test(u)) return { intent: "REJECTED", confidence: 0.95, reason: "ne sakam" };
+  if (/(ne|не)\s*mi\s*(treba|треба)/i.test(u)) return { intent: "REJECTED", confidence: 0.95, reason: "ne mi treba" };
+  if (/(ostavi|остави)\s*(me|ме)/i.test(u)) return { intent: "REJECTED", confidence: 0.95, reason: "ostavi me" };
+  if (/(izvini|извини),?\s*(ne|не)/i.test(u)) return { intent: "REJECTED", confidence: 0.9, reason: "izvini ne" };
+  if (/(nemam|немам)\s*(namera|намера)/i.test(u)) return { intent: "REJECTED", confidence: 0.9, reason: "nemam namera" };
+  if (/(nema|нема)\s*(potreba|потреба)/i.test(u)) return { intent: "REJECTED", confidence: 0.85, reason: "nema potreba" };
+  if (/(ne|не)\s*(bake|бате)/i.test(u)) return { intent: "REJECTED", confidence: 0.9, reason: "ne bake" };
+  if (/(ne|не)\s*(mislam|мислам)\s*da/i.test(u)) return { intent: "REJECTED", confidence: 0.85, reason: "ne mislam da" };
+  if (/(ne|не)\s*(moze|може)\s*da/i.test(u)) return { intent: "REJECTED", confidence: 0.8, reason: "ne moze da" };
+
+  // 2. ACCEPTED — with Cyrillic support
+  if (/^(da|да)$/i.test(u)) return { intent: "ACCEPTED", confidence: 0.95, reason: "standalone da" };
+  if (/^(da|да|ajde|ајде|moze|може|dobro|добро)([,.\s]|$)/i.test(u)) return { intent: "ACCEPTED", confidence: 0.9, reason: "affirmative start" };
+  if (/(ajde|ајде)/i.test(u) && !/(ne|не)/i.test(u)) return { intent: "ACCEPTED", confidence: 0.9, reason: "ajde" };
+  if (/(probame|пробаме)/i.test(u)) return { intent: "ACCEPTED", confidence: 0.9, reason: "probame" };
+  if (/(sorabotuvame|соработуваме)/i.test(u)) return { intent: "ACCEPTED", confidence: 0.95, reason: "sorabotuvame" };
+  if (/vo\s*(red|ред)/i.test(u)) return { intent: "ACCEPTED", confidence: 0.9, reason: "vo red" };
+  if (/se\s*(soglasuvam|согласувам)/i.test(u)) return { intent: "ACCEPTED", confidence: 0.95, reason: "se soglasuvam" };
+  if (/(prifakjam|прифаќам)/i.test(u)) return { intent: "ACCEPTED", confidence: 0.95, reason: "prifakjam" };
+  if (/(zosto|зошто)\s*da\s*(ne|не)/i.test(u)) return { intent: "ACCEPTED", confidence: 0.9, reason: "zosto da ne" };
+  if (/(ako|ако)\s*(e|е)\s*(taka|така)/i.test(u) && /(moze|може)/i.test(u)) return { intent: "ACCEPTED", confidence: 0.85, reason: "ako e taka moze" };
+  if (/(ke|ќе)\s*(probam|пробам)/i.test(u)) return { intent: "ACCEPTED", confidence: 0.85, reason: "ke probam" };
+  if (/(dogovor|договор)/i.test(u)) return { intent: "ACCEPTED", confidence: 0.9, reason: "dogovor" };
+
+  // 3. INTERESTED — with Cyrillic support
+  if (/\?/i.test(u)) return { intent: "INTERESTED", confidence: 0.8, reason: "question mark" };
+  if (/(kako|како)\s*(raboti|работи)/i.test(u)) return { intent: "INTERESTED", confidence: 0.85, reason: "kako raboti" };
+  if (/(kako|како)\s*(funkcionira|функционира)/i.test(u)) return { intent: "INTERESTED", confidence: 0.85, reason: "kako funkcionira" };
+  if (/(sto|што)\s*(znaci|значи)/i.test(u)) return { intent: "INTERESTED", confidence: 0.85, reason: "sto znaci" };
+  if (/(sto|shto|што)\s*(e|е)/i.test(u)) return { intent: "INTERESTED", confidence: 0.8, reason: "sto e" };
+  if (/(koi|кои|kakvi|какви)\s*(se|се)/i.test(u)) return { intent: "INTERESTED", confidence: 0.8, reason: "koi se" };
+  if (/(kakva|каква)\s*(sorabotka|соработка)/i.test(u)) return { intent: "INTERESTED", confidence: 0.85, reason: "kakva sorabotka" };
+  if (/(kako|како)\s*(vie|вие)/i.test(u)) return { intent: "INTERESTED", confidence: 0.75, reason: "kako vie" };
+  if (/(primer|пример|objasni|објасни)/i.test(u)) return { intent: "INTERESTED", confidence: 0.8, reason: "asking for example" };
+  if (/(znaci|значи)/i.test(u)) return { intent: "INTERESTED", confidence: 0.7, reason: "znaci" };
+  if (/(uslovi|услови)/i.test(u)) return { intent: "INTERESTED", confidence: 0.85, reason: "uslovi" };
+  if (/(mozebi|можеби)/i.test(u)) return { intent: "INTERESTED", confidence: 0.7, reason: "mozebi" };
+  if (/(razmisluvam|размислувам|ke razmislam|ќе размислам)/i.test(u)) return { intent: "INTERESTED", confidence: 0.7, reason: "razmisluvam" };
+  if (/(ne|не)\s*sum\s*(siguren|сигурен)/i.test(u)) return { intent: "INTERESTED", confidence: 0.7, reason: "ne sum siguren" };
+  if (/(da|да)\s*(vidime|видиме)/i.test(u)) return { intent: "INTERESTED", confidence: 0.7, reason: "da vidime" };
+  if (/(interesno|интересно)/i.test(u)) return { intent: "INTERESTED", confidence: 0.75, reason: "interesno" };
+  if (/(moze|може)\s*da\s*(probame|пробаме)/i.test(u)) return { intent: "INTERESTED", confidence: 0.7, reason: "moze da probame" };
+  if (/(ne|не)\s*(veruvam|верувам)/i.test(u)) return { intent: "INTERESTED", confidence: 0.6, reason: "ne veruvam" };
+  if (/(nemam|немам)\s*(doverba|доверба)/i.test(u)) return { intent: "INTERESTED", confidence: 0.6, reason: "nemam doverba" };
+
+  // 4. Default
+  return { intent: "INTERESTED", confidence: 0.5, reason: "ambiguous default" };
+}
+
+// ============================================================
+// FIXTURE: assertIntentEqual (for cleanup/testing intent results)
+// ============================================================
+function assertIntentEqual(actual, expectedIntent, expectedConfidence, label) {
+  const pass = actual && actual.intent === expectedIntent && actual.confidence >= expectedConfidence;
+  if (pass) {
+    passed++;
+    console.log(`  ✅ ${label} → ${actual.intent} (${actual.confidence}, ${actual.reason})`);
+  } else {
+    failed++;
+    const msg = `  ❌ ${label} — expected ${expectedIntent} >=${expectedConfidence}, got ${actual?.intent} (${actual?.confidence})`;
+    failures.push(msg);
+    console.log(msg);
+  }
+}
+
+// ============================================================
 // FIXTURE: parseOrientation (abbreviated for testing)
 // ============================================================
 function parseOrientation(text) {
@@ -737,6 +812,54 @@ assert(obj4?.key === 'percentage', "'kolku procenti zemate' → 'percentage'");
 const obj5 = matchObjection("kako vie pobrzo bi go prodale");
 assert(obj5 !== null, "'kako vie pobrzo bi go prodale' → matched");
 assert(obj5?.key === 'faster_sale', "→ 'faster_sale'");
+
+// ============================================================
+// TEST GROUP: classifyIntent (B12 FSM)
+// ============================================================
+console.log(`\n📦 GROUP: classifyIntent`);
+
+// REJECTED cases
+assertIntentEqual(classifyIntent("ne"), "REJECTED", 0.9, "'ne' → REJECTED");
+assertIntentEqual(classifyIntent("ne sakam"), "REJECTED", 0.9, "B12: 'ne sakam' → REJECTED");
+assertIntentEqual(classifyIntent("ne mi treba"), "REJECTED", 0.9, "'ne mi treba' → REJECTED");
+assertIntentEqual(classifyIntent("ne sum zainteresiran"), "REJECTED", 0.9, "'ne sum zainteresiran' → REJECTED");
+assertIntentEqual(classifyIntent("ne me interesira"), "REJECTED", 0.9, "'ne me interesira' → REJECTED");
+assertIntentEqual(classifyIntent("ostavi me"), "REJECTED", 0.9, "'ostavi me' → REJECTED");
+assertIntentEqual(classifyIntent("izvini, ne"), "REJECTED", 0.9, "'izvini, ne' → REJECTED");
+
+// ACCEPTED cases
+assertIntentEqual(classifyIntent("da"), "ACCEPTED", 0.9, "'da' → ACCEPTED");
+assertIntentEqual(classifyIntent("ajde"), "ACCEPTED", 0.8, "'ajde' → ACCEPTED");
+assertIntentEqual(classifyIntent("moze"), "ACCEPTED", 0.8, "'moze' → ACCEPTED");
+assertIntentEqual(classifyIntent("dobro"), "ACCEPTED", 0.8, "'dobro' → ACCEPTED");
+assertIntentEqual(classifyIntent("probame"), "ACCEPTED", 0.8, "'probame' → ACCEPTED");
+assertIntentEqual(classifyIntent("sorabotuvame"), "ACCEPTED", 0.9, "'sorabotuvame' → ACCEPTED");
+assertIntentEqual(classifyIntent("vo red"), "ACCEPTED", 0.8, "'vo red' → ACCEPTED");
+assertIntentEqual(classifyIntent("zosto da ne"), "ACCEPTED", 0.8, "'zosto da ne' → ACCEPTED");
+assertIntentEqual(classifyIntent("se soglasuvam"), "ACCEPTED", 0.9, "'se soglasuvam' → ACCEPTED");
+assertIntentEqual(classifyIntent("prifakjam"), "ACCEPTED", 0.9, "'prifakjam' → ACCEPTED");
+
+// INTERESTED cases
+assertIntentEqual(classifyIntent("kako raboti?"), "INTERESTED", 0.7, "'kako raboti?' → INTERESTED");
+assertIntentEqual(classifyIntent("koi se uslovite"), "INTERESTED", 0.7, "'koi se uslovite' → INTERESTED");
+assertIntentEqual(classifyIntent("mozebi"), "INTERESTED", 0.6, "'mozebi' → INTERESTED");
+assertIntentEqual(classifyIntent("ke razmislam"), "INTERESTED", 0.6, "'ke razmislam' → INTERESTED");
+assertIntentEqual(classifyIntent("ne sum siguren"), "INTERESTED", 0.6, "'ne sum siguren' → INTERESTED");
+assertIntentEqual(classifyIntent("interesno"), "INTERESTED", 0.7, "'interesno' → INTERESTED");
+assertIntentEqual(classifyIntent("ne veruvam na agencii"), "INTERESTED", 0.5, "'ne veruvam na agencii' → INTERESTED");
+assertIntentEqual(classifyIntent("kako vie bi go prodale"), "INTERESTED", 0.7, "'kako vie bi go prodale' → INTERESTED");
+assertIntentEqual(classifyIntent("daj primer"), "INTERESTED", 0.7, "'daj primer' → INTERESTED");
+
+// Cyrillic variants (B12 critical — patterns must support both scripts)
+assertIntentEqual(classifyIntent("ne sakam"), "REJECTED", 0.9, "B12 Cyrillic: 'ne sakam' (Latin) → REJECTED");
+assertIntentEqual(classifyIntent("не сакам"), "REJECTED", 0.9, "B12 Cyrillic: 'не сакам' (Cyrillic) → REJECTED");
+assertIntentEqual(classifyIntent("да"), "ACCEPTED", 0.9, "Cyrillic: 'да' (Cyrillic) → ACCEPTED");
+assertIntentEqual(classifyIntent("не верувам на агенции"), "INTERESTED", 0.5, "Cyrillic: 'не верувам на агенции' → INTERESTED");
+assertIntentEqual(classifyIntent("како работи?"), "INTERESTED", 0.7, "Cyrillic: 'како работи?' → INTERESTED");
+
+// AMBIGUOUS default
+const amb = classifyIntent("dali") || {};
+assert(amb.intent === "INTERESTED" && amb.confidence === 0.5, "'dali' → INTERESTED 0.5 default", "INTERESTED 0.5", amb.intent + " " + amb.confidence);
 
 // ============================================================
 // TEST GROUP: extractTerraceNumber
