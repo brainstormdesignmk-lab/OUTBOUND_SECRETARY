@@ -209,6 +209,24 @@ function extractTotalFloors(u, data) {
     const wordNum = parseMacedonianNumber(wordStoryMatch[1]);
     if (wordNum !== null && wordNum >= 1 && wordNum <= 50) return { totalFloors: wordNum };
   }
+
+  // BARE NUMBER FALLBACK: entire message is just a number (digit or word).
+  // This handles cases like "10" → totalFloors=10 when the user is directly
+  // answering the totalFloors question without "katnica"/"sprata" keywords.
+  // The NUMBER_SNIFFING_EXTRACTORS guard in STEP 2 prevents false positives
+  // in global discovery mode (when user says "10" unrelated to floors).
+  const bareDigit = u.match(/^(\d{1,3})$/);
+  if (bareDigit) {
+    const num = parseInt(bareDigit[1]);
+    if (num >= 1 && num <= 50) return { totalFloors: num };
+  }
+  // Bare word number: "deset" → 10
+  const bareWord = u.trim();
+  if (!/\s/.test(bareWord) && bareWord.length > 0) {
+    const wordNum = parseMacedonianNumber(bareWord);
+    if (wordNum !== null && wordNum >= 1 && wordNum <= 50) return { totalFloors: wordNum };
+  }
+
   return null;
 }
 
@@ -575,7 +593,8 @@ const YEAR_SNIFFING_EXTRACTORS = new Set([
 const NUMBER_SNIFFING_EXTRACTORS = new Set([
   'extractBedrooms',
   'extractFloor',
-  'extractTotalSqm'
+  'extractTotalSqm',
+  'extractTotalFloors'  // Added: bare number fallback (needs preferredField guard)
 ]);
 
 // ========================================
