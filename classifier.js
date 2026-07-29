@@ -113,6 +113,18 @@ export function classifyIntent(userInput, conversation) {
       /(\?|a\s+(sto|што|kako|како|dali|дали|koj|кој|koga|кога|kolku|колку|zosto|зошто|kakov|каков|kakva|каква|kakvo|какво|kakvi|какви)|ama|ама|sepak|сепак|mislam|мислам|dali|дали|mozebi|можеби|druga|друга|vekje|веќе|ke vidime|ќе видиме|da vidime|да видиме|ne sum|не сум|ne znam|не знам|ke razmislam|ќе размислам|razmisluvam|размислувам|ne rabotel|не работел|nemam iskustvo|немам искуство|ne sum siguren|не сум сигурен|ke prasam|ќе прашам|ke se javam|ќе се јавам|da se javam|да се јавам|da prasam|да прашам|ne sum rabotil|не сум работел|ne rabotila|не работела|nemam raboteno|немам работено|imam\s+dogovor|имам\s+договор|sto\s+ke|што\s+ќе|kako\s+ke|како\s+ќе|se\s+mislam|се\s+мислам|treba\s+da|треба\s+da|prvo|прво|samo\s+|само\s+)/i.test(u)) {
     return { intent: "INTERESTED", confidence: 0.7, reason: "affirmative start + hesitation" };
   }
+  // CONVERSATION-CONTINUATION GUARD: "da moze", "da prodolzime", "da slusam",
+  // "da objasnis", "da kazes" mean "yes continue talking" — NOT "yes I accept cooperation".
+  // The owner is giving conversational permission, not committing to the agency.
+  // These must run BEFORE the catch-all "affirmative start" pattern below.
+  const CONV_WORDS = /(?:prodolz|продолж|slusam|слушам|slusham|objasn|објасн|kazh|каж|izvoli|изволи|pojasn|појасн|poveke|повеќе)/i;
+  if (/^(da|да|ajde|ајде|moze|може|dobro|добро)([,.\s]|$)/i.test(u) && CONV_WORDS.test(u)) {
+    return { intent: "INTERESTED", confidence: 0.7, reason: "conversation continuation, not cooperation" };
+  }
+  // "da moze" (and variants): "yes you may", "yes go ahead" — conversation continuation
+  if (/^(da|да)\s*[,.]?\s*moze(?:те|\s|$)/i.test(u)) {
+    return { intent: "INTERESTED", confidence: 0.7, reason: "da moze — conversation continuation, not cooperation" };
+  }
   if (/^(da|да|ajde|ајде|moze|може|dobro|добро)([,.\s]|$)/i.test(u)) return { intent: "ACCEPTED", confidence: 0.9, reason: "affirmative start" };
   if (/(ajde|ајде)/i.test(u) && !/(ne|не)/i.test(u)) return { intent: "ACCEPTED", confidence: 0.9, reason: "ajde" };
   if (/(probame|пробаме)/i.test(u)) return { intent: "ACCEPTED", confidence: 0.9, reason: "probame" };

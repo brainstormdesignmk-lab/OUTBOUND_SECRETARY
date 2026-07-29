@@ -493,7 +493,18 @@ if (/kako bi sorabotuvale|како би соработувале|како да �
       classification = classifyIntent(u, conv);
       console.log(`[INTENT: ${classification.intent}, CONFIDENCE: ${classification.confidence}]`);
 
-      if (classification.intent === "ACCEPTED" && classification.confidence > 0.7) {
+      // COOPERATION ACCEPTANCE GATE (defense-in-depth):
+      // Even if the classifier says ACCEPTED, check for conversation-continuation
+      // words that the classifier might have missed. "prodolzi", "slusam", "objasni"
+      // after an affirmative are conversation continuations, NOT cooperation.
+      // The classifier handles the common cases ("da moze", "moze" alone),
+      // this gate catches edge cases.
+      const isConvContinuation = /prodolz|продолж|slusam|слушам|objasn|објасн|kazh|каж|izvoli|изволи|pojasn|појасн|poveke|повеќе|samo\s*(prasaj|прашај)|slobodno|слободно|izvoli|изволи/i.test(u);
+      if (classification.intent === "ACCEPTED" && classification.confidence > 0.7 && isConvContinuation) {
+        console.log(`[COOPERATION: GATE BLOCKED — conversation continuation (${classification.reason})]`);
+        phase = "PERSUASION";
+        classification = { intent: "INTERESTED", confidence: 0.7 };
+      } else if (classification.intent === "ACCEPTED" && classification.confidence > 0.7) {
         session.collectedData.cooperationAccepted = true;
         session.rejectionCount = 0;
         if (!session.collectedData.transactionType && session.adMemory?.transactionType) {
