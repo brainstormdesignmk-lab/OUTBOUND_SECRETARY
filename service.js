@@ -37,7 +37,8 @@ import {
   isAskingAboutPhone,
   isAskingHowItWorks,
   isAskingAboutClients,
-  isAskingWhereToSendPhotos
+  isAskingWhereToSendPhotos,
+  isAskingAboutLegalCosts
 } from './objections.js';
 
 // Global extraction pass
@@ -346,6 +347,25 @@ export async function generateResponse(session, userInput) {
         type: "NORMAL"
       };
     } // ← THIS BRACE WAS MISSING!
+
+    // HARDCODED: Koj plakja Advokat / Notar / Danok? (any one → answer all three)
+    if (isAskingAboutLegalCosts(u)) {
+      const saleAnswers = [
+        'Адвокатот и Нотарот се обврска на Купувачот. Данокот исто така го плаќа Купувачот во Град Скопје. Вие ја добивате вашата чиста цена.',
+        'Сите давачки за Адвокат, Нотар и Данок се на товар на Купувачот. Вашата обврска е само да го продадете имотот.',
+        'Купувачот ги регулира сите трошоци за Адвокат, Нотар и Данок. Вие ја добивате договорената цена без никакви давачки.'
+      ];
+      const rentAnswers = [
+        'Кај издавање, Адвокатот и Нотарот обично се делат по половина, но тоа е по договор меѓу двете страни.',
+        'За Адвокат и Нотар — тоа е по договор меѓу Вас и закупецот. Најчесто секоја страна плаќа половина.',
+        'Трошоците за Адвокат и Нотар кај издавање се договараат меѓу Вас и закупецот. Стандардно е секој да плати по половина.'
+      ];
+      const answers = isRent ? rentAnswers : saleAnswers;
+      return {
+        text: answers[Math.floor(Math.random() * answers.length)],
+        type: "NORMAL"
+      };
+    }
 
     // HARDCODED: How does it work?
     if (isAskingHowItWorks(u)) {

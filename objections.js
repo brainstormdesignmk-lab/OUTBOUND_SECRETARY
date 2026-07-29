@@ -108,6 +108,13 @@ function isAskingWhereToSendPhotos(text) {
   return /tuka da vi pratam|тука да ви пратам|kade da vi pratam|каде да ви пратам|pratam ovde|пратам овде|ovde da vi pratam|овде да ви пратам|kade da gi pratam|каде да ги пратам|na viber da vi pratam|на вајбер да ви пратам|preku viber|преку вајбер|na viber|на вајбер/i.test(text);
 }
 
+// ========================================
+// HELPER: Check if asking about legal costs (Advokat, Notar, Danok)
+// ========================================
+function isAskingAboutLegalCosts(text) {
+  return /advokat|адвокат|notar|нотар|danok|данок/i.test(text);
+}
+
 export {
   OBJECTION_RESPONSES,
   matchObjection,
@@ -118,5 +125,6 @@ export {
   isAskingAboutPhone,
   isAskingHowItWorks,
   isAskingAboutClients,
-  isAskingWhereToSendPhotos
+  isAskingWhereToSendPhotos,
+  isAskingAboutLegalCosts
 };
