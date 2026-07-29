@@ -30,12 +30,12 @@ function getNextPropertyId() {
     fs.mkdirSync(PROPERTY_ROOT, { recursive: true });
     return START_ID;
   }
-  
+
   const folders = fs.readdirSync(PROPERTY_ROOT);
   const numericFolders = folders
     .map(f => parseInt(f))
     .filter(n => !isNaN(n) && n >= START_ID);
-  
+
   if (numericFolders.length === 0) return START_ID;
   return Math.max(...numericFolders) + 1;
 }
@@ -45,17 +45,17 @@ function getNextPropertyId() {
 // ========================================
 function createPropertyFolder(propertyId, data) {
   const folderPath = join(PROPERTY_ROOT, String(propertyId));
-  
+
   if (!fs.existsSync(folderPath)) {
     fs.mkdirSync(folderPath, { recursive: true });
     fs.mkdirSync(join(folderPath, 'photos'), { recursive: true });
     fs.mkdirSync(join(folderPath, 'documents'), { recursive: true });
     fs.mkdirSync(join(folderPath, 'history'), { recursive: true });
   }
-  
+
   const jsonPath = join(folderPath, 'property.json');
   fs.writeFileSync(jsonPath, JSON.stringify(data, null, 2));
-  
+
   return folderPath;
 }
 
@@ -93,15 +93,15 @@ function saveToCSV(data, phone, propertyId) {
   if (!fs.existsSync(dir)) {
     fs.mkdirSync(dir, { recursive: true });
   }
-  
+
   const csvPath = CSV_PATH;
   const isRent = data.transactionType === 'rent';
-  
+
   let headers = [
     'phone', 'formattedPhone', 'propertyId',
     'transactionType'
   ];
-  
+
   if (isRent) {
     headers = headers.concat([
       'monthlyRent',
@@ -116,7 +116,7 @@ function saveToCSV(data, phone, propertyId) {
   } else {
     headers = headers.concat(['price']);
   }
-  
+
   headers = headers.concat([
     'sqm', 'hasTerrace', 'terraceSqm',
     'bedrooms', 'floor', 'totalFloors', 'elevator',
@@ -128,14 +128,14 @@ function saveToCSV(data, phone, propertyId) {
     'photosPermission', 'photosSource', 'photosStatus',
     'ownerName', 'address'
   ]);
-  
+
   let row = [
     phone || '',
     formatPhoneForLovable(phone || ''),
     propertyId || '',
     data.transactionType || 'sale'
   ];
-  
+
   if (isRent) {
     const rentDefaults = getRentDefaults();
     const commission = data.monthlyRent ? calculateRentCommission(data.monthlyRent) : null;
@@ -152,7 +152,7 @@ function saveToCSV(data, phone, propertyId) {
   } else {
     row = row.concat([data.cleanPrice || '']);
   }
-  
+
   row = row.concat([
     csvNum(data.totalSqm),
     csvBool(data.hasTerrace),
@@ -182,16 +182,16 @@ function saveToCSV(data, phone, propertyId) {
     data.ownerName || '',
     data.address || ''
   ]);
-  
+
   const exists = fs.existsSync(csvPath);
   const line = row.join(',') + '\n';
-  
+
   if (!exists) {
     fs.writeFileSync(csvPath, headers.join(',') + '\n' + line);
   } else {
     fs.appendFileSync(csvPath, line);
   }
-  
+
   console.log(`[CSV SAVED: ${row.join(', ')}]`);
 }
 
@@ -203,6 +203,19 @@ function saveToCSV(data, phone, propertyId) {
 // All patterns support BOTH Latin and Cyrillic (Macedonian owners use both).
 function classifyIntent(userInput, conversation) {
   const u = userInput.toLowerCase().trim();
+
+  // ==========================================
+  // 0. PRICE QUOTE GUARD — "jas baram 156 iljadi", "sakam 98000", "cena 120 iljadi"
+  // These are NOT rejections — they're stating a desired net price (buying signal!)
+  // Must be checked BEFORE REJECTED patterns to prevent false REJECTED classification.
+  // ==========================================
+  // Matches: "baram X iljadi", "sakam X iljadi", "cena X iljadi", "X iljadi za mene"
+  const priceQuoteGuard =
+    /(baram|сакам|sakam|цена|cena|price)\s*(\d{1,3}(\.\d{3})*\s*(iljadi|илјади)?)/i.test(u) ||
+    /(\d{1,3}\s*(iljadi|илјади).*za\s*(mene|мене))/i.test(u);
+  if (priceQuoteGuard) {
+    return { intent: "INTERESTED", confidence: 0.8, reason: "net price quote" };
+  }
 
   // ==========================================
   // 1. REJECTED — explicit no/refusal
@@ -224,6 +237,17 @@ function classifyIntent(userInput, conversation) {
   // 2. ACCEPTED — explicit yes/agreement
   // ==========================================
   if (/^(da|да)$/i.test(u)) return { intent: "ACCEPTED", confidence: 0.95, reason: "standalone da" };
+  // COMPREHENSIVE GUARD: affirmative start + objection/concern/question → INTERESTED (not ACCEPTED)
+  // Detects when a message starts with "da", "ajde", "moze", "dobro" BUT continues with:
+  // - A question (?) — "dobro zvuci. a sto ke pravime..."
+  // - An objection/stipulation — "druga agencija", "imam dogovor", "vekje sorabotuvam"
+  // - A "but" clause — "a sto...", "ama...", "sepak..."
+  // - Conditional/uncertainty — "treba da", "prvo", "samo", "se mislam"
+  // - General hesitation — "mozebi", "mislam", "ne sum", "ne znam"
+  if (/^(da|да|ajde|ајде|moze|може|dobro|добро)([,.\s]|$)/i.test(u) &&
+      /(\?|a\s+(sto|што|kako|како|dali|дали|koj|кој|koga|кога|kolku|колку|zosto|зошто|kakov|каков|kakva|каква|kakvo|какво|kakvi|какви)|ama|ама|sepak|сепак|mislam|мислам|dali|дали|mozebi|можеби|druga|друга|vekje|веќе|ke vidime|ќе видиме|da vidime|да видиме|ne sum|не сум|ne znam|не знам|ke razmislam|ќе размислам|razmisluvam|размислувам|ne rabotel|не работел|nemam iskustvo|немам искуство|ne sum siguren|не сум сигурен|ke prasam|ќе прашам|ke se javam|ќе се јавам|da se javam|да се јавам|da prasam|да прашам|ne sum rabotil|не сум работел|ne rabotila|не работела|nemam raboteno|немам работено|imam\s+dogovor|имам\s+договор|sto\s+ke|што\s+ќе|kako\s+ke|како\s+ќе|se\s+mislam|се\s+мислам|treba\s+da|треба\s+да|prvo|прво|samo\s+|само\s+)/i.test(u)) {
+    return { intent: "INTERESTED", confidence: 0.7, reason: "affirmative start + hesitation" };
+  }
   if (/^(da|да|ajde|ајде|moze|може|dobro|добро)([,.\s]|$)/i.test(u)) return { intent: "ACCEPTED", confidence: 0.9, reason: "affirmative start" };
   if (/(ajde|ајде)/i.test(u) && !/(ne|не)/i.test(u)) return { intent: "ACCEPTED", confidence: 0.9, reason: "ajde" };
   if (/(probame|пробаме)/i.test(u)) return { intent: "ACCEPTED", confidence: 0.9, reason: "probame" };
@@ -254,6 +278,7 @@ function classifyIntent(userInput, conversation) {
   if (/(mozebi|можеби)/i.test(u)) return { intent: "INTERESTED", confidence: 0.7, reason: "mozebi" };
   if (/(razmisluvam|размислувам|ke razmislam|ќе размислам)/i.test(u)) return { intent: "INTERESTED", confidence: 0.7, reason: "razmisluvam" };
   if (/(ne|не)\s*sum\s*(siguren|сигурен)/i.test(u)) return { intent: "INTERESTED", confidence: 0.7, reason: "ne sum siguren" };
+  if (/(sepak|сепак)/i.test(u) && !/(ama|ама)/i.test(u)) return { intent: "INTERESTED", confidence: 0.6, reason: "sepak" };
   if (/(da|да)\s*(vidime|видиме)/i.test(u)) return { intent: "INTERESTED", confidence: 0.7, reason: "da vidime" };
   if (/(interesno|интересно)/i.test(u)) return { intent: "INTERESTED", confidence: 0.75, reason: "interesno" };
   if (/(moze|може)\s*da\s*(probame|пробаме)/i.test(u)) return { intent: "INTERESTED", confidence: 0.7, reason: "moze da probame" };
@@ -298,7 +323,7 @@ function parseMacedonianNumber(text) {
     // B3: Irregular tens — "seeset" = 60 (consonant mutation: sest → see)
     'seeset': 60, 'шеесет': 60
   };
-  
+
   // Longest-first sort: 'dvanaeset' (12) must match before 'dva' (2) is found as substring
   const sorted = Object.entries(words).sort((a, b) => b[0].length - a[0].length);
   for (const [word, num] of sorted) {
@@ -312,7 +337,7 @@ function parseMacedonianNumber(text) {
 // ========================================
 function parseNumberWords(text) {
   const u = text.toLowerCase();
-  
+
   // Single numbers
   const numberWords = {
     'eden': 1, 'edna': 1, 'edno': 1,
@@ -326,14 +351,14 @@ function parseNumberWords(text) {
     'devet': 9, 'девет': 9,
     'deset': 10, 'десет': 10
   };
-  
+
   // Check exact match
   for (const [word, num] of Object.entries(numberWords)) {
     if (u.trim() === word) {
       return num;
     }
   }
-  
+
   const rootMap = {
     'eden': 1, 'edna': 1, 'edno': 1,
     'dva': 2, 'dve': 2,
@@ -387,7 +412,7 @@ function parseNumberWords(text) {
       }
     }
   }
-  
+
   // ========================================
   // TENS — "dvaeset", "dvajset", "dvadeset", "дваесет"
   // ========================================
@@ -396,7 +421,11 @@ function parseNumberWords(text) {
     const irregularTens = {
       'triest': 30, 'триест': 30,
       'pedeset': 50, 'педесет': 50,
-      'seeset': 60, 'шеесет': 60
+      'seeset': 60, 'шеесет': 60,
+      'stopeeset': 90, 'стопеесет': 90,
+      'deveeset': 90, 'девеесет': 90,
+      'osumdeset': 80, 'осумдесет': 80,
+      'osemdeset': 80, 'осемдесет': 80
     };
     for (const [word, val] of Object.entries(irregularTens)) {
       const idx = u.indexOf(word);
@@ -449,7 +478,7 @@ function parseNumberWords(text) {
     result += stoPrefix;
     return result;
   }
-  
+
   return null;
 }
 
@@ -469,7 +498,7 @@ function parseOrdinalFloor(text) {
     'осми': 8, 'osmi': 8,
     'деветти': 9, 'devetti': 9
   };
-  
+
   for (const [word, num] of Object.entries(ordinals)) {
     if (text.includes(word)) return num;
   }
@@ -500,37 +529,59 @@ function extractFirstNumber(text) {
 
 // ========================================
 // HELPER: Count bedrooms by counting room-type word mentions
-// Handles: "една голема спална и една детска" = 2
+// Supports singular AND plural room words:
+// - "spalna/spalni", "detska/detski", "gostinska/gostinski"
+// - Also handles "dve spalni", "tri spalni", "cetiri spalni" etc. via number+room detection
 // ========================================
 function countBedrooms(text) {
   const u = text.toLowerCase();
-  
+
   // 1. Apartment type check
   if (/garsonjera|гарсонера|гарсоњера|garsoniera|гарсониера/i.test(u)) return 0;
   if (/dvosoben|двособен/i.test(u)) return 1;
   if (/trisoben|трисобен|trosoben/i.test(u)) return 2;
   if (/cetvorosoben|четирисобен|cetvortosoben/i.test(u)) return 3;
   if (/petsoben|петсобен/i.test(u)) return 4;
-  
-  // 2. Room-word counting — only for multi-room descriptions
-  // e.g. "една голема спална и една детска" → 2
-  const roomWords = ['spalna', 'спална', 'detska', 'детска', 'gostinska', 'гостинска'];
+
+  // 2. Room-word counting — supports singular AND plural forms
+  // e.g. "spalna", "spalni", "detska", "detski", "gostinska", "gostinski"
+  const roomWords = [
+    'spalna', 'спална', 'spalni', 'спални',
+    'detska', 'детска', 'detski', 'детски',
+    'gostinska', 'гостинска', 'gostinski', 'гостински'
+  ];
   let roomCount = 0;
   for (const word of roomWords) {
     const matches = u.match(new RegExp(word, 'gi'));
     if (matches) roomCount += matches.length;
   }
   if (roomCount >= 2) return roomCount;
-  
-  // 3. Fall back to number extraction (handles "2 spalni", "tri spalni")
+
+  // 3. Check for number-word/phrase + room-word pattern directly
+  // This runs BEFORE parseMacedonianNumber on the full text to avoid
+  // substring-match issues (e.g. "edna" matching before "dve" in
+  // "dve spalni. edna pogolema")
+  // Handles: "dve spalni", "tri spalni", "cetiri spalni", etc.
+  const numberRoomMatch = u.match(/([a-zа-я]+)\s+(spalni|спални|spalna|спална|detski|детски|detska|детска|gostinski|гостински|gostinska|гостинска)/i);
+  if (numberRoomMatch) {
+    const num = parseMacedonianNumber(numberRoomMatch[1]);
+    if (num !== null && num >= 1 && num <= 20) return num;
+    const digitMatch = numberRoomMatch[1].match(/\d+/);
+    if (digitMatch) {
+      const n = parseInt(digitMatch[0]);
+      if (n >= 1 && n <= 20) return n;
+    }
+  }
+
+  // 4. Fall back to number extraction on full text
   const wordNum = parseMacedonianNumber(u);
   if (wordNum !== null && wordNum >= 0 && wordNum <= 10) return wordNum;
   const firstNum = extractFirstNumber(u);
   if (firstNum !== null && firstNum >= 0 && firstNum <= 20) return firstNum;
-  
-  // 4. Single room word with no number (e.g. just "спална")
+
+  // 5. Single room word with no number (e.g. just "спална")
   if (roomCount === 1) return 1;
-  
+
   return null;
 }
 
@@ -558,7 +609,7 @@ function extractPrice(text) {
       'devet': 9
     };
     let total = numMap[millionWordMatch[1].toLowerCase()] * 1000000;
-    
+
     // Check for thousand part
     // Look for: "X iljadi" where X is a number word
     const thousandPatterns = [
@@ -567,7 +618,7 @@ function extractPrice(text) {
       /(eden|edna|edno|dva|dve|tri|cetiri|pet|sest|sedum|osum|devet)илјади/i,
       /(dva|dve|tri|cetiri|pet|sest|sedum|osum|devet)\s*(iljadi|илјади)/i,
     ];
-    
+
     let thousandNum = null;
     for (const pattern of thousandPatterns) {
       const match = u.match(pattern);
@@ -587,7 +638,7 @@ function extractPrice(text) {
         break;
       }
     }
-    
+
     // If no simple number word, try parsing compound number (e.g., "petstodvaeset")
     if (thousandNum === null) {
       const compoundThousand = u.match(/([a-zа-я]+)\s*(iljadi|илјади)/i);
@@ -598,23 +649,42 @@ function extractPrice(text) {
         }
       }
     }
-    
+
     if (thousandNum !== null && thousandNum > 0) {
       total += thousandNum * 1000;
     }
-    
+
     return total;
   }
 
   // ========================================
   // 2. Handle word-based THOUSANDS only
   // e.g., "petstodvaeset iljadi" → 520,000
+  // e.g., "stodvaeset i pet iljadi" → 125,000 (multi-word number phrase)
   // ========================================
-  const thousandWordMatch = u.match(/([a-zа-я]+)\s*(iljadi|илјади)/i);
-  if (thousandWordMatch) {
-    const parsed = parseNumberWords(thousandWordMatch[1]);
-    if (parsed !== null && parsed > 0) {
-      return parsed * 1000;
+  // Find the position of "iljadi"/"илјади", then extract ONLY the words
+  // directly before it — NOT everything from the start of the string!
+  // This avoids capturing leading sentence words like "baram" or "za mene".
+  const iljadiIdx = u.search(/\b(iljadi|илјади)\b/i);
+  if (iljadiIdx !== -1) {
+    const beforeIljadi = u.slice(0, iljadiIdx).trim();
+    const words = beforeIljadi.split(/\s+/);
+    // Try longest suffix first, but skip phrases where the single last word
+    // parses BETTER than the full phrase (indicating noise words before the number).
+    // This correctly handles:
+    // - "stodvaesetipet iljadi" → "stodvaesetipet" = 125 ✓
+    // - "stodvaeset i pet iljadi" → "stodvaeset i pet" = 125 ✓
+    // - "za mene baram stodvaesetipet iljadi" → skip full phrase (25 < 125), use "stodvaesetipet" ✓
+    for (let i = Math.min(words.length, 10); i >= 1; i--) {
+      const phrase = words.slice(-i).join(' ');
+      const parsed = parseNumberWords(phrase);
+      if (parsed !== null && parsed > 0) {
+        // Guard: if the last word alone parses BETTER, the phrase has noise words
+        const lastWord = words[words.length - 1];
+        const singleWord = parseNumberWords(lastWord);
+        if (singleWord !== null && singleWord > parsed) continue;
+        return parsed * 1000;
+      }
     }
   }
 
@@ -742,14 +812,19 @@ function extractPrice(text) {
 }
 
 // ========================================
-// HELPER: Extract terrace number (looks for number near kvadrata or last number)
+// HELPER: Extract terrace number (handles digits AND Macedonian word-based numbers)
+// e.g., "cetiri" → 4, "pet" → 5, "sest" → 6, "sedum" → 7,  "4" → 4, "4m2" → 4
 // ========================================
 function extractTerraceNumber(text) {
   // Look for number before kvadrata/m2
   const sqmMatch = text.match(/(\d{1,4})\s*(kvadrata|kvadrati|m2|м2|kv|кв)/i);
   if (sqmMatch) return parseInt(sqmMatch[1]);
-  
-  // Otherwise, extract all numbers and take the LAST one (total)
+
+  // Try word-based Macedonian number (e.g. "cetiri", "pet", "sest", "sedum", "osum", etc.)
+  const wordNum = parseMacedonianNumber(text);
+  if (wordNum !== null && wordNum >= 1 && wordNum <= 100) return wordNum;
+
+  // Otherwise, extract all digits and take the LAST one
   const numbers = text.match(/\d+/g);
   if (numbers && numbers.length > 0) {
     return parseInt(numbers[numbers.length - 1]);
@@ -763,14 +838,14 @@ function extractTerraceNumber(text) {
 function parseYearBuilt(text) {
   const exactYearMatch = text.match(/\b(19\d{2}|20\d{2})\b/);
   if (exactYearMatch) return parseInt(exactYearMatch[1]);
-  
+
   const twoDigit = text.match(/\b(\d{2})\b/);
   if (twoDigit) {
     const year = parseInt(twoDigit[1]);
     if (year >= 0 && year <= 30) return 2000 + year;
     if (year >= 70 && year <= 99) return 1900 + year;
   }
-  
+
   if (/80ti|80 ти|80-ти|80ти|осумдесетти|80-i|80i|осамдесетти/i.test(text)) return 1985;
   if (/80ta|80 та|80та|1980-ти|1980ти|осумдесетта|80-ta/i.test(text)) return 1980;
   if (/90ti|90 ти|90-ти|90ти|деведесетти|90-i|90i|деведесетти/i.test(text)) return 1995;
@@ -779,12 +854,12 @@ function parseYearBuilt(text) {
   if (/70ta|70 та|70та|седумдесетта/i.test(text)) return 1970;
   if (/2000ti|2000 ти|двеилјадити/i.test(text)) return 2005;
   if (/2000ta|2000 та|двеилјадита/i.test(text)) return 2000;
-  
+
   if (/deveeset|девеесет|90|деведесет/i.test(text)) {
     if (/nekoja|некоја|nekoi|некои|неколку|некое|nekoe/i.test(text)) return 1995;
     return 1990;
   }
-  
+
   if (/osemdeset|осумдесет|80/i.test(text)) {
     if (/nekoja|некоја|nekoi|некои|неколку|некое|nekoe/i.test(text)) return 1985;
     return 1980;
@@ -907,7 +982,7 @@ function parseOrientation(text) {
     .replace(/severz|severz|severj/g, 'sever')
     .replace(/jugoj/g, 'jug')
     .replace(/jugo/g, 'jug');
-  
+
   const orientations = [];
   if (/sever|север|north/i.test(normalized)) orientations.push('sever');
   if (/jug|југ|south/i.test(normalized)) orientations.push('jug');
@@ -927,6 +1002,10 @@ const OBJECTION_RESPONSES = {
   'who_pays': {
     pattern: /кој ве плаќа|koj ve plakja|кој ви плаќа|кој ви дава пари|koj vi plakja|koj vi dava pari|kako vi plakjaat|како ви плаќаат|kako se naplakjate|како се наплаќате|koj ve plakja vas|кој ве плаќа вас|koj plakja|кој плаќа|koj vi plakja za uslugata|кој ви плаќа за услугата|koi vi plakjaat|кои ви плаќаат|koj vi dava pari|кој ви дава пари|koj vi gi dava parite|кој ви ги дава парите|koj ve plakja|кој ве плаќа|koj vi e platnikot|кој ви е платникот|koi se platnicite|кои се платниците|kako vi se naplakja|како ви се наплаќа|kako vi naplakjate|како ви наплаќате|koj vi e klientot|кој ви е клиентот|koi vi se klientite|кои ви се клиентите/i,
     response: 'Разликата меѓу вашата чиста цена и постигнатата купопродажна цена е провизија за агенцијата. Дали ви се разјасни принципот?'
+  },
+  'from_whose_pocket': {
+    pattern: /od koj dzeb|од кој џеб|od kade se parite|од каде се парите|od kade se parite|od koj dzeb se parite|od koj dzeb gi vadite parite|од кој џеб ги вадите парите|koi se parite|чии се парите|cii se parite|чии пари се тоа|cii pari se toa|od kade pa tie pari|од каде па тие пари|od kade vam parite|од каде вам парите|kako vie ke naplakjate|како вие ќе наплаќате|kako vie zemate|како вие земате|koj vi dava provizija|кој ви дава провизија|koj vi gi dava parite za provizija|кој ви ги дава парите за провизија|od kade e provizijata|од каде е провизијата|koj plakja provizija|кој плаќа провизија|kako se naplakjate vie|како се наплаќате вие/i,
+    response: 'Купувачот ја плаќа конечната цена. Вие ја добивате вашата барана цена, а нашата провизија е разликата над неа. Дали ви е појасно?'
   },
   'trust': {
     pattern: /не верувам на агенции|не им верувам|агенциите се лажни|agency scam|ne veruvam na agencii|ne im veruvam|agenciite se lazni|ne veruvam|не верувам|ne sum siguren|не сум сигурен|ne vi veruvam|не ви верувам|ne im veruvam na agenciite|не им верувам на агенциите|ne veruvam na agenciite|не верувам на агенциите|agenciite ne se dobri|агенциите не се добри|agenciite se prevara|агенциите се превара|ne vi veruvam deka|не ви верувам дека|ne vi veruvam na zbor|не ви верувам на збор|ne vi veruvam deka ke|не ви верувам дека ќе|ne veruvam deka|не верувам дека|se shto kazuvate|се што кажувате|ne vi veruvam|не ви верувам|ne imam doverba|не имам доверба|doverba nemam|доверба немам|ne veruvam vo agencii|не верувам во агенции|agenciite se isti|агенциите се исти|site agencii se isti|сите агенции се исти|agenciite ne se dobri|агенциите не се добри|agenciite se lazni|агенциите се лажни|agenciite se prevara|агенциите се превара|ne mi se veruva|не ми се верува|ne veruvam vo toa|не верувам во тоа|ne veruvam deka e taka|не верувам дека е така|ne veruvam deka moze|не верувам дека може|ne veruvam deka ke|не верувам дека ќе|ne veruvam na nikoj|не верувам на никој|ne veruvam na site|не верувам на сите|ne veruvam na vasiot|не верувам на вашиот|ne veruvam na vasi|не верувам на ваши|ne veruvam na ova|не верувам на ова|ne veruvam na takvi|не верувам на такви|ne veruvam na agenciite|не верувам на агенциите|ne veruvam na agencii|не верувам на агенции|agenciite ne mi se dopagaat|агенциите не ми се допаѓаат|agenciite ne se kredibilni|агенциите не се кредибилни|agenciite se nesigurni|агенциите се несигурни/i,
@@ -1070,7 +1149,7 @@ export async function generateResponse(session, userInput) {
     const conv = session.messages?.filter(m => m.text).map(m => `${m.role === 'model' ? 'Ана' : 'Сопственик'}: ${m.text}`).join('\n') || "";
 
     const isRent = session.adMemory?.transactionType === 'rent' || session.collectedData?.transactionType === 'rent';
-    
+
     // ========================================
     // HARDCODED: Availability confirmation (with negative lookahead to prevent false matches)
     // ========================================
@@ -1079,7 +1158,7 @@ export async function generateResponse(session, userInput) {
                             session.adMemory?.propertyType === 'house' ? 'куќата' :
                             session.adMemory?.propertyType === 'land' ? 'плацот' :
                             session.adMemory?.propertyType === 'commercial' ? 'локалот' : 'имотот';
-      
+
       let response;
       if (isRent) {
         const rentResponses = [
@@ -1096,10 +1175,10 @@ export async function generateResponse(session, userInput) {
         ];
         response = saleResponses[Math.floor(Math.random() * saleResponses.length)];
       }
-      
+
       // Store that we already acknowledged availability
       session.availabilityAcknowledged = true;
-      
+
       return {
         text: response,
         type: "NORMAL"
@@ -1109,12 +1188,12 @@ export async function generateResponse(session, userInput) {
     // ========================================
     // HARDCODED: Objection Router (BEFORE anything else)
     // ========================================
-    
+
         // Check for price quotes like "baram 156iljadi", "сакам 120000", "цена 150000"
     const priceQuoteMatch = u.match(/\b(baram|сакам|цена|price|cena)\s*(\d{1,3}(?:[.,]\d{3})*)/i);
     if (priceQuoteMatch) {
       let price = parseInt(priceQuoteMatch[2].replace(/[.,]/g, ''));
-      
+
       // Check if "iljadi" appears anywhere in the message
       if (u.includes('iljadi') || u.includes('илјади')) {
         // If number is less than 1000 and "iljadi" is mentioned, multiply
@@ -1122,16 +1201,16 @@ export async function generateResponse(session, userInput) {
           price = price * 1000;
         }
       }
-      
+
       session.collectedData.mentionedPrice = price;
       session.rejectionCount = 0; // Reset rejection count
-      
+
       return {
         text: `Вие барате ${price.toLocaleString()} евра. Тоа е вашата чиста цена, а ние додаваме над неа. Дали сте расположени да соработуваме?`,
         type: "NORMAL"
       };
     } // ← THIS BRACE WAS MISSING!
-    
+
     // HARDCODED: How does it work?
     if (isAskingHowItWorks(u)) {
       return {
@@ -1194,7 +1273,7 @@ if (/kako bi sorabotuvale|како би соработувале|како да �
           type: "NORMAL"
         };
       }
-      
+
       const objection = matchObjection(u, isRent);
       if (objection) {
         session.commissionExplained = true;
@@ -1247,11 +1326,11 @@ if (/kako bi sorabotuvale|како би соработувале|како да �
     const alreadyInDataCollection = session.collectedData.cooperationAccepted === true;
     let classification = null;
     let phase = "PERSUASION";
-    
+
     if (!alreadyInDataCollection) {
       classification = classifyIntent(u, conv);
       console.log(`[INTENT: ${classification.intent}, CONFIDENCE: ${classification.confidence}]`);
-      
+
       if (classification.intent === "ACCEPTED" && classification.confidence > 0.7) {
         session.collectedData.cooperationAccepted = true;
         session.rejectionCount = 0;
@@ -1263,7 +1342,7 @@ if (/kako bi sorabotuvale|како би соработувале|како да �
       } else if (classification.intent === "REJECTED" && classification.confidence > 0.7) {
         session.rejectionCount = (session.rejectionCount || 0) + 1;
         console.log(`[REJECTION COUNT: ${session.rejectionCount}]`);
-        
+
         if (session.rejectionCount === 1) {
           return {
             text: isRent ? "Агенцијата не зема ништо од вас за услугата. Само ви ги зголемува шансите за побрзо издавање на вашиот имот. Да пробаме?" : "Агенцијата не зема ништо од вас за услугата. Само ви ги зголемува шансите за побрза продажба на вашиот имот. Да пробаме?",
@@ -1281,9 +1360,9 @@ if (/kako bi sorabotuvale|како би соработувале|како да �
           };
         }
       } else if (classification.intent === "INTERESTED" && classification.confidence < 0.3) {
-        return { 
-          text: "Разбирам. Доколку се предомислите, слободно контактирајте нѐ.", 
-          type: "CLOSED" 
+        return {
+          text: "Разбирам. Доколку се предомислите, слободно контактирајте нѐ.",
+          type: "CLOSED"
         };
       } else {
         phase = "PERSUASION";
@@ -1298,11 +1377,11 @@ if (/kako bi sorabotuvale|како би соработувале|како да �
 
     let nextField = null;
     let hasScraperPhotos = false;
-    
+
     if (phase === "DATA_COLLECTION") {
       const known = { ...session.adMemory, ...session.collectedData };
       nextField = getNextMissingField(known);
-      
+
       if (session.adMemory?.photoUrls && session.adMemory.photoUrls.length > 0) {
         hasScraperPhotos = true;
       }
@@ -1311,7 +1390,7 @@ if (/kako bi sorabotuvale|како би соработувале|како да �
     // ========================================
     // MEMORY EXTRACTION (Context-aware)
     // ========================================
-    
+
     // === cleanPrice (Sale) / monthlyRent (Rent) ===
     if (nextField === 'cleanPrice' || nextField === 'monthlyRent') {
       const price = extractPrice(u);
@@ -1355,7 +1434,7 @@ if (/kako bi sorabotuvale|како би соработувале|како да �
         session.collectedData.hasTerrace = false;
         session.collectedData.terraceSqm = 0;
         console.log(`[TERRACE: none]`);
-      } 
+      }
       // Case 2: Has terrace with size — use extractTerraceNumber
       else if (/ima|има|terasa|тераса|terrace|kv|кв|kvadrati|квадрати|m2|m²/i.test(u) || isPositive(u)) {
         const firstNum = extractTerraceNumber(u);
@@ -1441,32 +1520,31 @@ if (/kako bi sorabotuvale|како би соработувале|како да �
       }
     }
 
-    // === heating (FIXED — parno follow-up detection) ===
-    if (nextField === 'heating') {
-      if (/parno|парно/i.test(u) && !/gradsko|граѓско|sopstveno|сопствено|individualno|индивидуално|moe|мое|nase|наше|licno|лично|zgradata|зградата|centralno|централно|na zgradata|на зградата|sopstveno parno|сопствено парно|gradsko parno|градско парно|moe parno|мое парно|nase parno|наше парно|licno parno|лично парно/i.test(u)) {
-        // Just "parno" — ask for follow-up
-        session.collectedData.heating = "parno_unknown";
-        session.collectedData.heatingType = "unknown";
-        session.collectedData.heatingFollowUp = true;
-        return {
-          text: "Какво парно? Градско или сопствено?",
-          type: "QUESTION"
-        };
-      } else if (/gradsko|граѓско|central|centralno|dalinsko|toplovod|beg|gradsko|градско/i.test(u)) {
+    // === heating (FIXED — parno follow-up, B16) ===
+    // When user says bare "parno", DON'T set heating in collectedData.
+    // Instead set only heatingFollowUp flag, so getNextMissingField
+    // still returns 'heating' for the follow-up reply.
+    if (nextField === 'heating' || session.collectedData.heatingFollowUp) {
+      // If we're in follow-up mode, process the specific type from the user
+      if (/gradsko|граѓско|central|centralno|dalinsko|toplovod|beg/i.test(u)) {
         session.collectedData.heating = "district";
         session.collectedData.heatingType = "district";
+        session.collectedData.heatingFollowUp = false;
         console.log(`[HEATING: district]`);
-      } else if (/sopstveno|сопствено|individualno|индивидуално|svoja|своја|kotel|kotlarnica|котларница|сопствена|sopstvena|centralno|централно|moe|мое|nase|наше|licno|лично|zgradata|зградата|na zgradata|на зградата|sopstveno parno|сопствено парно|moe parno|мое парно|nase parno|наше парно|licno parno|лично парно|parno moe|парно мое|parno nase|парно наше|parno licno|парно лично|parno na zgradata|парно на зградата|sopstveno|сопствено|sopstveno parno|сопствено парно/i.test(u)) {
+      } else if (/sopstveno|сопствено|individualno|индивидуално|svoja|своја|kotel|kotlarnica|котларница|сопствена|sopstvena|moe|мое|nase|наше|licno|лично|zgradata|зградата|na zgradata|на зградата|sopstveno parno|сопствено парно|moe parno|мое парно|nase parno|наше парно|licno parno|лично парно|parno moe|парно мое|parno nase|парно наше|parno licno|парно лично|parno na zgradata|парно на зградата|sopstveno|сопствено|sopstveno parno|сопствено парно/i.test(u)) {
         session.collectedData.heating = "central";
         session.collectedData.heatingType = "private_central";
+        session.collectedData.heatingFollowUp = false;
         console.log(`[HEATING: private_central]`);
       } else if (/klima|клима|inverter|инвертер|split|сплит|invertor|инвертор|klima inverter|клима инвертер|термопумпа|toplotna|топлотна|na klima|на клима|se gream|се греам/i.test(u)) {
         session.collectedData.heating = "electric";
         session.collectedData.heatingType = "inverter";
+        session.collectedData.heatingFollowUp = false;
         console.log(`[HEATING: inverter]`);
       } else if (/struja|струја|electric|термо|термосистем|termo|радијатори|radijatori|калорифер|kalorifer/i.test(u)) {
         session.collectedData.heating = "electric";
         session.collectedData.heatingType = "electric";
+        session.collectedData.heatingFollowUp = false;
         console.log(`[HEATING: electric]`);
       } else if (/drva|дрва|peleti|пелети|pellet|пелет|nafta|нафта|loz|лож|огрев|ogrev|jаглен|jaglen|uglen|у́глен/i.test(u)) {
         if (/drva|дрва|peleti|пелети|pellet|пелет|ogrev|огрев/i.test(u)) {
@@ -1476,7 +1554,23 @@ if (/kako bi sorabotuvale|како би соработувале|како да �
           session.collectedData.heating = "oil";
           session.collectedData.heatingType = "oil";
         }
+        session.collectedData.heatingFollowUp = false;
         console.log(`[HEATING: ${session.collectedData.heatingType}]`);
+      } else if (/parno|парно/i.test(u) && !session.collectedData.heatingFollowUp) {
+        // First bare "parno" — ask for follow-up, DON'T set heating yet
+        session.collectedData.heatingFollowUp = true;
+        return {
+          text: "Какво парно? Градско или сопствено?",
+          type: "QUESTION"
+        };
+      }
+      // If still in follow-up mode and no pattern matched — default to unknown
+      // to prevent infinite loop / field-skipping
+      if (session.collectedData.heatingFollowUp) {
+        session.collectedData.heating = "parno_unknown";
+        session.collectedData.heatingType = "unknown";
+        session.collectedData.heatingFollowUp = false;
+        console.log(`[HEATING: parno_unknown (defaulted)]`);
       }
     }
 
@@ -1575,12 +1669,22 @@ if (/kako bi sorabotuvale|како би соработувале|како да �
           session.collectedData.renovationYear = null;
           console.log(`[RENOVATED: true, year unknown]`);
         } else if (/pred|пред|pri|при/i.test(u)) {
+          // Try digit-based relative year first (e.g. "pred 2 godini")
           const years = u.match(/\d+/);
           if (years) {
             const currentYear = new Date().getFullYear();
             session.collectedData.renovated = true;
             session.collectedData.renovationYear = currentYear - parseInt(years[0]);
             console.log(`[RENOVATED: true, year: ${session.collectedData.renovationYear} (calculated)]`);
+          } else {
+            // Try word-based number (e.g. "pred dve godini", "pred tri godini")
+            const wordNum = parseMacedonianNumber(u);
+            if (wordNum !== null && wordNum >= 1 && wordNum <= 100) {
+              const currentYear = new Date().getFullYear();
+              session.collectedData.renovated = true;
+              session.collectedData.renovationYear = currentYear - wordNum;
+              console.log(`[RENOVATED: true, year: ${session.collectedData.renovationYear} (calculated from word)]`);
+            }
           }
         }
       }
@@ -1598,6 +1702,23 @@ if (/kako bi sorabotuvale|како би соработувале|како да �
         if (year !== null) {
           session.collectedData.renovationYear = year;
           console.log(`[RENOVATION YEAR: ${session.collectedData.renovationYear}]`);
+        } else if (/pred|пред|pri|при/i.test(u)) {
+          // Handle relative year: "pred X godini" (X years ago)
+          // Try digit-based first (e.g. "pred 2 godini")
+          const years = u.match(/\d+/);
+          if (years) {
+            const currentYear = new Date().getFullYear();
+            session.collectedData.renovationYear = currentYear - parseInt(years[0]);
+            console.log(`[RENOVATION YEAR: ${session.collectedData.renovationYear} (calculated from digit)]`);
+          } else {
+            // Try word-based number (e.g. "pred dve godini", "pred tri godini", "pred cetiri godini")
+            const wordNum = parseMacedonianNumber(u);
+            if (wordNum !== null && wordNum >= 1 && wordNum <= 100) {
+              const currentYear = new Date().getFullYear();
+              session.collectedData.renovationYear = currentYear - wordNum;
+              console.log(`[RENOVATION YEAR: ${session.collectedData.renovationYear} (calculated from word)]`);
+            }
+          }
         }
       }
     }
@@ -1690,12 +1811,12 @@ if (/kako bi sorabotuvale|како би соработувале|како да �
     if (phase === "DATA_COLLECTION") {
       const known = { ...session.adMemory, ...session.collectedData };
       nextField = getNextMissingField(known);
-      
+
       if (!nextField) {
         const propertyId = getNextPropertyId();
         const phone = session.phone || '';
         const isRent = session.collectedData.transactionType === 'rent';
-        
+
         const propertyData = {
           propertyId: propertyId,
           status: "ACTIVE",
@@ -1707,7 +1828,7 @@ if (/kako bi sorabotuvale|како би соработувале|како да �
           sourcePhotoUrls: session.adMemory?.photoUrls || [],
           ...session.collectedData
         };
-        
+
         if (isRent) {
           const rentDefaults = getRentDefaults();
           if (!propertyData.depositMonths) propertyData.depositMonths = rentDefaults.depositMonths;
@@ -1717,10 +1838,10 @@ if (/kako bi sorabotuvale|како би соработувале|како да �
             propertyData.commission = calculateRentCommission(propertyData.monthlyRent);
           }
         }
-        
+
         createPropertyFolder(propertyId, propertyData);
         saveToCSV(session.collectedData, phone, propertyId);
-        
+
         let closeMessage = "";
         if (session.collectedData.photosStatus === 'VIBER_PENDING') {
           closeMessage = `Тоа беа информациите што ми се потребни.
@@ -1761,20 +1882,20 @@ if (/kako bi sorabotuvale|како би соработувале|како да �
 
 Ви посакувам убав ден.`;
         }
-        
+
         return { text: closeMessage, type: "CLOSED" };
       }
 
             // Count how many fields we already have
-      const fieldCount = Object.keys(session.collectedData).filter(k => 
-        k !== 'cooperationAccepted' && 
-        session.collectedData[k] !== null && 
+      const fieldCount = Object.keys(session.collectedData).filter(k =>
+        k !== 'cooperationAccepted' &&
+        session.collectedData[k] !== null &&
         session.collectedData[k] !== undefined
       ).length;
-      
+
       const fillers = ["Одлично.", "Супер.", "Добро.", "Разбирам.", "Во ред.", "Благодарам."];
       const filler = fillers[Math.floor(Math.random() * fillers.length)];
-      
+
       let prefix = "";
       if (fieldCount <= 1) {
         prefix = "Одлично. Ќе ми бидат потребни неколку информации за внес на вашата недвижност во системот. ";
@@ -1787,29 +1908,29 @@ if (/kako bi sorabotuvale|како би соработувале|како да �
       } else {
         prefix = "Одлично, уште последниве информации и завршуваме. ";
       }
-      
+
       const propertyLabel = known.propertyType === 'apartment' ? 'станот' :
                             known.propertyType === 'house' ? 'куќата' :
                             known.propertyType === 'land' ? 'плацот' : 'имотот';
-      
+
       // Get the question with the correct property type
       const question = getQuestion(nextField, known.propertyType || 'apartment', hasScraperPhotos, session.collectedData.photosStatus);
-      
+
       // If the question is generic, replace with property-specific
       let finalQuestion = question;
       if (question && question.includes('станот')) {
         finalQuestion = question.replace(/станот/g, propertyLabel);
       }
-      
+
       const response = prefix + finalQuestion;
 
       console.log(`[NEXT FIELD: ${nextField}]`);
       console.log(`[QUESTION: ${finalQuestion}]`);
 
-      return { 
-        text: response, 
-        type: "QUESTION", 
-        nextField 
+      return {
+        text: response,
+        type: "QUESTION",
+        nextField
       };
     }
 
@@ -1881,9 +2002,9 @@ ${conv}
 
     const result = await groq.chat.completions.create({
       messages: [
-        { 
-          role: "system", 
-          content: "Ти си Ана. Бидете природни, професионални и кратки на македонски. Секогаш завршувај со прашање за соработка. Не биди наметлива. Користи стандарден македонски книжевен јазик." 
+        {
+          role: "system",
+          content: "Ти си Ана. Бидете природни, професионални и кратки на македонски. Секогаш завршувај со прашање за соработка. Не биди наметлива. Користи стандарден македонски книжевен јазик."
         },
         { role: "user", content: prompt }
       ],
@@ -1896,11 +2017,11 @@ ${conv}
 
     let response = result.choices[0]?.message?.content?.trim() || "Дали сте расположени да соработуваме?";
     response = cleanResponse(response, '').replace(/^Ана:?\s*/i, '').trim();
-    
+
     // Remove duplicate phrases (fix for stutter)
     response = response.replace(/(Дали сте расположени)\s+\1/gi, '$1');
     response = response.replace(/(\.)\s*\1/g, '.');
-    
+
         if (!/да ли|дали|\?/.test(response)) {
       const closings = [
         "Дали сте расположени да соработуваме?",
@@ -1911,7 +2032,7 @@ ${conv}
       ];
       const closing = closings[Math.floor(Math.random() * closings.length)];
       response += " " + closing;
-    }    
+    }
     // Add variety to closing question - ALWAYS add if not already present
     const closingQuestions = [
       "Дали сте расположени да соработуваме?",
@@ -1921,7 +2042,7 @@ ${conv}
       "Дали да продолжиме?",
       "Што мислите?"
     ];
-    
+
     if (!/да ли|дали|\?/.test(response)) {
       const closing = closingQuestions[Math.floor(Math.random() * closingQuestions.length)];
       response += " " + closing;
@@ -1943,7 +2064,7 @@ ${conv}
       response = response.replace(/продажб|продаде|продава|prodazb|prodade|prodava/gi, 'издавањ');
     }
     response = response.replace(/\s+/g, ' ').trim();
-    
+
     return { text: response, type: "NORMAL" };
   } catch (e) {
     console.error("ERR:", e.message);

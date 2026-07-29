@@ -126,7 +126,11 @@ function parseNumberWords(text) {
     const irregularTens = {
       'triest': 30, 'триест': 30,
       'pedeset': 50, 'педесет': 50,
-      'seeset': 60, 'шеесет': 60
+      'seeset': 60, 'шеесет': 60,
+      'stopeeset': 90, 'стопеесет': 90,
+      'deveeset': 90, 'девеесет': 90,
+      'osumdeset': 80, 'осумдесет': 80,
+      'osemdeset': 80, 'осемдесет': 80
     };
     for (const [word, val] of Object.entries(irregularTens)) {
       const idx = u.indexOf(word);
@@ -224,11 +228,22 @@ function extractPrice(text) {
     return total;
   }
 
-  // 2. Handle word-based THOUSANDS only
-  const thousandWordMatch = u.match(/([a-zа-я]+)\s*(iljadi|илјади)/i);
-  if (thousandWordMatch) {
-    const parsed = parseNumberWords(thousandWordMatch[1]);
-    if (parsed !== null && parsed > 0) return parsed * 1000;
+  // 2. Handle word-based THOUSANDS only (B13: capture multi-word number phrases)
+  const iljadiIdx = u.search(/\b(iljadi|илјади)\b/i);
+  if (iljadiIdx !== -1) {
+    const beforeIljadi = u.slice(0, iljadiIdx).trim();
+    const words = beforeIljadi.split(/\s+/);
+    for (let i = Math.min(words.length, 10); i >= 1; i--) {
+      const phrase = words.slice(-i).join(' ');
+      const parsed = parseNumberWords(phrase);
+      if (parsed !== null && parsed > 0) {
+        // Guard: skip if single last word parses better (noise words before number)
+        const lastWord = words[words.length - 1];
+        const singleWord = parseNumberWords(lastWord);
+        if (singleWord !== null && singleWord > parsed) continue;
+        return parsed * 1000;
+      }
+    }
   }
 
   // 3. Handle digit THOUSANDS
@@ -436,47 +451,69 @@ function extractFirstNumber(text) {
 }
 
 // ============================================================
-// FIXTURE: countBedrooms
+// FIXTURE: countBedrooms (B14 — plural + number+room detection)
 // ============================================================
 function countBedrooms(text) {
   const u = text.toLowerCase();
-  
+
   // 1. Apartment type check
   if (/garsonjera|гарсонера|гарсоњера|garsoniera|гарсониера/i.test(u)) return 0;
   if (/dvosoben|двособен/i.test(u)) return 1;
   if (/trisoben|трисобен|trosoben/i.test(u)) return 2;
   if (/cetvorosoben|четирисобен|cetvortosoben/i.test(u)) return 3;
   if (/petsoben|петсобен/i.test(u)) return 4;
-  
-  // 2. Room-word counting — only for multi-room descriptions
-  // e.g. "една голема спална и една детска" → 2
-  const roomWords = ['spalna', 'спална', 'detska', 'детска', 'gostinska', 'гостинска'];
+
+  // 2. Room-word counting — supports singular AND plural forms
+  const roomWords = [
+    'spalna', 'спална', 'spalni', 'спални',
+    'detska', 'детска', 'detski', 'детски',
+    'gostinska', 'гостинска', 'gostinski', 'гостински'
+  ];
   let roomCount = 0;
   for (const word of roomWords) {
     const matches = u.match(new RegExp(word, 'gi'));
     if (matches) roomCount += matches.length;
   }
   if (roomCount >= 2) return roomCount;
-  
-  // 3. Fall back to number extraction (handles "2 spalni", "tri spalni")
+
+  // 3. Check for number-word + room-word pattern directly (B14)
+  // Runs BEFORE parseMacedonianNumber to avoid substring-order issues
+  const numberRoomMatch = u.match(/([a-zа-я]+)\s+(spalni|спални|spalna|спална|detski|детски|detska|детска|gostinski|гостински|gostinska|гостинска)/i);
+  if (numberRoomMatch) {
+    const num = parseMacedonianNumber(numberRoomMatch[1]);
+    if (num !== null && num >= 1 && num <= 20) return num;
+    const digitMatch = numberRoomMatch[1].match(/\d+/);
+    if (digitMatch) {
+      const n = parseInt(digitMatch[0]);
+      if (n >= 1 && n <= 20) return n;
+    }
+  }
+
+  // 4. Fall back to number extraction on full text
   const wordNum = parseMacedonianNumber(u);
   if (wordNum !== null && wordNum >= 0 && wordNum <= 10) return wordNum;
   const firstNum = extractFirstNumber(u);
   if (firstNum !== null) return firstNum;
-  
-  // 4. Single room word with no number
+
+  // 5. Single room word with no number
   if (roomCount === 1) return 1;
-  
+
   return null;
 }
 
 // ============================================================
-// FIXTURE: extractTerraceNumber
+// FIXTURE: extractTerraceNumber (B15 — handles word-based numbers too)
 // ============================================================
 function extractTerraceNumber(text) {
+  // Look for number before kvadrata/m2
   const sqmMatch = text.match(/(\d{1,4})\s*(kvadrata|kvadrati|m2|м2|kv|кв)/i);
   if (sqmMatch) return parseInt(sqmMatch[1]);
 
+  // Try word-based Macedonian number (B15 — all words, not just cetiri)
+  const wordNum = parseMacedonianNumber(text);
+  if (wordNum !== null && wordNum >= 1 && wordNum <= 100) return wordNum;
+
+  // Otherwise, extract all digits and take the LAST one
   const numbers = text.match(/\d+/g);
   if (numbers && numbers.length > 0) return parseInt(numbers[numbers.length - 1]);
   return null;
@@ -507,6 +544,10 @@ const OBJECTION_RESPONSES = {
   'who_pays': {
     pattern: /кој ве плаќа|koj ve plakja|кој ви плаќа|кој ви дава пари|koj vi plakja|koj vi dava pari|kako vi plakjaat|како ви плаќаат|kako se naplakjate|како се наплаќате|koj ve plakja vas|кој ве плаќа вас|koj plakja|кој плаќа|koj vi plakja za uslugata|кој ви плаќа за услугата|koi vi plakjaat|кои ви плаќаат|koj vi dava pari|кој ви дава пари|koj vi gi dava parite|кој ви ги дава парите|koj ve plakja|кој ве плаќа|koj vi e platnikot|кој ви е платникот|koi se platnicite|кои се платниците|kako vi se naplakja|како ви се наплаќа|kako vi naplakjate|како ви наплаќате|koj vi e klientot|кој ви е клиентот|koi vi se klientite|кои ви се клиентите/i,
     response: 'Разликата меѓу вашата чиста цена и постигнатата купопродажна цена е провизија за агенцијата. Дали ви се разјасни принципот?'
+  },
+  'from_whose_pocket': {
+    pattern: /od koj dzeb|од кој џеб|od kade se parite|од каде се парите|od kade se parite|od koj dzeb se parite|od koj dzeb gi vadite parite|од кој џеб ги вадите парите|koi se parite|чии се парите|cii se parite|чии пари се тоа|cii pari se toa|od kade pa tie pari|од каде па тие пари|od kade vam parite|од каде вам парите|kako vie ke naplakjate|како вие ќе наплаќате|kako vie zemate|како вие земате|koj vi dava provizija|кој ви дава провизија|koj vi gi dava parite za provizija|кој ви ги дава парите за провизија|od kade e provizijata|од каде е провизијата|koj plakja provizija|кој плаќа провизија|kako se naplakjate vie|како се наплаќате вие/i,
+    response: 'Купувачот ја плаќа конечната цена. Вие ја добивате вашата барана цена, а нашата провизија е разликата над неа. Дали ви е појасно?'
   },
   'trust': {
     pattern: /не верувам на агенции|не им верувам|агенциите се лажни|agency scam|ne veruvam na agencii|ne im veruvam|agenciite se lazni|ne veruvam|не верувам|ne sum siguren|не сум сигурен|ne vi veruvam|не ви верувам|ne im veruvam na agenciite|не им верувам на агенциите|ne veruvam na agenciite|не верувам на агенциите/i,
@@ -551,6 +592,15 @@ function matchObjection(text) {
 function classifyIntent(userInput, conversation) {
   const u = userInput.toLowerCase().trim();
 
+  // 0. PRICE QUOTE GUARD — "jas baram 156 iljadi", "sakam 98000", "cena 120 iljadi"
+  // These are NOT rejections — they're stating a desired net price (buying signal!)
+  const priceQuoteGuard =
+    /(baram|сакам|sakam|цена|cena|price)\s*(\d{1,3}(\.\d{3})*\s*(iljadi|илјади)?)/i.test(u) ||
+    /(\d{1,3}\s*(iljadi|илјади).*za\s*(mene|мене))/i.test(u);
+  if (priceQuoteGuard) {
+    return { intent: "INTERESTED", confidence: 0.8, reason: "net price quote" };
+  }
+
   // 1. REJECTED — with Cyrillic support
   if (/^(ne|не)$/i.test(u)) return { intent: "REJECTED", confidence: 0.95, reason: "standalone ne" };
   if (/(ne|не)\s*sum\s*(zainteresiran|заинтересиран)/i.test(u)) return { intent: "REJECTED", confidence: 0.95, reason: "ne sum zainteresiran" };
@@ -567,6 +617,11 @@ function classifyIntent(userInput, conversation) {
 
   // 2. ACCEPTED — with Cyrillic support
   if (/^(da|да)$/i.test(u)) return { intent: "ACCEPTED", confidence: 0.95, reason: "standalone da" };
+  // COMPREHENSIVE GUARD: affirmative start + objection/concern/question → INTERESTED (not ACCEPTED)
+  if (/^(da|да|ajde|ајде|moze|може|dobro|добро)([,.\s]|$)/i.test(u) &&
+      /(\?|a\s+(sto|што|kako|како|dali|дали|koj|кој|koga|кога|kolku|колку|zosto|зошто|kakov|каков|kakva|каква|kakvo|какво|kakvi|какви)|ama|ама|sepak|сепак|mislam|мислам|dali|дали|mozebi|можеби|druga|друга|vekje|веќе|ke vidime|ќе видиме|da vidime|да видиме|ne sum|не сум|ne znam|не знам|ke razmislam|ќе размислам|razmisluvam|размислувам|ne rabotel|не работел|nemam iskustvo|немам искуство|ne sum siguren|не сум сигурен|ke prasam|ќе прашам|ke se javam|ќе се јавам|da se javam|да се јавам|da prasam|да прашам|ne sum rabotil|не сум работел|ne rabotila|не работела|nemam raboteno|немам работено|imam\s+dogovor|имам\s+договор|sto\s+ke|што\s+ќе|kako\s+ke|како\s+ќе|se\s+mislam|се\s+мислам|treba\s+da|треба\s+da|prvo|прво|samo\s+|само\s+)/i.test(u)) {
+    return { intent: "INTERESTED", confidence: 0.7, reason: "affirmative start + hesitation" };
+  }
   if (/^(da|да|ajde|ајде|moze|може|dobro|добро)([,.\s]|$)/i.test(u)) return { intent: "ACCEPTED", confidence: 0.9, reason: "affirmative start" };
   if (/(ajde|ајде)/i.test(u) && !/(ne|не)/i.test(u)) return { intent: "ACCEPTED", confidence: 0.9, reason: "ajde" };
   if (/(probame|пробаме)/i.test(u)) return { intent: "ACCEPTED", confidence: 0.9, reason: "probame" };
@@ -594,6 +649,7 @@ function classifyIntent(userInput, conversation) {
   if (/(mozebi|можеби)/i.test(u)) return { intent: "INTERESTED", confidence: 0.7, reason: "mozebi" };
   if (/(razmisluvam|размислувам|ke razmislam|ќе размислам)/i.test(u)) return { intent: "INTERESTED", confidence: 0.7, reason: "razmisluvam" };
   if (/(ne|не)\s*sum\s*(siguren|сигурен)/i.test(u)) return { intent: "INTERESTED", confidence: 0.7, reason: "ne sum siguren" };
+  if (/(sepak|сепак)/i.test(u) && !/(ama|ама)/i.test(u)) return { intent: "INTERESTED", confidence: 0.6, reason: "sepak" };
   if (/(da|да)\s*(vidime|видиме)/i.test(u)) return { intent: "INTERESTED", confidence: 0.7, reason: "da vidime" };
   if (/(interesno|интересно)/i.test(u)) return { intent: "INTERESTED", confidence: 0.75, reason: "interesno" };
   if (/(moze|може)\s*da\s*(probame|пробаме)/i.test(u)) return { intent: "INTERESTED", confidence: 0.7, reason: "moze da probame" };
@@ -850,6 +906,47 @@ assertIntentEqual(classifyIntent("ne veruvam na agencii"), "INTERESTED", 0.5, "'
 assertIntentEqual(classifyIntent("kako vie bi go prodale"), "INTERESTED", 0.7, "'kako vie bi go prodale' → INTERESTED");
 assertIntentEqual(classifyIntent("daj primer"), "INTERESTED", 0.7, "'daj primer' → INTERESTED");
 
+// HESITATION GUARD — affirmative start + hesitation should be INTERESTED, not ACCEPTED
+assertIntentEqual(classifyIntent("da da, jasnomi e ama sepak se mislam"), "INTERESTED", 0.6, "H1: 'da da, ama sepak se mislam' → INTERESTED");
+assertIntentEqual(classifyIntent("da ama ne sum siguren"), "INTERESTED", 0.6, "H2: 'da ama ne sum siguren' → INTERESTED");
+assertIntentEqual(classifyIntent("da sepak ne znam"), "INTERESTED", 0.6, "H3: 'da sepak ne znam' → INTERESTED");
+assertIntentEqual(classifyIntent("da mozebi ke probame"), "INTERESTED", 0.6, "H4: 'da mozebi ke probame' → INTERESTED");
+assertIntentEqual(classifyIntent("ajde ama sepak"), "INTERESTED", 0.6, "H5: 'ajde ama sepak' → INTERESTED");
+assertIntentEqual(classifyIntent("da ke vidime"), "INTERESTED", 0.6, "H6: 'da ke vidime' → INTERESTED");
+assertIntentEqual(classifyIntent("da ne sum rabotel so agencii"), "INTERESTED", 0.6, "H7: 'da ne sum rabotel so agencii' → INTERESTED");
+assertIntentEqual(classifyIntent("dobro ama sepak se mislam"), "INTERESTED", 0.6, "H8: 'dobro ama sepak se mislam' → INTERESTED");
+assertIntentEqual(classifyIntent("moze ama sepak"), "INTERESTED", 0.6, "H9: 'moze ama sepak' → INTERESTED");
+assertIntentEqual(classifyIntent("da da, ke razmislam uste malce"), "INTERESTED", 0.6, "H10: 'da da, ke razmislam' → INTERESTED");
+
+// Separately: standalone "sepak" should be INTERESTED (not ignored)
+assertIntentEqual(classifyIntent("sepak ne sum siguren"), "INTERESTED", 0.5, "H11: 'sepak ne sum siguren' → INTERESTED");
+
+// Confirm pure affirmatives still work correctly (no regression)
+assertIntentEqual(classifyIntent("da"), "ACCEPTED", 0.9, "REGRESSION: 'da' still → ACCEPTED");
+assertIntentEqual(classifyIntent("da probame"), "ACCEPTED", 0.8, "REGRESSION: 'da probame' → ACCEPTED");
+assertIntentEqual(classifyIntent("da sorabotuvame"), "ACCEPTED", 0.8, "REGRESSION: 'da sorabotuvame' → ACCEPTED");
+assertIntentEqual(classifyIntent("ajde ajde"), "ACCEPTED", 0.8, "REGRESSION: 'ajde ajde' → ACCEPTED");  assertIntentEqual(classifyIntent("dobro. javete se"), "ACCEPTED", 0.8, "REGRESSION: 'dobro. javete se' → ACCEPTED");
+
+// NEW OBJECTION PATTERNS — expanded guard catches questions, other agencies, conditions, etc.
+assertIntentEqual(classifyIntent("dobro zvuci. a sto ke pravime so toa sto jas vekje sorabotuvam so edna druga agencija?"), "INTERESTED", 0.6, "H12: 'dobro zvuci. a sto ke pravime so druga agencija?' → INTERESTED");
+assertIntentEqual(classifyIntent("da, a kako ke funkcionira toa?"), "INTERESTED", 0.6, "H13: 'da, a kako ke funkcionira?' → INTERESTED");
+assertIntentEqual(classifyIntent("dobro, imam dogovor so druga agencija"), "INTERESTED", 0.6, "H14: 'dobro, imam dogovor so druga agencija' → INTERESTED");
+assertIntentEqual(classifyIntent("da, vekje sorabotuvam so edna agencija"), "INTERESTED", 0.6, "H15: 'da, vekje sorabotuvam so agencija' → INTERESTED");
+assertIntentEqual(classifyIntent("dobro, sto ke pravime so garazata?"), "INTERESTED", 0.6, "H16: 'dobro, sto ke pravime?' → INTERESTED");
+assertIntentEqual(classifyIntent("da, treba da prasam uste nesto"), "INTERESTED", 0.6, "H17: 'da, treba da prasam uste nesto' → INTERESTED");
+assertIntentEqual(classifyIntent("moze, samo da proveram nesto"), "INTERESTED", 0.6, "H18: 'moze, samo da proveram nesto' → INTERESTED");
+assertIntentEqual(classifyIntent("dobro, prvo sakam da prasam nesto"), "INTERESTED", 0.6, "H19: 'dobro, prvo sakam da prasam' → INTERESTED");
+assertIntentEqual(classifyIntent("dobro zvuci. vekje sorabotuvam so druga agencija"), "INTERESTED", 0.6, "H20: 'dobro zvuci. vekje sorabotuvam so druga' → INTERESTED");
+assertIntentEqual(classifyIntent("ajde, ama sepak se mislam deka"), "INTERESTED", 0.6, "H21: 'ajde, ama sepak se mislam' → INTERESTED");
+assertIntentEqual(classifyIntent("da, a dali moze da se dogovorime?"), "INTERESTED", 0.6, "H22: 'da, a dali moze da se dogovorime?' → INTERESTED");
+assertIntentEqual(classifyIntent("dobro, kako ke odi celiot proces?"), "INTERESTED", 0.6, "H23: 'dobro, kako ke odi procesot?' → INTERESTED");
+assertIntentEqual(classifyIntent("da, sepak se mislam uste"), "INTERESTED", 0.6, "H24: 'da, sepak se mislam' → INTERESTED");
+
+// Confirm pure affirmatives still work after new patterns (no regression)
+assertIntentEqual(classifyIntent("da"), "ACCEPTED", 0.9, "REGRESSION H: 'da' still → ACCEPTED");
+assertIntentEqual(classifyIntent("dobro"), "ACCEPTED", 0.8, "REGRESSION H: 'dobro' still → ACCEPTED");
+assertIntentEqual(classifyIntent("da probame"), "ACCEPTED", 0.8, "REGRESSION H: 'da probame' → ACCEPTED");
+
 // Cyrillic variants (B12 critical — patterns must support both scripts)
 assertIntentEqual(classifyIntent("ne sakam"), "REJECTED", 0.9, "B12 Cyrillic: 'ne sakam' (Latin) → REJECTED");
 assertIntentEqual(classifyIntent("не сакам"), "REJECTED", 0.9, "B12 Cyrillic: 'не сакам' (Cyrillic) → REJECTED");
@@ -928,6 +1025,134 @@ assert(or2?.includes('istok'), "'severistok' contains 'istok'");
 const or3 = parseOrientation("jug");
 assert(or3 !== null, "'jug' → parsed");
 assert(or3?.includes('jug'), "'jug' contains 'jug'");
+
+// ============================================================
+// TEST GROUP: B13 — Multi-word price thousand parsing
+// ============================================================
+console.log(`\n📦 GROUP: B13 — Multi-word price thousand parsing`);
+
+// The core bug: "stodvaeset i pet iljadi" = 125000
+assertEqual(extractPrice("stodvaeset i pet iljadi"), 125000, "B13: 'stodvaeset i pet iljadi' → 125000");
+
+// All variants of number phrases before iljadi
+assertEqual(extractPrice("sto iljadi evra"), 100000, "B13: 'sto iljadi evra' → 100000");
+assertEqual(extractPrice("dvesto iljadi"), 200000, "B13: 'dvesto iljadi' → 200000");
+assertEqual(extractPrice("petstodvaeset iljadi"), 520000, "B13: 'petstodvaeset iljadi' → 520000");
+assertEqual(extractPrice("dvaeset iljadi"), 20000, "B13: 'dvaeset iljadi' → 20000");
+assertEqual(extractPrice("triest iljadi"), 30000, "B13: 'triest iljadi' → 30000");
+assertEqual(extractPrice("pedeset iljadi"), 50000, "B13: 'pedeset iljadi' → 50000");
+assertEqual(extractPrice("seeset iljadi"), 60000, "B13: 'seeset iljadi' → 60000");
+
+// Multi-word with "i": stodvaeset i X iljadi
+assertEqual(extractPrice("stodvaeset i pet iljadi"), 125000, "B13: 'stodvaeset i pet iljadi' → 125000");
+assertEqual(extractPrice("stodvaeset i tri iljadi"), 123000, "B13: 'stodvaeset i tri iljadi' → 123000");
+assertEqual(extractPrice("stotriest i cetiri iljadi"), 134000, "B13: 'stotriest i cetiri iljadi' → 134000");
+
+// Regular single-word before iljadi (should still work)
+assertEqual(extractPrice("pet iljadi"), 5000, "B13: 'pet iljadi' → 5000");
+assertEqual(extractPrice("deset iljadi"), 10000, "B13: 'deset iljadi' → 10000");
+
+// ============================================================
+// TEST GROUP: B14 — Bedroom count variants
+// ============================================================
+console.log(`\n📦 GROUP: B14 — Bedroom count with plural + number+room`);
+
+// Core bug: "dve spalni. edna pogolema drugata mala" = 2
+assertEqual(countBedrooms("dve spalni. edna pogolema drugata mala"), 2, "B14: 'dve spalni. edna pogolema drugata mala' → 2");
+
+// All number words + plural spalni
+assertEqual(countBedrooms("edna spalni"), 1, "B14: 'edna spalni' → 1");
+assertEqual(countBedrooms("dve spalni"), 2, "B14: 'dve spalni' → 2");
+assertEqual(countBedrooms("tri spalni"), 3, "B14: 'tri spalni' → 3");
+assertEqual(countBedrooms("cetiri spalni"), 4, "B14: 'cetiri spalni' → 4");
+assertEqual(countBedrooms("pet spalni"), 5, "B14: 'pet spalni' → 5");
+assertEqual(countBedrooms("sest spalni"), 6, "B14: 'sest spalni' → 6");
+assertEqual(countBedrooms("sedum spalni"), 7, "B14: 'sedum spalni' → 7");
+assertEqual(countBedrooms("osum spalni"), 8, "B14: 'osum spalni' → 8");
+
+// Plural room words should be matched
+assertEqual(countBedrooms("dve detski"), 2, "B14: 'dve detski' → 2");
+assertEqual(countBedrooms("edna gostinska i edna spalna"), 2, "B14: 'edna gostinska i edna spalna' → 2");
+assertEqual(countBedrooms("dve spalni i edna detska"), 2, "B14: 'dve spalni i edna detska' → 2 (roomCount>=2)");
+
+// ============================================================
+// TEST GROUP: B15 — Terrace word-based numbers
+// ============================================================
+console.log(`\n📦 GROUP: B15 — Terrace word-based numbers`);
+
+// Core bug: "cetiri" (word-based) should work
+assertEqual(extractTerraceNumber("cetiri"), 4, "B15: 'cetiri' → 4");
+
+// All Macedonian number words for terrace size
+assertEqual(extractTerraceNumber("edna"), 1, "B15: 'edna' → 1");
+assertEqual(extractTerraceNumber("dve"), 2, "B15: 'dve' → 2");
+assertEqual(extractTerraceNumber("tri"), 3, "B15: 'tri' → 3");
+assertEqual(extractTerraceNumber("cetiri"), 4, "B15: 'cetiri' → 4");
+assertEqual(extractTerraceNumber("pet"), 5, "B15: 'pet' → 5");
+assertEqual(extractTerraceNumber("sest"), 6, "B15: 'sest' → 6");
+assertEqual(extractTerraceNumber("sedum"), 7, "B15: 'sedum' → 7");
+assertEqual(extractTerraceNumber("osum"), 8, "B15: 'osum' → 8");
+assertEqual(extractTerraceNumber("devet"), 9, "B15: 'devet' → 9");
+assertEqual(extractTerraceNumber("deset"), 10, "B15: 'deset' → 10");
+
+// Cyrillic variants
+assertEqual(extractTerraceNumber("четири"), 4, "B15: 'четири' → 4 (Cyrillic)");
+assertEqual(extractTerraceNumber("пет"), 5, "B15: 'пет' → 5 (Cyrillic)");
+
+// Digit variants still work
+assertEqual(extractTerraceNumber("4"), 4, "B15: '4' → 4");
+assertEqual(extractTerraceNumber("5 m2"), 5, "B15: '5 m2' → 5");
+assertEqual(extractTerraceNumber("nema"), null, "B15: 'nema' → null");
+
+// ============================================================
+// TEST GROUP: B16 — Heating follow-up flag logic (conceptual verification)
+// ============================================================
+console.log(`\n📦 GROUP: B16 — Heating type detection patterns`);
+
+// Verify that the regex patterns match the expected heating types
+function testHeatingPattern(u) {
+  if (/gradsko|граѓско|central|centralno|dalinsko|toplovod|beg/i.test(u)) return "district";
+  if (/sopstveno|сопствено|individualno|индивидуално|svoja|своја|kotel|kotlarnica|котларница|moe|мое|nase|наше|licno|лично|zgradata|зградата/i.test(u)) return "private_central";
+  if (/klima|клима|inverter|инвертер|split|сплит/i.test(u)) return "inverter";
+  if (/struja|струја|electric/i.test(u)) return "electric";
+  if (/parno|парно/i.test(u)) return "parno_bare";
+  return null;
+}
+
+assertEqual(testHeatingPattern("gradsko"), "district", "B16: 'gradsko' → district");
+assertEqual(testHeatingPattern("centralno"), "district", "B16: 'centralno' → district");
+assertEqual(testHeatingPattern("central"), "district", "B16: 'central' → district");
+assertEqual(testHeatingPattern("dalinsko"), "district", "B16: 'dalinsko' → district");
+assertEqual(testHeatingPattern("sopstveno"), "private_central", "B16: 'sopstveno' → private_central");
+assertEqual(testHeatingPattern("individualno"), "private_central", "B16: 'individualno' → private_central");
+assertEqual(testHeatingPattern("moe parno"), "private_central", "B16: 'moe parno' → private_central");
+assertEqual(testHeatingPattern("klima"), "inverter", "B16: 'klima' → inverter");
+assertEqual(testHeatingPattern("struja"), "electric", "B16: 'struja' → electric");
+assertEqual(testHeatingPattern("parno"), "parno_bare", "B16: bare 'parno' → triggers follow-up");
+
+// ============================================================
+// TEST GROUP: B17 — Renovation year word-based relative years
+// ============================================================
+console.log(`\n📦 GROUP: B17 — Word-based relative years (pred X godini)`);
+
+// Verify parseMacedonianNumber works for all relative year number words
+assertEqual(parseMacedonianNumber("pred edna godina"), 1, "B17: 'edna' found in 'pred edna godina'");
+assertEqual(parseMacedonianNumber("pred dve godini"), 2, "B17: 'dve' found in 'pred dve godini'");
+assertEqual(parseMacedonianNumber("pred tri godini"), 3, "B17: 'tri' found in 'pred tri godini'");
+assertEqual(parseMacedonianNumber("pred cetiri godini"), 4, "B17: 'cetiri' found in 'pred cetiri godini'");
+assertEqual(parseMacedonianNumber("pred pet godini"), 5, "B17: 'pet' found in 'pred pet godini'");
+assertEqual(parseMacedonianNumber("pred sest godini"), 6, "B17: 'sest' found in 'pred sest godini'");
+assertEqual(parseMacedonianNumber("pred sedum godini"), 7, "B17: 'sedum' found in 'pred sedum godini'");
+assertEqual(parseMacedonianNumber("pred osum godini"), 8, "B17: 'osum' found in 'pred osum godini'");
+assertEqual(parseMacedonianNumber("pred devet godini"), 9, "B17: 'devet' found in 'pred devet godini'");
+assertEqual(parseMacedonianNumber("pred deset godini"), 10, "B17: 'deset' found in 'pred deset godini'");
+
+// Cyrillic variants
+assertEqual(parseMacedonianNumber("пред две години"), 2, "B17: 'две' found in Cyrillic");
+assertEqual(parseMacedonianNumber("пред три години"), 3, "B17: 'три' found in Cyrillic");
+assertEqual(parseMacedonianNumber("пред четири години"), 4, "B17: 'четири' found in Cyrillic");
+
+// Digits are handled by a separate code path (not parseMacedonianNumber)
 
 // ============================================================
 // SUMMARY
