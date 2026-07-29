@@ -1540,12 +1540,12 @@ if (/kako bi sorabotuvale|како би соработувале|како да �
     // still returns 'heating' for the follow-up reply.
     if (nextField === 'heating' || session.collectedData.heatingFollowUp) {
       // If we're in follow-up mode, process the specific type from the user
-      if (/gradsko|граѓско|central|centralno|dalinsko|toplovod|beg/i.test(u)) {
+      if (/gradsko|граѓско|dalinsko|toplovod|beg/i.test(u)) {
         session.collectedData.heating = "district";
         session.collectedData.heatingType = "district";
         session.collectedData.heatingFollowUp = false;
         console.log(`[HEATING: district]`);
-      } else if (/sopstveno|сопствено|individualno|индивидуално|svoja|своја|kotel|kotlarnica|котларница|сопствена|sopstvena|moe|мое|nase|наше|licno|лично|zgradata|зградата|na zgradata|на зградата|sopstveno parno|сопствено парно|moe parno|мое парно|nase parno|наше парно|licno parno|лично парно|parno moe|парно мое|parno nase|парно наше|parno licno|парно лично|parno na zgradata|парно на зградата|sopstveno|сопствено|sopstveno parno|сопствено парно/i.test(u)) {
+      } else if (/centralno|централно|central|sopstveno|сопствено|individualno|индивидуално|svoja|своја|kotel|kotlarnica|котларница|сопствена|sopstvena|moe|мое|nase|наше|licno|лично|zgradata|зградата|na zgradata|на зградата|sopstveno parno|сопствено парно|moe parno|мое парно|nase parno|наше парно|licno parno|лично парно|parno moe|парно мое|parno nase|парно наше|parno licno|парно лично|parno na zgradata|парно на зградата|sopstveno|сопствено|sopstveno parno|сопствено парно/i.test(u)) {
         session.collectedData.heating = "central";
         session.collectedData.heatingType = "private_central";
         session.collectedData.heatingFollowUp = false;
@@ -1555,7 +1555,7 @@ if (/kako bi sorabotuvale|како би соработувале|како да �
         session.collectedData.heatingType = "inverter";
         session.collectedData.heatingFollowUp = false;
         console.log(`[HEATING: inverter]`);
-      } else if (/struja|струја|electric|термо|термосистем|termo|радијатори|radijatori|калорифер|kalorifer/i.test(u)) {
+      } else if (/struja|струја|electric|термо|термосистем|termo|radijatori|радијатори|kalorifer|калорифер/i.test(u)) {
         session.collectedData.heating = "electric";
         session.collectedData.heatingType = "electric";
         session.collectedData.heatingFollowUp = false;

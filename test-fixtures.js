@@ -1125,8 +1125,8 @@ console.log(`\n📦 GROUP: B16 — Heating type detection patterns`);
 
 // Verify that the regex patterns match the expected heating types
 function testHeatingPattern(u) {
-  if (/gradsko|граѓско|central|centralno|dalinsko|toplovod|beg/i.test(u)) return "district";
-  if (/sopstveno|сопствено|individualno|индивидуално|svoja|своја|kotel|kotlarnica|котларница|moe|мое|nase|наше|licno|лично|zgradata|зградата/i.test(u)) return "private_central";
+  if (/gradsko|граѓско|dalinsko|toplovod|beg/i.test(u)) return "district";
+  if (/centralno|централно|central|sopstveno|сопствено|individualno|индивидуално|svoja|своја|kotel|kotlarnica|котларница|moe|мое|nase|наше|licno|лично|zgradata|зградата/i.test(u)) return "private_central";
   if (/klima|клима|inverter|инвертер|split|сплит/i.test(u)) return "inverter";
   if (/struja|струја|electric/i.test(u)) return "electric";
   if (/parno|парно/i.test(u)) return "parno_bare";
@@ -1134,8 +1134,8 @@ function testHeatingPattern(u) {
 }
 
 assertEqual(testHeatingPattern("gradsko"), "district", "B16: 'gradsko' → district");
-assertEqual(testHeatingPattern("centralno"), "district", "B16: 'centralno' → district");
-assertEqual(testHeatingPattern("central"), "district", "B16: 'central' → district");
+assertEqual(testHeatingPattern("centralno"), "private_central", "B16: 'centralno' → private_central");
+assertEqual(testHeatingPattern("central"), "private_central", "B16: 'central' → private_central");
 assertEqual(testHeatingPattern("dalinsko"), "district", "B16: 'dalinsko' → district");
 assertEqual(testHeatingPattern("sopstveno"), "private_central", "B16: 'sopstveno' → private_central");
 assertEqual(testHeatingPattern("individualno"), "private_central", "B16: 'individualno' → private_central");
