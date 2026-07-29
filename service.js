@@ -231,8 +231,14 @@ function saveToCSV(data, phone, propertyId) {
 }
 
 // ========================================
-// OBJECTION LIBRARY — Hardcoded Responses (LOCKED)
+// GENERATE FIRST MESSAGE
 // ========================================
+
+export function generateFirstMessage(lead) {
+  const title = (lead.title || '').toLowerCase();
+  let propertyType = 'apartment';
+  let propertyLabel = 'имотот';
+
   if (/stan|стан/i.test(title)) {
     propertyType = 'apartment';
     propertyLabel = 'станот';
@@ -642,7 +648,20 @@ if (/kako bi sorabotuvale|како би соработувале|како да �
             session.collectedData.photosStatus = "VIBER_PENDING";
             session.collectedData.photos = true;
             console.log(`[PHOTOS: VIBER_PENDING, photos=true]`);
-          } else if (isNegative(u) || /nemam|немам|nema|нема|bez|без|nema sliki|нема слики|bez sliki|без слики|ne|не|nema fotografi|нема фотографии|nemam sliki|немам слики|nemam momentalno|немам моментално|ti kazav|ти кажав|kazav|кажав|rekov|реков|nemam|немам|nema momentalno|нема моментално|ne mozam|не можам|ne moze
+          } else if (isNegative(u) || /nemam|немам|nema|нема|bez|без|nema sliki|нема слики|bez sliki|без слики|ne|не|nema fotografi|нема фотографии|nemam sliki|немам слики|nemam momentalno|немам моментално|ti kazav|ти кажав|kazav|кажав|rekov|реков|nemam|немам|nema momentalno|нема моментално|ne mozam|не можам|ne moze|не може/i.test(u)) {
+            session.collectedData.photosPermission = false;
+            session.collectedData.photosSource = "NONE";
+            session.collectedData.photosStatus = "NONE";
+            session.collectedData.photos = false;
+            console.log(`[PHOTOS: NONE, photos=false]`);
+          }
+        }
+      }
+    }
+
+    console.log(`[PHASE: ${phase}]`);
+    console.log(`[MEMORY:`, JSON.stringify(session.collectedData, null, 2), `]`);
+
     // DATA COLLECTION PHASE — WITH MICRO-SOCIAL GLUE
     // ========================================
     if (phase === "DATA_COLLECTION") {
