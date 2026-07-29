@@ -494,7 +494,59 @@ export function extractPrice(text) {
 // ========================================
 // Extract terrace number
 // ========================================
+// CRITICAL: When "terasa" is present, ONLY look for the number NEAREST to it.
+// Uses word-based backwards search from "terasa" to find the closest number.
+// NEVER call parseMacedonianNumber on the full text — that will pick up
+// unrelated numbers like "peeset" (50) from "peeset i sest i tri kvadrata terasa"
+// when the correct terrace size is "tri" (3) which is the last word before "terasa".
+// ========================================
 export function extractTerraceNumber(text) {
+  const words = text.split(/\s+/);
+  const terasaWordIdx = words.findIndex(w => /terasa|тераса|terrace/i.test(w));
+
+  if (terasaWordIdx !== -1) {
+    // Helper to extract leading digits from a word (handles "5m2", "15m2", "3kvadrata")
+    // Returns the digit value if 1-100, otherwise null.
+    const extractWordNumber = (w) => {
+      // Pure digit word: "5", "15"
+      if (/^\d{1,4}$/.test(w)) {
+        const n = parseInt(w);
+        return (n >= 1 && n <= 100) ? n : null;
+      }
+      // Leading digits + suffix: "5m2", "15m2", "3kvadrata"
+      const leadingDigits = w.match(/^(\d{1,4})/);
+      if (leadingDigits) {
+        const n = parseInt(leadingDigits[1]);
+        if (n >= 1 && n <= 100) return n;
+      }
+      // Macedonian number word: "tri", "pet"
+      const wordNum = parseMacedonianNumber(w);
+      if (wordNum !== null && wordNum >= 1 && wordNum <= 100) return wordNum;
+      return null;
+    };
+
+    // Phase 1: Look BACKWARDS from the word before "terasa" for the NEAREST number
+    // Handles "peeset i sest i tri kvadrata terasa" → backwards from "kvadrata"
+    // finds "tri" (3) — the LAST number word before "terasa", which is correct.
+    // Also handles "5 m2 terasa" → backwards finds "5" (digit).
+    // Also handles "15m2 terasa" → backwards finds "15" (leading digits from "15m2").
+    for (let i = terasaWordIdx - 1; i >= 0; i--) {
+      const result = extractWordNumber(words[i]);
+      if (result !== null) return result;
+    }
+
+    // Phase 2: Nothing before "terasa" — look FORWARD from the word after it
+    // Handles "terasa 5 m2", "terasa od 3 m2", "terasa 10m2", "terasa 15m2"
+    for (let i = terasaWordIdx + 1; i < words.length; i++) {
+      const result = extractWordNumber(words[i]);
+      if (result !== null) return result;
+    }
+
+    // "terasa" found but NO number near it — return null instead of guessing
+    return null;
+  }
+
+  // Phase 3: No "terasa" in text — existing fallback logic
   const sqmMatch = text.match(/(\d{1,4})\s*(kvadrata|kvadrati|m2|м2|kv|кв)/i);
   if (sqmMatch) return parseInt(sqmMatch[1]);
 
