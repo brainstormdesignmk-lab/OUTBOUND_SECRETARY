@@ -517,132 +517,422 @@ if (/kako bi sorabotuvale|како би соработувале|како да �
     // ========================================
     // MEMORY EXTRACTION (Context-aware)
     // ========================================
-    // GLOBAL EXTRACTION PASS — extracts all simple fields from every message
-    // ========================================
-    if (phase === "DATA_COLLECTION") {
-      const updates = runGlobalExtraction(u, session.collectedData, userInput);
-      for (const [key, value] of Object.entries(updates)) {
-        if (session.collectedData[key] === undefined || session.collectedData[key] === null) {
-          session.collectedData[key] = value;
-          console.log(`[GLOBAL: ${key} = ${JSON.stringify(value)}]`);
+
+    // === cleanPrice (Sale) / monthlyRent (Rent) ===
+    if (nextField === 'cleanPrice' || nextField === 'monthlyRent') {
+      const price = extractPrice(u);
+      if (price !== null) {
+        if (nextField === 'cleanPrice') {
+          session.collectedData.cleanPrice = price;
+          console.log(`[PRICE: ${session.collectedData.cleanPrice}]`);
+        } else {
+          session.collectedData.monthlyRent = price;
+          console.log(`[MONTHLY RENT: ${session.collectedData.monthlyRent}]`);
         }
       }
+    }
 
-      // ========================================
-      // COMPLEX STATEFUL HANDLERS
-      // These have early returns (follow-up questions) or complex
-      // state machine logic that can't be pure extraction.
-      // ========================================
+    // === totalSqm ===
+    if (nextField === 'totalSqm') {
+      const sqmMatch = u.match(/(\d{2,4})\s*(m2|м2|квадрати|кв|sqm|kvadrati|kvadrata|квадрата|квадрат|kv|кв)/i);
+      if (sqmMatch) {
+        session.collectedData.totalSqm = parseInt(sqmMatch[1]);
+        console.log(`[SQM: ${session.collectedData.totalSqm}]`);
+      } else {
+        const firstNum = extractFirstNumber(u);
+        if (firstNum !== null && firstNum >= 10 && firstNum <= 999) {
+          session.collectedData.totalSqm = firstNum;
+          console.log(`[SQM: ${session.collectedData.totalSqm}]`);
+        }
+      }
+    }
 
-      // === terraceSqm (Handles ALL cases) ===
-      if (session.collectedData.terraceSqm === undefined && session.collectedData.hasTerrace === undefined) {
-        // Case 1: "ne znam" reply (follow-up question response)
-        if (/ne znam|не знам|незнам|neznam|ne znam tocno|не знам точно|ne sum siguren|не сум сигурен/i.test(u)) {
+    // === terraceSqm (FIXED — handles ALL cases) ===
+    if (nextField === 'terraceSqm') {
+      // Case 1: No terrace (use word boundaries to avoid "ne" matching "ne znam")
+      // First check if this is a "ne znam" reply (follow-up from Case 3)
+      if (/ne znam|не знам|незнам|neznam|ne znam tocno|не знам точно|ne sum siguren|не сум сигурен/i.test(u)) {
+        session.collectedData.hasTerrace = true;
+        session.collectedData.terraceSqm = null;
+        console.log(`[TERRACE: yes, size unknown]`);
+      }
+      // True negative responses (numeric "0", explicit "nema")
+      else if (/^0$|nema terasa|нема тераса|nema|нема|без|bez|nema|нема|bez terasa|без тераса|nema parking|нема паркинг/i.test(u) && !/ima|има|kv|кв|m2|м2|kvadrat|квадрат/i.test(u)) {
+        session.collectedData.hasTerrace = false;
+        session.collectedData.terraceSqm = 0;
+        console.log(`[TERRACE: none]`);
+      }
+      // Case 2: Has terrace with size — use extractTerraceNumber
+      else if (/ima|има|terasa|тераса|terrace|kv|кв|kvadrati|квадрати|m2|m²/i.test(u) || isPositive(u)) {
+        const firstNum = extractTerraceNumber(u);
+        if (firstNum !== null && firstNum > 0 && firstNum < 100) {
           session.collectedData.hasTerrace = true;
-          session.collectedData.terraceSqm = null;
-          console.log(`[TERRACE: yes, size unknown]`);
-        }
-        // True negative responses
-        else if (/^0$|nema terasa|нема тераса|nema|нема|без|bez|nema|нема|bez terasa|без тераса|nema parking|нема паркинг/i.test(u) && !/ima|има|kv|кв|m2|м2|kvadrat|квадрат/i.test(u)) {
-          session.collectedData.hasTerrace = false;
-          session.collectedData.terraceSqm = 0;
-          console.log(`[TERRACE: none]`);
-        }
-        // Has terrace with or without size
-        else if (/ima|има|terasa|тераса|terrace|kv|кв|kvadrati|квадрати|m2|m²/i.test(u) || isPositive(u)) {
-          const firstNum = extractTerraceNumber(u);
-          if (firstNum !== null && firstNum > 0 && firstNum < 100) {
-            session.collectedData.hasTerrace = true;
-            session.collectedData.terraceSqm = firstNum;
-            console.log(`[TERRACE: ${firstNum}m2]`);
-          } else {
-            console.log(`[TERRACE: yes, size unknown — asking follow-up]`);
-            return {
-              text: 'Дали знаете колку квадрати е терасата?',
-              type: "QUESTION"
-            };
-          }
-        }
-      }
-
-      // === heating (FIXED — parno follow-up, B16) ===
-      if (nextField === 'heating' || session.collectedData.heatingFollowUp) {
-        if (/gradsko|градско|граѓско|dalinsko|dalecno|далечно|toplovod|beg/i.test(u)) {
-          session.collectedData.heating = "district";
-          session.collectedData.heatingType = "district";
-          session.collectedData.heatingFollowUp = false;
-          console.log(`[HEATING: district]`);
-        } else if (/centralno|централно|central|sopstveno|сопствено|individualno|индивидуално|svoja|своја|kotel|kotlarnica|котларница|сопствена|sopstvena|moe|мое|nase|наше|licno|лично|zgradata|зградата|na zgradata|на зградата|sopstveno parno|сопствено парно|moe parno|мое парно|nase parno|наше парно|licno parno|лично парно|parno moe|парно мое|parno nase|парно наше|parno licno|парно лично|parno na zgradata|парно на зградата|sopstveno|сопствено|sopstveno parno|сопствено парно/i.test(u)) {
-          session.collectedData.heating = "central";
-          session.collectedData.heatingType = "private_central";
-          session.collectedData.heatingFollowUp = false;
-          console.log(`[HEATING: private_central]`);
-        } else if (/klima|клима|inverter|инвертер|split|сплит|invertor|инвертор|klima inverter|клима инвертер|термопумпа|toplotna|топлотна|na klima|на клима|se gream|се греам/i.test(u)) {
-          session.collectedData.heating = "electric";
-          session.collectedData.heatingType = "inverter";
-          session.collectedData.heatingFollowUp = false;
-          console.log(`[HEATING: inverter]`);
-        } else if (/struja|струја|electric|термо|термосистем|termo|radijatori|радијатори|kalorifer|калорифер/i.test(u)) {
-          session.collectedData.heating = "electric";
-          session.collectedData.heatingType = "electric";
-          session.collectedData.heatingFollowUp = false;
-          console.log(`[HEATING: electric]`);
-        } else if (/drva|дрва|peleti|пелети|pellet|пелет|nafta|нафта|loz|лож|огрев|ogrev|jаглен|jaglen|uglen|у́глен/i.test(u)) {
-          if (/drva|дрва|peleti|пелети|pellet|пелет|ogrev|огрев/i.test(u)) {
-            session.collectedData.heating = "solid_fuel";
-            session.collectedData.heatingType = "wood_pellets";
-          } else {
-            session.collectedData.heating = "oil";
-            session.collectedData.heatingType = "oil";
-          }
-          session.collectedData.heatingFollowUp = false;
-          console.log(`[HEATING: ${session.collectedData.heatingType}]`);
-        } else if (/parno|парно/i.test(u) && !session.collectedData.heatingFollowUp) {
-          session.collectedData.heatingFollowUp = true;
+          session.collectedData.terraceSqm = firstNum;
+          console.log(`[TERRACE: ${firstNum}m2]`);
+        } else {
+          // Owner confirmed terrace but no size — ask follow-up
+          // NOTE: Don't set hasTerrace=true here! Let getNextMissingField
+          // still return 'terraceSqm' so the follow-up reply is processed
+          // by this same handler (not by the next field's handler).
+          console.log(`[TERRACE: yes, size unknown — asking follow-up]`);
           return {
-            text: "Какво парно? Градско или сопствено?",
+            text: 'Дали знаете колку квадрати е терасата?',
             type: "QUESTION"
           };
         }
-        if (session.collectedData.heatingFollowUp) {
-          session.collectedData.heating = "parno_unknown";
-          session.collectedData.heatingType = "unknown";
-          session.collectedData.heatingFollowUp = false;
-          console.log(`[HEATING: parno_unknown (defaulted)]`);
+      }
+    }
+
+    // === bedrooms ===
+    if (nextField === 'bedrooms') {
+      const bdCount = countBedrooms(u);
+      if (bdCount !== null && bdCount >= 0 && bdCount <= 20) {
+        session.collectedData.bedrooms = bdCount;
+        console.log(`[BEDROOMS: ${session.collectedData.bedrooms}]`);
+      }
+    }
+
+    // === floor (FIXED — potkrovje detection) ===
+    if (nextField === 'floor') {
+      // Check for potkrovje first
+      if (/potkrovje|поткровје|podkrovje|подкровје|potkrov|поткров|potkrov|поткров/i.test(u)) {
+        if (session.collectedData.totalFloors) {
+          session.collectedData.floor = session.collectedData.totalFloors + 1;
+        } else {
+          session.collectedData.floor = 6; // Default assumption
+        }
+        console.log(`[FLOOR: potkrovje → ${session.collectedData.floor}]`);
+      } else {
+        const ordinal = parseOrdinalFloor(u);
+        if (ordinal !== null) {
+          session.collectedData.floor = ordinal;
+          console.log(`[FLOOR: ${session.collectedData.floor}]`);
+        } else {
+          const firstNum = extractFirstNumber(u);
+          if (firstNum !== null && firstNum >= 0 && firstNum <= 50) {
+            session.collectedData.floor = firstNum;
+            console.log(`[FLOOR: ${session.collectedData.floor}]`);
+          }
+          const wordNum = parseMacedonianNumber(u);
+          if (wordNum !== null && wordNum >= 0 && wordNum <= 50) {
+            session.collectedData.floor = wordNum;
+            console.log(`[FLOOR: ${session.collectedData.floor}]`);
+          }
         }
       }
+    }
 
-      // === photos (complex stateful handler with scraper logic) ===
-      if (nextField === 'photos') {
-        if (session.collectedData.photosStatus && session.collectedData.photosStatus !== 'PENDING') {
-          if (session.collectedData.photosStatus === 'NONE') {
-            session.collectedData.photos = false;
-          } else {
-            session.collectedData.photos = true;
-          }
-          console.log(`[PHOTOS: already processed, photos=${session.collectedData.photos}]`);
-        } else if (hasScraperPhotos) {
-          if (isPositive(u) || /da|да|se|се|aktuelni|актуелни|okej|океј|moze|може|se aktuelni|се актуелни|aktuelni se|актуелни се|da se|да се|se isti|се исти|isti se|исти се/i.test(u)) {
-            session.collectedData.photosPermission = true;
-            session.collectedData.photosSource = "SCRAPER";
-            session.collectedData.photosStatus = "SCRAPER_APPROVED";
-            session.collectedData.photos = true;
-            console.log(`[PHOTOS: SCRAPER_APPROVED, photos=true]`);
-          } else if (isNegative(u) || /ne|не|nema|нема|ne se|не се|neaktuelni|неактуелни|novi|нови|novo|ново|ne se aktuelni|не се актуелни|ne se isti|не се исти|novi se|нови се/i.test(u)) {
-            session.collectedData.photosPermission = true;
-            session.collectedData.photosSource = "SCRAPER_NOT_CURRENT";
-            session.collectedData.photosStatus = "SCRAPER_NOT_CURRENT";
-            session.collectedData.photos = true;
-            console.log(`[PHOTOS: SCRAPER_NOT_CURRENT, photos=true]`);
-          }
+    // === totalFloors ===
+    if (nextField === 'totalFloors') {
+      const firstNum = extractFirstNumber(u);
+      if (firstNum !== null && firstNum >= 1 && firstNum <= 50) {
+        session.collectedData.totalFloors = firstNum;
+        console.log(`[TOTAL FLOORS: ${session.collectedData.totalFloors}]`);
+      }
+      const wordNum = parseMacedonianNumber(u);
+      if (wordNum !== null && wordNum >= 1 && wordNum <= 50) {
+        session.collectedData.totalFloors = wordNum;
+        console.log(`[TOTAL FLOORS: ${session.collectedData.totalFloors}]`);
+      }
+    }
+
+    // === elevator ===
+    if (nextField === 'elevator') {
+      if (isPositive(u) || /lift|лифт|ima|има/i.test(u)) {
+        session.collectedData.elevator = true;
+        console.log(`[ELEVATOR: true]`);
+      } else if (isNegative(u) || /bez lift|без лифт|nema lift/i.test(u)) {
+        session.collectedData.elevator = false;
+        console.log(`[ELEVATOR: false]`);
+      }
+    }
+
+    // === heating (FIXED — parno follow-up, B16) ===
+    // When user says bare "parno", DON'T set heating in collectedData.
+    // Instead set only heatingFollowUp flag, so getNextMissingField
+    // still returns 'heating' for the follow-up reply.
+    if (nextField === 'heating' || session.collectedData.heatingFollowUp) {
+      // If we're in follow-up mode, process the specific type from the user
+      if (/gradsko|градско|граѓско|dalinsko|dalecno|далечно|toplovod|beg/i.test(u)) {
+        session.collectedData.heating = "district";
+        session.collectedData.heatingType = "district";
+        session.collectedData.heatingFollowUp = false;
+        console.log(`[HEATING: district]`);
+      } else if (/centralno|централно|central|sopstveno|сопствено|individualno|индивидуално|svoja|своја|kotel|kotlarnica|котларница|сопствена|sopstvena|moe|мое|nase|наше|licno|лично|zgradata|зградата|na zgradata|на зградата|sopstveno parno|сопствено парно|moe parno|мое парно|nase parno|наше парно|licno parno|лично парно|parno moe|парно мое|parno nase|парно наше|parno licno|парно лично|parno na zgradata|парно на зградата|sopstveno|сопствено|sopstveno parno|сопствено парно/i.test(u)) {
+        session.collectedData.heating = "central";
+        session.collectedData.heatingType = "private_central";
+        session.collectedData.heatingFollowUp = false;
+        console.log(`[HEATING: private_central]`);
+      } else if (/klima|клима|inverter|инвертер|split|сплит|invertor|инвертор|klima inverter|клима инвертер|термопумпа|toplotna|топлотна|na klima|на клима|se gream|се греам/i.test(u)) {
+        session.collectedData.heating = "electric";
+        session.collectedData.heatingType = "inverter";
+        session.collectedData.heatingFollowUp = false;
+        console.log(`[HEATING: inverter]`);
+      } else if (/struja|струја|electric|термо|термосистем|termo|radijatori|радијатори|kalorifer|калорифер/i.test(u)) {
+        session.collectedData.heating = "electric";
+        session.collectedData.heatingType = "electric";
+        session.collectedData.heatingFollowUp = false;
+        console.log(`[HEATING: electric]`);
+      } else if (/drva|дрва|peleti|пелети|pellet|пелет|nafta|нафта|loz|лож|огрев|ogrev|jаглен|jaglen|uglen|у́глен/i.test(u)) {
+        if (/drva|дрва|peleti|пелети|pellet|пелет|ogrev|огрев/i.test(u)) {
+          session.collectedData.heating = "solid_fuel";
+          session.collectedData.heatingType = "wood_pellets";
         } else {
-          if (isPositive(u) || /ima|има|imam|имам|ke pratam|ќе пратам|pratam|пратам|moze da pratam|може да пратам|da|да|ok|океј|da imam|да имам|ima fotografi|има фотографии|ima sliki|има слики|ke vi pratam|ќе ви пратам|ke ispratam|ќе испратам|ke pushtam|ќе пуштам|ima na oglas|има на оглас|ke vi ispratam|ќе ви испратам|ispratam|испратам|tuka da vi pratam|тука да ви пратам/i.test(u)) {
-            session.collectedData.photosPermission = true;
-            session.collectedData.photosSource = "VIBER_PENDING";
-            session.collectedData.photosStatus = "VIBER_PENDING";
-            session.collectedData.photos = true;
-            console.log(`[PHOTOS: VIBER_PENDING, photos=true]`);
-          } else if (isNegative(u) || /nemam|немам|nema|нема|bez|без|nema sliki|нема слики|bez sliki|без слики|ne|не|nema fotografi|нема фотографии|nemam sliki|немам слики|nemam momentalno|немам моментално|ti kazav|ти кажав|kazav|кажав|rekov|реков|nemam|немам|nema momentalno|нема моментално|ne mozam|не можам|ne moze
+          session.collectedData.heating = "oil";
+          session.collectedData.heatingType = "oil";
+        }
+        session.collectedData.heatingFollowUp = false;
+        console.log(`[HEATING: ${session.collectedData.heatingType}]`);
+      } else if (/parno|парно/i.test(u) && !session.collectedData.heatingFollowUp) {
+        // First bare "parno" — ask for follow-up, DON'T set heating yet
+        session.collectedData.heatingFollowUp = true;
+        return {
+          text: "Какво парно? Градско или сопствено?",
+          type: "QUESTION"
+        };
+      }
+      // If still in follow-up mode and no pattern matched — default to unknown
+      // to prevent infinite loop / field-skipping
+      if (session.collectedData.heatingFollowUp) {
+        session.collectedData.heating = "parno_unknown";
+        session.collectedData.heatingType = "unknown";
+        session.collectedData.heatingFollowUp = false;
+        console.log(`[HEATING: parno_unknown (defaulted)]`);
+      }
+    }
+
+    // === ac ===
+    if (nextField === 'ac') {
+      if (isPositive(u)) {
+        session.collectedData.ac = true;
+        console.log(`[AC: true]`);
+      } else if (isNegative(u)) {
+        session.collectedData.ac = false;
+        console.log(`[AC: false]`);
+      }
+    }
+
+    // === parking (FIXED — underground = garage) ===
+    if (nextField === 'parking') {
+      if (/nema|нема|без|bez|ne|не|nema parking|нема паркинг|nema garaza|нема гаража/i.test(u)) {
+        session.collectedData.parking = false;
+        console.log(`[PARKING: false]`);
+      } else if (isPositive(u) || /garaza|гаража|privat|приват|parking|паркинг|garage|гараж|podzemna|подземна|sopstveno|сопствено|pred zgrada|пред зграда|na -|на -|podzemno|подземно/i.test(u)) {
+        session.collectedData.parking = true;
+        if (/garaza|гаража|garage|гараж|podzemna|подземна|podzemno|подземно|na -1|на -1|na -2|на -2|na -|на -|podzemno parking|подземно паркинг|podzemna garaza|подземна гаража|garaza na -|гаража на -/i.test(u)) {
+          session.collectedData.parkingType = "garage";
+        } else if (/privat|приват|sopstveno|сопствено|pred zgrada|пред зграда/i.test(u)) {
+          session.collectedData.parkingType = "private";
+        } else {
+          session.collectedData.parkingType = "public";
+        }
+        console.log(`[PARKING: true, type: ${session.collectedData.parkingType}]`);
+      }
+    }
+
+    // === orientation (EXPANDED) ===
+    if (nextField === 'orientation') {
+      const orients = parseOrientation(u);
+      if (orients && orients.length > 0) {
+        session.collectedData.orientation = orients.join('-');
+        session.collectedData.orientationPrimary = orients[0];
+        session.collectedData.orientationSecondary = orients.length > 1 ? orients[1] : null;
+        console.log(`[ORIENTATION: ${session.collectedData.orientation}]`);
+      }
+    }
+
+    // === furnished ===
+    if (nextField === 'furnished') {
+      if (/prazen|правен|gol|гол|bez namestaj|без мебел|nenamesten|ненаместен|prazno|празно|gola sostojba|гола состојба|ne e namesten|не е наместен|bez|без|nema|нема|ne|не|ne e|не е|prav|прав/i.test(u)) {
+        session.collectedData.furnished = false;
+        session.collectedData.furnishedLevel = "empty";
+        console.log(`[FURNISHED: empty]`);
+      } else if (/komplet|ful|full|kompletno|celosno|целосно|m paket|м пакет|top namesten|топ наместен|namesten|наместен|opremen|опремен|namestaj|мебел|kompletno namesten|комплетно наместен|se prodava namesten|се продава наместен|so namestaj|со мебел|namesten|наместен/i.test(u)) {
+        session.collectedData.furnished = true;
+        session.collectedData.furnishedLevel = "full";
+        console.log(`[FURNISHED: full]`);
+      } else if (isPositive(u)) {
+        session.collectedData.furnished = true;
+        session.collectedData.furnishedLevel = "partial";
+        console.log(`[FURNISHED: partial]`);
+      }
+    }
+
+    // === yearBuilt ===
+    if (nextField === 'yearBuilt') {
+      const year = parseYearBuilt(u);
+      if (year !== null) {
+        session.collectedData.yearBuilt = year;
+        console.log(`[YEAR BUILT: ${session.collectedData.yearBuilt}]`);
+      }
+    }
+
+    // === renovated ===
+    if (nextField === 'renovated') {
+      if (/ne|не|nema|нема|ne e|не е|bez|без|not renovated|ништо|ne e renoviran|не е реновиран|nema renoviran|нема реновирано|ne e renovirano|не е реновирано|nema renovirano|нема реновирано|ne renoviran|не реновиран|ne e renoviran|не е реновиран|ne e|не е/i.test(u)) {
+        session.collectedData.renovated = false;
+        session.collectedData.renovationYear = null;
+        console.log(`[RENOVATED: false]`);
+      } else {
+        const yearMatch = u.match(/\b(19\d{2}|20\d{2})\b/);
+        if (yearMatch) {
+          session.collectedData.renovated = true;
+          session.collectedData.renovationYear = parseInt(yearMatch[1]);
+          console.log(`[RENOVATED: true, year: ${session.collectedData.renovationYear}]`);
+        } else if (/90ti|90 ти|90-ти|90ти|деведесетти/i.test(u)) {
+          session.collectedData.renovated = true;
+          session.collectedData.renovationYear = 1995;
+          console.log(`[RENOVATED: true, year: 1995 (90ti)]`);
+        } else if (/80ti|80 ти|80-ти|80ти/i.test(u)) {
+          session.collectedData.renovated = true;
+          session.collectedData.renovationYear = 1985;
+          console.log(`[RENOVATED: true, year: 1985 (80ti)]`);
+        } else if (/2000ti|2000 ти|двеилјадити/i.test(u)) {
+          session.collectedData.renovated = true;
+          session.collectedData.renovationYear = 2005;
+          console.log(`[RENOVATED: true, year: 2005 (2000ti)]`);
+        } else if (isPositive(u) || /реновиран|renoviran|обновен|obnoven|novo|нов|sreden|среден|kompletno renoviran|комплетно реновиран|delumno renoviran|делумно реновиран|skoro|скоро|nedavno|недавно|pre|пред|osvezhivme|освеживме|go osvezivme|го освеживме/i.test(u)) {
+          session.collectedData.renovated = true;
+          session.collectedData.renovationYear = null;
+          console.log(`[RENOVATED: true, year unknown]`);
+        } else if (/pred|пред|pri|при/i.test(u)) {
+          // Try digit-based relative year first (e.g. "pred 2 godini")
+          const years = u.match(/\d+/);
+          if (years) {
+            const currentYear = new Date().getFullYear();
+            session.collectedData.renovated = true;
+            session.collectedData.renovationYear = currentYear - parseInt(years[0]);
+            console.log(`[RENOVATED: true, year: ${session.collectedData.renovationYear} (calculated)]`);
+          } else {
+            // Try word-based number (e.g. "pred dve godini", "pred tri godini")
+            const wordNum = parseMacedonianNumber(u);
+            if (wordNum !== null && wordNum >= 1 && wordNum <= 100) {
+              const currentYear = new Date().getFullYear();
+              session.collectedData.renovated = true;
+              session.collectedData.renovationYear = currentYear - wordNum;
+              console.log(`[RENOVATED: true, year: ${session.collectedData.renovationYear} (calculated from word)]`);
+            }
+          }
+        }
+      }
+    }
+
+    // === renovationYear — SKIP if renovated is false ===
+    if (nextField === 'renovationYear') {
+      if (session.collectedData.renovated === false) {
+        session.collectedData.renovationYear = null;
+        console.log(`[RENOVATION YEAR: skipped (renovated=false)]`);
+        const known = { ...session.adMemory, ...session.collectedData };
+        nextField = getNextMissingField(known);
+      } else {
+        const year = parseYearBuilt(u);
+        if (year !== null) {
+          session.collectedData.renovationYear = year;
+          console.log(`[RENOVATION YEAR: ${session.collectedData.renovationYear}]`);
+        } else if (/pred|пред|pri|при/i.test(u)) {
+          // Handle relative year: "pred X godini" (X years ago)
+          // Try digit-based first (e.g. "pred 2 godini")
+          const years = u.match(/\d+/);
+          if (years) {
+            const currentYear = new Date().getFullYear();
+            session.collectedData.renovationYear = currentYear - parseInt(years[0]);
+            console.log(`[RENOVATION YEAR: ${session.collectedData.renovationYear} (calculated from digit)]`);
+          } else {
+            // Try word-based number (e.g. "pred dve godini", "pred tri godini", "pred cetiri godini")
+            const wordNum = parseMacedonianNumber(u);
+            if (wordNum !== null && wordNum >= 1 && wordNum <= 100) {
+              const currentYear = new Date().getFullYear();
+              session.collectedData.renovationYear = currentYear - wordNum;
+              console.log(`[RENOVATION YEAR: ${session.collectedData.renovationYear} (calculated from word)]`);
+            }
+          }
+        }
+      }
+    }
+
+    // === documentationClean (FIXED — hipoteka = NOT clean) ===
+    if (nextField === 'documentationClean') {
+      if (/hipoteka|хипотека|ostavinska|оставинска|razvod|развод|sudski|судски|problem|проблем|ne e cist|не е чист|ne e cista|не е чиста|komplikacii|компликации|teret|терет|zabrana|забрана|zalozen|заложен|ne e cist imoten list|не е чист имотен лист|ima hipoteka|има хипотека|ima problem|има проблем/i.test(u)) {
+        session.collectedData.documentationClean = false;
+        if (/hipoteka|хипотека/i.test(u)) {
+          session.collectedData.documentationIssues = "hipoteka";
+        } else if (/ostavinska|оставинска/i.test(u)) {
+          session.collectedData.documentationIssues = "ostavinska";
+        } else if (/razvod|развод/i.test(u)) {
+          session.collectedData.documentationIssues = "razvod";
+        } else if (/teret|терет|zabrana|забрана|zalozen|заложен/i.test(u)) {
+          session.collectedData.documentationIssues = "teret";
+        } else {
+          session.collectedData.documentationIssues = "other";
+        }
+        console.log(`[DOCUMENTATION: not clean - ${session.collectedData.documentationIssues}]`);
+      } else if (/cist|чист|ima|има|da|да|nema problem|нема проблем|nema|нема|cista|чиста|cisto|чисто|nema hipoteka|нема хипотека|nema ostavinska|нема оставинска|nema razvod|нема развод|nema sudski|нема судски|cist imoten list|чист имотен лист|ima cist imoten list|има чист имотен лист|nema teret|нема терет|nema zabrana|нема забрана|cisto|чисто|ima|има|na ime|на име|cisto na moe ime|чисто на мое име|na moe ime|на мое име/i.test(u)) {
+        session.collectedData.documentationClean = true;
+        session.collectedData.documentationIssues = null;
+        console.log(`[DOCUMENTATION: clean]`);
+      }
+    }
+
+    // === photos ===
+    if (nextField === 'photos') {
+      if (session.collectedData.photosStatus && session.collectedData.photosStatus !== 'PENDING') {
+        if (session.collectedData.photosStatus === 'NONE') {
+          session.collectedData.photos = false;
+        } else {
+          session.collectedData.photos = true;
+        }
+        console.log(`[PHOTOS: already processed, photos=${session.collectedData.photos}]`);
+      } else if (hasScraperPhotos) {
+        if (isPositive(u) || /da|да|se|се|aktuelni|актуелни|okej|океј|moze|може|se aktuelni|се актуелни|aktuelni se|актуелни се|da se|да се|se isti|се исти|isti se|исти се/i.test(u)) {
+          session.collectedData.photosPermission = true;
+          session.collectedData.photosSource = "SCRAPER";
+          session.collectedData.photosStatus = "SCRAPER_APPROVED";
+          session.collectedData.photos = true;
+          console.log(`[PHOTOS: SCRAPER_APPROVED, photos=true]`);
+        } else if (isNegative(u) || /ne|не|nema|нема|ne se|не се|neaktuelni|неактуелни|novi|нови|novo|ново|ne se aktuelni|не се актуелни|ne se isti|не се исти|novi se|нови се/i.test(u)) {
+          session.collectedData.photosPermission = true;
+          session.collectedData.photosSource = "SCRAPER_NOT_CURRENT";
+          session.collectedData.photosStatus = "SCRAPER_NOT_CURRENT";
+          session.collectedData.photos = true;
+          console.log(`[PHOTOS: SCRAPER_NOT_CURRENT, photos=true]`);
+        }
+      } else {
+        if (isPositive(u) || /ima|има|imam|имам|ke pratam|ќе пратам|pratam|пратам|moze da pratam|може да пратам|da|да|ok|океј|da imam|да имам|ima fotografi|има фотографии|ima sliki|има слики|ke vi pratam|ќе ви пратам|ke ispratam|ќе испратам|ke pushtam|ќе пуштам|ima na oglas|има на оглас|ke vi ispratam|ќе ви испратам|ispratam|испратам|tuka da vi pratam|тука да ви пратам/i.test(u)) {
+          session.collectedData.photosPermission = true;
+          session.collectedData.photosSource = "VIBER_PENDING";
+          session.collectedData.photosStatus = "VIBER_PENDING";
+          session.collectedData.photos = true;
+          console.log(`[PHOTOS: VIBER_PENDING, photos=true]`);
+        } else if (isNegative(u) || /nemam|немам|nema|нема|bez|без|nema sliki|нема слики|bez sliki|без слики|ne|не|nema fotografi|нема фотографии|nemam sliki|немам слики|nemam momentalno|немам моментално|ti kazav|ти кажав|kazav|кажав|rekov|реков|nemam|немам|nema momentalno|нема моментално|ne mozam|не можам|ne moze|не може/i.test(u)) {
+          session.collectedData.photosPermission = false;
+          session.collectedData.photosSource = "NONE";
+          session.collectedData.photosStatus = "NONE";
+          session.collectedData.photos = false;
+          console.log(`[PHOTOS: NONE, photos=false]`);
+        }
+      }
+    }
+
+    // === ownerName ===
+    if (nextField === 'ownerName') {
+      if (u.length > 0) {
+        session.collectedData.ownerName = userInput.trim();
+        console.log(`[OWNER NAME: ${session.collectedData.ownerName}]`);
+      }
+    }
+
+    // === address ===
+    if (nextField === 'address') {
+      if (u.length > 0) {
+        session.collectedData.address = userInput.trim();
+        console.log(`[ADDRESS: ${session.collectedData.address}]`);
+      }
+    }
+
+    console.log(`[PHASE: ${phase}]`);
+    console.log(`[MEMORY:`, JSON.stringify(session.collectedData, null, 2), `]`);
+
+    // ========================================
     // DATA COLLECTION PHASE — WITH MICRO-SOCIAL GLUE
     // ========================================
     if (phase === "DATA_COLLECTION") {
