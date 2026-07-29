@@ -34,7 +34,7 @@ function assert(label, condition, detail) {
 // ========================================
 // HELPER: Create a fresh session for testing
 // ========================================
-function createSession(scenario = 'sale') {
+function createSession(scenario = 'sale', { preAccept = false } = {}) {
   const isRent = scenario === 'rent';
   return {
     adMemory: {
@@ -46,11 +46,16 @@ function createSession(scenario = 'sale') {
       photoUrls: []
     },
     collectedData: {
-      cooperationAccepted: true,
+      cooperationAccepted: preAccept ? false : true,
       transactionType: isRent ? 'rent' : 'sale',
       propertyType: 'apartment'
     },
-    messages: [],
+    messages: preAccept ? [
+      { role: 'model', text: isRent
+        ? 'Здраво, јас сум Ана од Metropolis. Ве контактирам за огласот за станот што се издава. Дали е сѐ уште достапен и дали сте заинтересирани за соработка?'
+        : 'Здраво, јас сум Ана од Metropolis. Ве контактирам за огласот за станот што се продава. Дали е сѐ уште достапен и дали сте заинтересирани за соработка без провизија за вас?'
+      }
+    ] : [],
     phone: '+38970123456'
   };
 }
@@ -427,6 +432,85 @@ async function runScenario3() {
 
 
 // ========================================
+// SCENARIO 4: Sale — "da" acceptance → price first (regression test)
+// ========================================
+// Simulates the exact broken scenario from the user's campaign:
+// Owner was in PERSUASION phase and said "da" to accept.
+// Before the fix, isPositive("da") triggered the terrace handler's
+// follow-up question BEFORE the price question.
+// After the fix, nextField gate prevents terrace interruption.
+// ========================================
+console.log(`\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
+console.log(`📋 SCENARIO 4: Sale — "da" accept → price first`);
+console.log(`━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
+
+async function runScenario4() {
+  // Start during persuasion (preAccept=true, cooperationAccepted=false)
+  const session = createSession('sale', { preAccept: true });
+  let res;
+
+  // Turn 1: Owner accepts with "da" → should transition to DATA_COLLECTION
+  //         and ask about cleanPrice FIRST (not terrace!)
+  console.log(`\n  === Turn 1: Owner says "da" ===`);
+  res = await sendMessage(session, "da");
+  assert("S4-T1: type=QUESTION (not terrace follow-up)", res.type === "QUESTION", `got ${res.type}`);
+  assert("S4-T1: nextField=cleanPrice (first in workflow)", res.nextField === "cleanPrice", `got ${res.nextField}`);
+  assert("S4-T1: response asks about price", /цена/i.test(res.text), `text: ${res.text.substring(0, 60)}`);
+  assert("S4-T1: cooperationAccepted=true", session.collectedData.cooperationAccepted === true, 'was not set');
+  assert("S4-T1: hasTerrace NOT set (nobody mentioned it)", session.collectedData.hasTerrace === undefined, `got ${session.collectedData.hasTerrace}`);
+  assert("S4-T1: terraceSqm NOT set", session.collectedData.terraceSqm === undefined, `got ${session.collectedData.terraceSqm}`);
+
+  // Turn 2: Owner answers price — "98 iljadi" should NOT trigger terrace
+  console.log(`\n  === Turn 2: Owner says "98 iljadi evra" ===`);
+  res = await sendMessage(session, "98 iljadi evra");
+  assert("S4-T2: type=QUESTION", res.type === "QUESTION", `got ${res.type}`);
+  assert("S4-T2: nextField=totalSqm", res.nextField === "totalSqm", `got ${res.nextField}`);
+  assert("S4-T2: cleanPrice=98000", session.collectedData.cleanPrice === 98000, `got ${session.collectedData.cleanPrice}`);
+  // "98 iljadi" should NOT set terrace (price context, not terrace)
+  assert("S4-T2: hasTerrace NOT set from price", session.collectedData.hasTerrace === undefined, `got ${session.collectedData.hasTerrace}`);
+  assert("S4-T2: terraceSqm NOT set from price", session.collectedData.terraceSqm === undefined, `got ${session.collectedData.terraceSqm}`);
+
+  // Turn 3: Owner answers sqm
+  console.log(`\n  === Turn 3: Owner says "55 kvadrati" ===`);
+  res = await sendMessage(session, "55 kvadrati");
+  assert("S4-T3: type=QUESTION", res.type === "QUESTION", `got ${res.type}`);
+  assert("S4-T3: nextField=terraceSqm", res.nextField === "terraceSqm", `got ${res.nextField}`);
+  assert("S4-T3: totalSqm=55", session.collectedData.totalSqm === 55, `got ${session.collectedData.totalSqm}`);
+  // "55 kvadrati" should NOT set terrace (generic sqm without terrace context)
+  assert("S4-T3: hasTerrace NOT set from generic sqm", session.collectedData.hasTerrace === undefined, `got ${session.collectedData.hasTerrace}`);
+
+  // Turn 4: Owner answers terrace
+  console.log(`\n  === Turn 4: Owner says "ima 15m2" ===`);
+  res = await sendMessage(session, "ima 15m2");
+  assert("S4-T4: type=QUESTION", res.type === "QUESTION", `got ${res.type}`);
+  assert("S4-T4: nextField=bedrooms", res.nextField === "bedrooms", `got ${res.nextField}`);
+  assert("S4-T4: hasTerrace=true", session.collectedData.hasTerrace === true, `got ${session.collectedData.hasTerrace}`);
+  assert("S4-T4: terraceSqm=15", session.collectedData.terraceSqm === 15, `got ${session.collectedData.terraceSqm}`);
+
+  // Fast-forward through remaining fields
+  console.log(`\n  === Fast-forward remaining fields ===`);
+  const remaining = [
+    { input: "2 spalni", field: "bedrooms", val: 2 },
+    { input: "3 kat", field: "floor", val: 3 },
+    { input: "10katnica", field: "totalFloors", val: 10 },
+    { input: "ima lift", field: "elevator", val: true },
+  ];
+
+  for (let i = 0; i < remaining.length; i++) {
+    res = await sendMessage(session, remaining[i].input);
+    assert(`S4-T${5 + i}: ${remaining[i].field}=${remaining[i].val}`, session.collectedData[remaining[i].field] === remaining[i].val,
+      `${remaining[i].field}: got ${JSON.stringify(session.collectedData[remaining[i].field])}`);
+  }
+
+  // Verify final state: elevator was collected, no false positives
+  assert("S4-END: elevator=true (last field checked)", session.collectedData.elevator === true, `got ${session.collectedData.elevator}`);
+  assert("S4-END: hasTerrace correctly true", session.collectedData.hasTerrace === true, `got ${session.collectedData.hasTerrace}`);
+  assert("S4-END: terraceSqm correctly 15", session.collectedData.terraceSqm === 15, `got ${session.collectedData.terraceSqm}`);
+  assert("S4-END: res is QUESTION (not ERROR)", res.type === "QUESTION", `got ${res.type}`);
+  console.log(`   ✔ Scenario 4 complete: "da" → price first, no terrace false positives`);
+}
+
+// ========================================
 // RUN ALL SCENARIOS
 // ========================================
 (async () => {
@@ -434,12 +518,11 @@ async function runScenario3() {
     console.log(`\n================================================================`);
     console.log(`🎭 E2E CAMPAIGN SIMULATION`);
     console.log(`================================================================`);
-    console.log(`Testing generateResponse() in DATA_COLLECTION phase`);
-    console.log(`(no Groq API needed — cooperationAccepted=true)`);
 
     await runScenario1();
     await runScenario2();
     await runScenario3();
+    await runScenario4();
 
     // SUMMARY
     console.log(`\n=======================================================`);
