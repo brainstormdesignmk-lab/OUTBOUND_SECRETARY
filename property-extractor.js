@@ -86,7 +86,11 @@ export function parseNumberWords(text) {
 
   let firstMatchIndex = null;
   const getStoPrefix = () => {
-    return (firstMatchIndex !== null && firstMatchIndex !== 0 && /^(sto|сто)/i.test(u)) ? 100 : 0;
+    if (firstMatchIndex !== null && firstMatchIndex !== 0) {
+      const beforeMatch = u.slice(0, firstMatchIndex).trim().toLowerCase();
+      if (beforeMatch.endsWith('sto') || beforeMatch.endsWith('сто')) return 100;
+    }
+    return 0;
   };
 
   const compoundMatch = u.match(new RegExp(
@@ -120,14 +124,35 @@ export function parseNumberWords(text) {
   }
 
   if (!found) {
+    // Standalone hundreds (двесте=200, триста=300)
+    const standaloneHundreds = {
+      'dveste': 200, 'двесте': 200, 'dvesta': 200, 'двеста': 200,
+      'trieste': 300, 'тристе': 300, 'trista': 300, 'триста': 300,
+    };
+    for (const [word, val] of Object.entries(standaloneHundreds)) {
+      const idx = u.indexOf(word);
+      if (idx !== -1 && !/[a-zа-я]/.test(u[idx + word.length] || '') && !/[a-zа-я]/.test(u[idx - 1] || '')) {
+        result = val;
+        consumedLength = idx + word.length;
+        firstMatchIndex = idx;
+        found = true;
+        break;
+      }
+    }
+  }
+
+  if (!found) {
     const irregularTens = {
       'triest': 30, 'триест': 30,
       'pedeset': 50, 'педесет': 50,
       'seeset': 60, 'шеесет': 60,
       'stopeeset': 150, 'стопеесет': 150,
+      'stodvaeset': 120, 'стодваесет': 120,
       'deveeset': 90, 'девеесет': 90,
+      'devedeset': 90, 'деведесет': 90,
       'osumdeset': 80, 'осумдесет': 80,
       'osemdeset': 80, 'осемдесет': 80,
+      'sedumdeset': 70, 'седумдесет': 70,
       'peeset': 50, 'пеесет': 50
     };
     for (const [word, val] of Object.entries(irregularTens)) {

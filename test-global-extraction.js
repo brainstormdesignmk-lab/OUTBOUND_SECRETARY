@@ -258,10 +258,25 @@ console.log(`\n📦 GROUP: Price cross-field contamination guard`);
 
 // Test: "stopeeset i tri iljadi evra" (73,000€) — price words contain
 // substrings that match floor ("peeset" in parseMacedonianNumber) and
-// bedrooms ("tri" = 3). Must ONLY extract cleanPrice.  result = runGlobalExtraction("stopeeset i tri iljadi evra", {});
+// bedrooms ("tri" = 3). Must ONLY extract cleanPrice.
+  result = runGlobalExtraction("stopeeset i tri iljadi evra", {});
   assert("PC1: cleanPrice=153000 (stopeeset=150 + tri=3 = 153 × 1000)", result.cleanPrice === 153000, `got ${result.cleanPrice}`);
   result = runGlobalExtraction("stopeeset i dve iljadi evra", {});
   assert("PC1b: cleanPrice=152000 (stopeeset=150 + dve=2 = 152 × 1000)", result.cleanPrice === 152000, `got ${result.cleanPrice}`);
+
+// Test: "za mene baram stodvaeset i pet iljadi evra" — noise before number, getStoPrefix must detect "sto" before match
+result = runGlobalExtraction("za mene baram stodvaeset i pet iljadi evra", {});
+assert("PC1c: cleanPrice=125000 (stodvaeset=120 + pet=5 = 125 × 1000, embedded sto detected)", result.cleanPrice === 125000, `got ${result.cleanPrice}`);
+assert("PC1c: floor NOT extracted from price message", result.floor === undefined, `got ${JSON.stringify(result.floor)}`);
+
+// Test: "devedeset i tri iljadi" — uses devedeset (long form) not deveeset (short form)
+result = runGlobalExtraction("devedeset i tri iljadi", {});
+assert("PC1d: cleanPrice=93000 (devedeset=90 + tri=3 = 93 × 1000, long form)", result.cleanPrice === 93000, `got ${result.cleanPrice}`);
+
+// Test: "dveste iljadi evra" — standalone hundreds word (dveste=200)
+result = runGlobalExtraction("dveste iljadi evra", {});
+assert("PC1e: cleanPrice=200000 (dveste=200 × 1000)", result.cleanPrice === 200000, `got ${result.cleanPrice}`);
+
 assert("PC1: floor NOT extracted (cross-field contamination)", result.floor === undefined, `got ${JSON.stringify(result.floor)}`);
 assert("PC1: bedrooms NOT extracted", result.bedrooms === undefined, `got ${JSON.stringify(result.bedrooms)}`);
 assert("PC1: totalFloors NOT extracted", result.totalFloors === undefined, `got ${JSON.stringify(result.totalFloors)}`);
