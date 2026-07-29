@@ -297,6 +297,30 @@ const EXTRACTION_RULES = [
   extractDocumentationClean
 ];
 
+// Map from workflow field name to dedicated extractor function.
+// Used by runGlobalExtraction's preferredField logic to extract
+// the CURRENT question's field FIRST before global extraction.
+// Fields without a dedicated extractor (terraceSqm, heating, photos,
+// ownerName, address) are handled by complex stateful handlers in
+// service.js and are not included here.
+const FIELD_TO_EXTRACTOR = {
+  cleanPrice: extractCleanPrice,
+  monthlyRent: extractMonthlyRent,
+  totalSqm: extractTotalSqm,
+  bedrooms: extractBedrooms,
+  floor: extractFloor,
+  totalFloors: extractTotalFloors,
+  elevator: extractElevator,
+  ac: extractAC,
+  parking: extractParking,
+  orientation: extractOrientation,
+  furnished: extractFurnished,
+  yearBuilt: extractYearBuilt,
+  renovated: extractRenovated,
+  renovationYear: extractRenovationYear,
+  documentationClean: extractDocumentationClean
+};
+
 // Extractors that can accidentally pick up price words (iljadi/evra) as
 // floor/bedroom/totalFloors values. These are skipped when a price was
 // extracted from the same message to prevent cross-field contamination.
@@ -309,12 +333,48 @@ const PRICE_SENSITIVE_EXTRACTORS = new Set([
 // ========================================
 // runGlobalExtraction — Main entry point
 // ========================================
-// Runs ALL extraction rules on user input and returns
-// { field: value, ... } for any newly extracted data.
-// Does NOT overwrite existing non-null values.
+// Extracts field values from user input.
+//
+// When preferredField is provided:
+//   1. Try the dedicated extractor for that field FIRST.
+//   2. If it extracts a NEW value (high confidence), return immediately
+//      — skip all other extractors. The message answered the question.
+//   3. If it finds nothing, fall through to the full extraction pass.
+//
+// Without preferredField: run ALL extractors (global discovery mode).
+//
+// Returns { field: value, ... } for any newly extracted data.
+// Does NOT overwrite existing non-null values in currentData.
 // ========================================
-function runGlobalExtraction(u, currentData) {
+function runGlobalExtraction(u, currentData, preferredField) {
   const updates = {};
+
+  // STEP 1: If a specific field is preferred, try its dedicated extractor FIRST.
+  // If it finds the value, the message answered the current question — return
+  // immediately without running the full extraction pass (prevents cross-field
+  // contamination from number-sniffing extractors).
+  if (preferredField) {
+    const extractor = FIELD_TO_EXTRACTOR[preferredField];
+    if (extractor) {
+      const result = extractor(u, currentData);
+      if (result) {
+        for (const [key, value] of Object.entries(result)) {
+          const existing = currentData[key];
+          if (existing === undefined || existing === null) {
+            updates[key] = value;
+            console.log(`[EXTRACTION: preferred field ${preferredField} = ${JSON.stringify(value)} — ${Object.keys(result).join(',')} found, skip global]`);
+          }
+        }
+        if (Object.keys(updates).length > 0) {
+          return updates; // Current field extracted — skip all other extractors
+        }
+      }
+    }
+  }
+
+  // STEP 2: Full extraction pass — bonus info discovery.
+  // Only reached when preferredField wasn't set, has no dedicated extractor,
+  // or its extractor couldn't find a value in this message.
   let priceExtracted = false;
   for (const rule of EXTRACTION_RULES) {
     // If a price (cleanPrice or monthlyRent) was already extracted from THIS
@@ -325,15 +385,10 @@ function runGlobalExtraction(u, currentData) {
     }
     const result = rule(u, currentData);
     if (result) {
-      // Only add fields that aren't already set
       for (const [key, value] of Object.entries(result)) {
         const existing = currentData[key];
         if (existing === undefined || existing === null) {
           updates[key] = value;
-          // Track whether a price/rent was newly extracted from THIS message.
-          // Only set when the value is actually stored (not when it already exists
-          // in currentData), to prevent false positives from extractPrice matching
-          // numbers in non-price contexts like "10katnica" → extractPrice("10katnica") → 10.
           if (key === 'cleanPrice' || key === 'monthlyRent') {
             priceExtracted = true;
           }

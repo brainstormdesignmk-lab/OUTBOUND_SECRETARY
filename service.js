@@ -558,7 +558,7 @@ if (/kako bi sorabotuvale|како би соработувале|како да �
     // numbers like "13" from "ne znam ama zgradata ima 13 sprata".
     // ========================================
     if (!session.pendingFollowUp) {
-      const updates = runGlobalExtraction(u, session.collectedData);
+      const updates = runGlobalExtraction(u, session.collectedData, nextField);
       for (const [key, value] of Object.entries(updates)) {
         session.collectedData[key] = value;
         console.log(`[GLOBAL: ${key} = ${JSON.stringify(value)}]`);

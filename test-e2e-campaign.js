@@ -263,30 +263,42 @@ async function runScenario2() {
   const session = createSession('sale');
   let res;
 
-  // Turn 1: Price + sqm (NOT bedrooms/floor — price-sensitive contamination guard
-  // blocks bedrooms, floor, totalFloors when price is in the same message)
+  // Turn 1: Price only (no sqm bonus — preferred field priority means cleanPrice
+  // is extracted and totalSqm is NOT bonus-extracted from the same message)
   res = await sendMessage(session, "120 iljadi, 55 m2");
   assert("S2-T1: type=QUESTION", res.type === "QUESTION", `got ${res.type}`);
   assert("S2-T1: cleanPrice=120000", session.collectedData.cleanPrice === 120000, `got ${session.collectedData.cleanPrice}`);
-  assert("S2-T1: totalSqm=55", session.collectedData.totalSqm === 55, `got ${session.collectedData.totalSqm}`);
+  // totalSqm NOT extracted (preferred field cleanPrice found first, skip global)
+  assert("S2-T1: totalSqm NOT extracted (priority: current field only)", session.collectedData.totalSqm === undefined, `got ${session.collectedData.totalSqm}`);
   // bedrooms and floor NOT extracted (price in same message)
   assert("S2-T1: bedrooms NOT extracted with price", session.collectedData.bedrooms === undefined, `got ${session.collectedData.bedrooms}`);
   assert("S2-T1: floor NOT extracted with price", session.collectedData.floor === undefined, `got ${session.collectedData.floor}`);
-  // Next field should be terraceSqm
-  assert("S2-T1: nextField=terraceSqm", res.nextField === "terraceSqm", `got ${res.nextField}`);
+  // Next field should be totalSqm (since it wasn't bonus-extracted)
+  assert("S2-T1: nextField=totalSqm", res.nextField === "totalSqm", `got ${res.nextField}`);
 
-  // Turn 2: Terrace + bedrooms + floor + totalFloors + elevator in one message
-  // (No price in this message → all extractors run normally)
-  res = await sendMessage(session, "ima terasa 15m2, 2 spalni, 3 kat, 10katnica, lift");
+  // Turn 2: Total sqm (separate message, as current question)
+  res = await sendMessage(session, "55 kvadrati");
   assert("S2-T2: type=QUESTION", res.type === "QUESTION", `got ${res.type}`);
-  assert("S2-T2: hasTerrace=true", session.collectedData.hasTerrace === true, `got ${session.collectedData.hasTerrace}`);
-  assert("S2-T2: terraceSqm=15", session.collectedData.terraceSqm === 15, `got ${session.collectedData.terraceSqm}`);
-  assert("S2-T2: bedrooms=2", session.collectedData.bedrooms === 2, `got ${session.collectedData.bedrooms}`);
-  assert("S2-T2: floor=3", session.collectedData.floor === 3, `got ${session.collectedData.floor}`);
-  assert("S2-T2: totalFloors=10", session.collectedData.totalFloors === 10, `got ${session.collectedData.totalFloors}`);
-  assert("S2-T2: elevator=true", session.collectedData.elevator === true, `got ${session.collectedData.elevator}`);
+  assert("S2-T2: totalSqm=55", session.collectedData.totalSqm === 55, `got ${session.collectedData.totalSqm}`);
+  // Terrace should NOT be extracted from generic sqm (no "terasa" keyword)
+  assert("S2-T2: hasTerrace NOT set from generic sqm", session.collectedData.hasTerrace === undefined, `got ${session.collectedData.hasTerrace}`);
+  // Next field should be terraceSqm
+  assert("S2-T2: nextField=terraceSqm", res.nextField === "terraceSqm", `got ${res.nextField}`);
+
+  // Turn 3: Terrace + bedrooms + floor + totalFloors + elevator in one message
+  // Note: terraceSqm has NO dedicated extractor in FIELD_TO_EXTRACTOR, so the
+  // preferred field logic falls through to the full global extraction pass.
+  // This means bedrooms, floor, totalFloors, elevator ARE bonus-extracted.
+  res = await sendMessage(session, "ima terasa 15m2, 2 spalni, 3 kat, 10katnica, lift");
+  assert("S2-T3: type=QUESTION", res.type === "QUESTION", `got ${res.type}`);
+  assert("S2-T3: hasTerrace=true", session.collectedData.hasTerrace === true, `got ${session.collectedData.hasTerrace}`);
+  assert("S2-T3: terraceSqm=15", session.collectedData.terraceSqm === 15, `got ${session.collectedData.terraceSqm}`);
+  assert("S2-T3: bedrooms=2", session.collectedData.bedrooms === 2, `got ${session.collectedData.bedrooms}`);
+  assert("S2-T3: floor=3", session.collectedData.floor === 3, `got ${session.collectedData.floor}`);
+  assert("S2-T3: totalFloors=10", session.collectedData.totalFloors === 10, `got ${session.collectedData.totalFloors}`);
+  assert("S2-T3: elevator=true", session.collectedData.elevator === true, `got ${session.collectedData.elevator}`);
   // Next: should be heating (not heatingFollowUp since "parno" not mentioned)
-  assert("S2-T2: nextField=heating", res.nextField === "heating", `got ${res.nextField}`);
+  assert("S2-T3: nextField=heating", res.nextField === "heating", `got ${res.nextField}`);
 
   // Turn 3: Heating + ac + parking all in one (and tell parno is gradsko)
   res = await sendMessage(session, "parno gradsko, klima, garaza");

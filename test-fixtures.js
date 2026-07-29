@@ -1210,6 +1210,11 @@ assertEqual(countBedrooms("edna spalna i edna detska"), 2, "'edna spalna i edna 
   assertEqual(countBedrooms("dve golemi"), 2, "'dve golemi' → 2 (single segment falls through, handled by fallback)");
   assertEqual(countBedrooms("55 m2, 3 kat, ima lift"), null, "'55 m2, 3 kat, ima lift' → null (no room context in any segment)");
 
+  // Additional multi-room patterns: Cyrillic/Latin variants, 3+ way splits
+  assertEqual(countBedrooms("dva spalni i edna detska i edna gostinska"), 4, "'dva spalni i edna detska i edna gostinska' → 4 (dva=2 + edna=1 + edna=1)");
+  assertEqual(countBedrooms("cetiri spalni i dve detski"), 6, "'cetiri spalni i dve detski' → 6 (cetiri=4 + dve=2)");
+  assertEqual(countBedrooms("5 sobi"), 5, "'5 sobi' → 5 (digit + sobi via extractFirstNumber fallback)");
+
   // ============================================================ 
   // TEST GROUP: parseOrientation
 // ============================================================
