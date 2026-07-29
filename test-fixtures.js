@@ -597,26 +597,71 @@ function matchObjection(text) {
 }
 
 // ============================================================
-// FIXTURE: classifyIntent (B12 — Finite State Machine)
+// ============================================================
+// FIXTURE: parseConversationContext (context-aware intent helper)
+// ============================================================
+function parseConversationContext(conversation) {
+  if (!conversation || conversation.trim().length === 0) {
+    return { lastAnaMessage: '', lastUserMessage: '', previousUserMessages: [] };
+  }
+
+  const lines = conversation.split('\n').filter(l => l.trim());
+  const userMessages = [];
+  let lastAnaMessage = '';
+  let lastUserMessage = '';
+
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const line = lines[i];
+    if (line.startsWith('Ана:')) {
+      if (!lastAnaMessage) {
+        lastAnaMessage = line.replace(/^Ана:\s*/i, '').toLowerCase();
+      }
+    } else if (line.startsWith('Сопственик:')) {
+      const text = line.replace(/^Сопственик:\s*/i, '').toLowerCase();
+      if (!lastUserMessage) {
+        lastUserMessage = text;
+      }
+      userMessages.push(text);
+    }
+  }
+
+  return {
+    lastAnaMessage,
+    lastUserMessage,
+    previousUserMessages: userMessages.slice(0, 3)
+  };
+}
+
+// ============================================================
+// FIXTURE: classifyIntent (B12 — Finite State Machine, B21 — Context-aware)
 // ============================================================
 function classifyIntent(userInput, conversation) {
   const u = userInput.toLowerCase().trim();
 
+  // Parse conversation context for context-aware rules
+  const ctx = parseConversationContext(conversation);
+
+  // CONTEXT: Check if Ana just explained commission/pricing in her last message
+  const anaExplainingCommission = /провизија|разлика|чиста цена|купопродажна|барана цена|без провизија|нашата провизија|вашата цена/i.test(ctx.lastAnaMessage);
+  const isShortEngaged = u.length < 30 && !/(ne|не)\s*(sakam|me|sum|mi)|ostavi me|izvini/i.test(u);
+
   // 0. PRICE QUOTE GUARD — "jas baram 156 iljadi", "sakam 98000", "cena 120 iljadi"
-  // These are NOT rejections — they're stating a desired net price (buying signal!)
-  // Digit pattern: "baram 156 iljadi", "sakam 98000"
-  // Word-number pattern: "baram stopeeset iljadi", "sakam pedeset iljadi"
   const priceQuoteGuard =
     /(baram|сакам|sakam|цена|cena|price)\s*(\d{1,3}(\.\d{3})*\s*(iljadi|илјади)?)/i.test(u) ||
     /(\d{1,3}\s*(iljadi|илјади).*za\s*(mene|мене))/i.test(u) ||
-    // Word-number pattern: {number_word}(\s+i\s+{number_word})? iljadi
     /(baram|сакам|sakam|цена|cena|price)\s+([a-zа-я]+(\s+i\s+[a-zа-я]+)*)\s+iljadi/i.test(u);
   if (priceQuoteGuard) {
     return { intent: "INTERESTED", confidence: 0.8, reason: "net price quote" };
   }
 
   // 1. REJECTED — with Cyrillic support
-  if (/^(ne|не)$/i.test(u)) return { intent: "REJECTED", confidence: 0.95, reason: "standalone ne" };
+  if (/^(ne|не)$/i.test(u)) {
+    // RULE B: If user was previously engaged (asked question), standalone "ne" is likely answering, not rejecting
+    if (ctx.lastUserMessage && /\?|kako|sto|што|kakva|каква|kolku|колку|dali|дали|koj|кој/i.test(ctx.lastUserMessage)) {
+      return { intent: "INTERESTED", confidence: 0.65, reason: "standalone ne with context: user was previously engaged" };
+    }
+    return { intent: "REJECTED", confidence: 0.95, reason: "standalone ne" };
+  }
   if (/(ne|не)\s*sum\s*(zainteresiran|заинтересиран)/i.test(u)) return { intent: "REJECTED", confidence: 0.95, reason: "ne sum zainteresiran" };
   if (/(ne|не)\s*me\s*(interesira|интересира)/i.test(u)) return { intent: "REJECTED", confidence: 0.95, reason: "ne me interesira" };
   if (/(ne|не)\s*(sakam|сакам)/i.test(u)) return { intent: "REJECTED", confidence: 0.95, reason: "ne sakam" };
@@ -630,7 +675,16 @@ function classifyIntent(userInput, conversation) {
   if (/(ne|не)\s*(moze|може)\s*da/i.test(u)) return { intent: "REJECTED", confidence: 0.8, reason: "ne moze da" };
 
   // 2. ACCEPTED — with Cyrillic support
-  if (/^(da|да)$/i.test(u)) return { intent: "ACCEPTED", confidence: 0.95, reason: "standalone da" };
+  if (/^(da|да)$/i.test(u)) {
+    // RULE C: If user previously hesitated, standalone "da" is not true acceptance
+    const hasPreviousHesitation = ctx.previousUserMessages.some(msg =>
+      /mislam|мислам|mozebi|можеби|sepak|сепак|ama|ама|ne sum|не сум|ne znam|не знам|razmisl|размисл|prvo|прво|samo|само|probam|пробам|ke vidime|ќе видиме|da vidime|да видиме/i.test(msg)
+    );
+    if (hasPreviousHesitation) {
+      return { intent: "INTERESTED", confidence: 0.6, reason: "standalone da with context: previous hesitation" };
+    }
+    return { intent: "ACCEPTED", confidence: 0.95, reason: "standalone da" };
+  }
   // COMPREHENSIVE GUARD: affirmative start + objection/concern/question → INTERESTED (not ACCEPTED)
   if (/^(da|да|ajde|ајде|moze|може|dobro|добро)([,.\s]|$)/i.test(u) &&
       /(\?|a\s+(sto|што|kako|како|dali|дали|koj|кој|koga|кога|kolku|колку|zosto|зошто|kakov|каков|kakva|каква|kakvo|какво|kakvi|какви)|ama|ама|sepak|сепак|mislam|мислам|dali|дали|mozebi|можеби|druga|друга|vekje|веќе|ke vidime|ќе видиме|da vidime|да видиме|ne sum|не сум|ne znam|не знам|ke razmislam|ќе размислам|razmisluvam|размислувам|ne rabotel|не работел|nemam iskustvo|немам искуство|ne sum siguren|не сум сигурен|ke prasam|ќе прашам|ke se javam|ќе се јавам|da se javam|да се јавам|da prasam|да прашам|ne sum rabotil|не сум работел|ne rabotila|не работела|nemam raboteno|немам работено|imam\s+dogovor|имам\s+договор|sto\s+ke|што\s+ќе|kako\s+ke|како\s+ќе|se\s+mislam|се\s+мислам|treba\s+da|треба\s+da|prvo|прво|samo\s+|само\s+)/i.test(u)) {
@@ -670,7 +724,10 @@ function classifyIntent(userInput, conversation) {
   if (/(ne|не)\s*(veruvam|верувам)/i.test(u)) return { intent: "INTERESTED", confidence: 0.6, reason: "ne veruvam" };
   if (/(nemam|немам)\s*(doverba|доверба)/i.test(u)) return { intent: "INTERESTED", confidence: 0.6, reason: "nemam doverba" };
 
-  // 4. Default
+  // 4. Default (with context boost: if Ana was explaining commission, boost to INTERESTED)
+  if (anaExplainingCommission && isShortEngaged) {
+    return { intent: "INTERESTED", confidence: 0.7, reason: "ambiguous with commission context" };
+  }
   return { intent: "INTERESTED", confidence: 0.5, reason: "ambiguous default" };
 }
 
@@ -940,6 +997,91 @@ assertIntentEqual(classifyIntent("da"), "ACCEPTED", 0.9, "REGRESSION: 'da' still
 assertIntentEqual(classifyIntent("da probame"), "ACCEPTED", 0.8, "REGRESSION: 'da probame' → ACCEPTED");
 assertIntentEqual(classifyIntent("da sorabotuvame"), "ACCEPTED", 0.8, "REGRESSION: 'da sorabotuvame' → ACCEPTED");
 assertIntentEqual(classifyIntent("ajde ajde"), "ACCEPTED", 0.8, "REGRESSION: 'ajde ajde' → ACCEPTED");  assertIntentEqual(classifyIntent("dobro. javete se"), "ACCEPTED", 0.8, "REGRESSION: 'dobro. javete se' → ACCEPTED");
+
+// ============================================================
+// CONTEXT-AWARE (B21) — classifyIntent with conversation history
+// ============================================================
+console.log(`  ── Context-aware rules (B21)`);
+
+// Helper: build conv string with Ana's last message
+function convWithAna(text) {
+  return `Ана: Здраво, јас сум Ана од Metropolis.
+Сопственик: KAKVI SE USLOVITE?
+Ана: ${text}`;
+}
+
+// Helper: build conv string with the last user message showing engagement
+function convWithUserQuestion(userMsg) {
+  return `Ана: Здраво, јас сум Ана од Metropolis.
+Сопственик: ${userMsg}
+Ана: Разликата меѓу вашата чиста цена и постигнатата купопродажна цена е провизија за агенцијата. Дали ви е појасно?`;
+}
+
+// Helper: build conv with previous user hesitation
+function convWithHesitation(hesitationMsg) {
+  return `Ана: Здраво, јас сум Ана од Metropolis.
+Сопственик: ${hesitationMsg}
+Ана: Ве разбирам, имаме голем број клиенти заинтересирани. Дали сте расположени да соработуваме?
+Сопственик: da
+Ана: Одлично! Која би била последната чиста цена за станот?`;
+}
+
+// RULE A: Objection context boost — Ana explaining commission should boost INTERESTED
+assertIntentEqual(
+  classifyIntent("kazete mi poveke", convWithAna("Разликата меѓу вашата чиста цена и постигнатата купопродажна цена е провизија за агенцијата.")),
+  "INTERESTED", 0.6,
+  "B21-A1: ambiguous reply → INTERESTED with commission context"
+);
+
+// RULE B: Previous user engagement → standalone "ne" downgraded from REJECTED
+assertIntentEqual(
+  classifyIntent("ne", convWithUserQuestion("KAKVI SE USLOVITE?")),
+  "INTERESTED", 0.6,
+  "B21-B1: 'ne' → INTERESTED when user previously asked a question"
+);
+assertIntentEqual(
+  classifyIntent("ne", convWithUserQuestion("KOLKU PROVZIJA ZEMATE?")),
+  "INTERESTED", 0.6,
+  "B21-B2: 'ne' → INTERESTED when user asked about commission"
+);
+assertIntentEqual(
+  classifyIntent("ne", convWithUserQuestion("KAKO RABOTI TOA?")),
+  "INTERESTED", 0.6,
+  "B21-B3: 'ne' → INTERESTED when user asked 'how does it work?'"
+);
+
+// RULE B (control): Without conversation context, standalone "ne" is still REJECTED
+assertIntentEqual(
+  classifyIntent("ne", ""),
+  "REJECTED", 0.9,
+  "B21-B4: 'ne' without context → still REJECTED"
+);
+
+// RULE C: Previous hesitation → standalone "da" downgraded to INTERESTED
+assertIntentEqual(
+  classifyIntent("da", convWithHesitation("mozebi ke probam ama ne sum siguren")),
+  "INTERESTED", 0.5,
+  "B21-C1: 'da' → INTERESTED when user previously hesitated"
+);
+assertIntentEqual(
+  classifyIntent("da", convWithHesitation("se mislam uste")),
+  "INTERESTED", 0.5,
+  "B21-C2: 'da' → INTERESTED when user said 'se mislam'"
+);
+
+// RULE C (control): Without previous hesitation, "da" is still ACCEPTED
+assertIntentEqual(
+  classifyIntent("da", ""),
+  "ACCEPTED", 0.9,
+  "B21-C3: 'da' without hesitation context → still ACCEPTED"
+);
+
+// RULE C (control): Strong explicit acceptance overrides hesitation context
+assertIntentEqual(
+  classifyIntent("da sorabotuvame", convWithHesitation("mozebi")),
+  "ACCEPTED", 0.8,
+  "B21-C4: 'da sorabotuvame' → ACCEPTED regardless of context"
+);
 
 // NEW OBJECTION PATTERNS — expanded guard catches questions, other agencies, conditions, etc.
 assertIntentEqual(classifyIntent("dobro zvuci. a sto ke pravime so toa sto jas vekje sorabotuvam so edna druga agencija?"), "INTERESTED", 0.6, "H12: 'dobro zvuci. a sto ke pravime so druga agencija?' → INTERESTED");
