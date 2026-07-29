@@ -22,13 +22,18 @@ import {
 // ========================================
 
 function extractCleanPrice(u, data) {
-  if (data.transactionType === 'rent') return null;
+  // Skip if this is a rental (transactionType='rent') OR if monthlyRent already captured
+  // (handles case during persuasion when transactionType isn't set yet but price is rent amount)
+  if (data.transactionType === 'rent' || data.monthlyRent !== undefined) return null;
   const price = extractPrice(u);
   return price !== null ? { cleanPrice: price } : null;
 }
 
 function extractMonthlyRent(u, data) {
+  // Skip if NOT a rental (transactionType !== 'rent' also catches undefined during persuasion)
+  // Also skip if cleanPrice already captured (cross-guard for sale leads)
   if (data.transactionType !== 'rent') return null;
+  if (data.cleanPrice !== undefined) return null;
   const price = extractPrice(u);
   return price !== null ? { monthlyRent: price } : null;
 }

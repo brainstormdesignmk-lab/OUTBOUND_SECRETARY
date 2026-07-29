@@ -290,7 +290,7 @@ export async function generateResponse(session, userInput) {
     // ========================================
     // HARDCODED: Availability confirmation (with negative lookahead to prevent false matches)
     // ========================================
-    if (!session.collectedData.cooperationAccepted &&/uste go imam|уште го имам|dostapen e|достапен е|sloboden e|слободен е|seuste e dostapen|сè уште е достапен|go imam|го имам|uste e|уште е|dostapen|достапен|da imam|да имам|uste go imam da|уште го имам да|da uste go imam|да уште го имам|seuste go imam|сè уште го имам|go imam uste|го имам уште|uste e sloboden|уште е слободен|e sloboden|е слободен|dostapno e|достапно е|seuste e dostapno|сè уште е достапно|ima uste|има уште|uste ima|уште има|go ima uste|го има уште|uste go ima|уште го има|go ima|го има|uste go imam|уште го имам|go nema|го нема|nema go|нема го|ne e dostapen|не е достапен|go nema uste|го нема уште|uste go nema|уште го нема|seuste e|сè уште е|seuste go imam|сè уште го имам|dostapna e|достапна е|slobodna e|слободна е|seuste e dostapna|сè уште е достапна|uste e dostapna|уште е достапна|dostapni se|достапни се|seuste se dostapni|сè уште се достапни|uste se dostapni|уште се достапни|go imam uste|го имам уште|uste go imam|уште го имам|go imam seuste|го имам сè уште|seuste go imam|сè уште го имам|go imam|го имам|uste go imam|уште го имам|seuste go imam|сè уште го имам|go imam|го имам|uste go imam|уште го имам|nema|нема|nema go|нема го|go nema|го нема|go nema uste|го нема уште|uste go nema|уште го нема|nema uste|нема уште|seuste e|сè уште е|dostapen|достапен|dostapna|достапна/i.test(u) && !/terasa|тераса|klima|клима|parking|паркинг|procent|процент|obvrski|обврски|klient|клиент|broj|број|kancelari|канцелари|sorabotka|соработка|uslovi|услови|garaza|гаража|garage|гараж|lift|лифт|m2|квадрати|kvadrati|heating|греење|parno|парно/i.test(u)) {
+    if (!session.collectedData.cooperationAccepted &&/uste go imam|уште го имам|dostapen e|достапен е|sloboden e|слободен е|seuste e dostapen|сè уште е достапен|go imam|го имам|uste e|уште е|dostapen|достапен|da imam|да имам|uste go imam da|уште го имам да|da uste go imam|да уште го имам|seuste go imam|сè уште го имам|go imam uste|го имам уште|uste e sloboden|уште е слободен|e sloboden|е слободен|dostapno e|достапно е|seuste e dostapno|сè уште е достапно|ima uste|има уште|uste ima|уште има|go ima uste|го има уште|uste go ima|уште го има|go ima|го има|uste go imam|уште го имам|go nema|го нема|nema go|нема го|ne e dostapen|не е достапен|go nema uste|го нема уште|uste go nema|уште го нема|seuste e|сè уште е|seuste go imam|сè уште го имам|dostapna e|достапна е|slobodna e|слободна е|seuste e dostapna|сè уште е достапна|uste e dostapna|уште е достапна|dostapni se|достапни се|seuste se dostapni|сè уште се достапни|uste se dostapni|уште се достапни|go imam uste|го имам уште|uste go imam|уште го имам|go imam seuste|го имам сè уште|seuste go imam|сè уште го имам|go imam|го имам|uste go imam|уште го имам|seuste go imam|сè уште го имам|go imam|го имам|uste go imam|уште го имам|nema go|нема го|go nema|го нема|go nema uste|го нема уште|uste go nema|уште го нема|nema uste|нема уште|seuste e|сè уште е|dostapen|достапен|dostapna|достапна/i.test(u) && !/terasa|тераса|klima|клима|parking|паркинг|procent|процент|obvrski|обврски|klient|клиент|broj|број|kancelari|канцелари|sorabotka|соработка|uslovi|услови|garaza|гаража|garage|гараж|lift|лифт|m2|квадрати|kvadrati|heating|греење|parno|парно/i.test(u)) {
       const propertyLabel = session.adMemory?.propertyType === 'apartment' ? 'станот' :
                             session.adMemory?.propertyType === 'house' ? 'куќата' :
                             session.adMemory?.propertyType === 'land' ? 'плацот' :
@@ -544,22 +544,23 @@ if (/kako bi sorabotuvale|како би соработувале|како да �
     }
 
     // ========================================
-    // MEMORY EXTRACTION (Context-aware)
+    // GLOBAL EXTRACTION PASS — extracts all simple fields from EVERY message
+    // Runs for BOTH persuasion and data collection phases.
+    // This captures property details the owner volunteers during conversation
+    // even before formal data collection starts.
     // ========================================
-    // GLOBAL EXTRACTION PASS — extracts all simple fields from every message
+    const updates = runGlobalExtraction(u, session.collectedData);
+    for (const [key, value] of Object.entries(updates)) {
+      session.collectedData[key] = value;
+      console.log(`[GLOBAL: ${key} = ${JSON.stringify(value)}]`);
+    }
+
+    // ========================================
+    // COMPLEX STATEFUL HANDLERS (Data Collection only)
+    // These have early returns (follow-up questions) or complex
+    // state machine logic that can't be pure extraction.
     // ========================================
     if (phase === "DATA_COLLECTION") {
-      const updates = runGlobalExtraction(u, session.collectedData);
-      for (const [key, value] of Object.entries(updates)) {
-        session.collectedData[key] = value;
-        console.log(`[GLOBAL: ${key} = ${JSON.stringify(value)}]`);
-      }
-
-      // ========================================
-      // COMPLEX STATEFUL HANDLERS
-      // These have early returns (follow-up questions) or complex
-      // state machine logic that can't be pure extraction.
-      // ========================================
 
       // === terraceSqm (Handles ALL cases) ===
       if (session.collectedData.terraceSqm === undefined && session.collectedData.hasTerrace === undefined) {
