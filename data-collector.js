@@ -330,6 +330,21 @@ const PRICE_SENSITIVE_EXTRACTORS = new Set([
   'extractTotalFloors'
 ]);
 
+// Number-sniffing extractors that use parseMacedonianNumber or extractFirstNumber
+// as bare-number fallbacks. When the message has NO strong field-specific keywords
+// (e.g., just "pet mislam" — bare number words), these extractors should only run
+// if they're matching the CURRENT field being asked (preferredField), to prevent
+// a single bare number from populating bedrooms + floor + totalSqm simultaneously.
+//
+// extractFloor IS included despite its context-specific early paths (potkrovje,
+// ordinal, digit+kat) because those paths are protected by hasStrongKeywords —
+// "potkrovje" and "prv", "vtor", "tret" are all in the strong keywords regex.
+const NUMBER_SNIFFING_EXTRACTORS = new Set([
+  'extractBedrooms',
+  'extractFloor',
+  'extractTotalSqm'
+]);
+
 // ========================================
 // runGlobalExtraction — Main entry point
 // ========================================
@@ -375,12 +390,37 @@ function runGlobalExtraction(u, currentData, preferredField) {
   // STEP 2: Full extraction pass — bonus info discovery.
   // Only reached when preferredField wasn't set, has no dedicated extractor,
   // or its extractor couldn't find a value in this message.
+  //
+  // Detect whether the message has strong field-specific keywords.
+  // If not (just bare number words like "pet mislam"), number-sniffing
+  // extractors that aren't the preferred field are skipped — preventing
+  // a single bare number from populating bedrooms + floor + totalSqm.
+  // Strong field-specific keywords — message is about a specific field, not a bare number.
+  // When these are absent and preferredField is set, only the current field's extractor
+  // should use bare-number matching (prevents "5" or "pet" from setting bedrooms+floor).
+  const hasStrongKeywords = /spaln|спалн|detsk|детск|gostinsk|гостинск|golem|голем|mala|мала|soba|соба|sobi|соби|kat|кат|sprat|спрат|katnica|катница|sprata|спрата|potkrovje|поткровје|prizemje|приземје|prv|прв|vtor|втор|tret|трет|cetvrt|четврт|m2|м2|kvadrati|квадрати|kv|кв|sqm|lift|лифт|elevator|klima|клима|inverter|инвертер|parking|паркинг|garaza|гаража|garage|гараж|terasa|тераса|terrace|namest|мебел|namestaj|мебел|opremen|опремен|izgraden|граден|godina|година|gradba|градба|renov|ренов|cist|чист|hipotek|хипотек|ostavinsk|оставинск|foto|фото|slik|слик|viber|вајбер|advokat|адвокат|notar|нотар|danok|данок|provizija|провизија|dogovor|договор|parno|парно|greene|греење|struja|струја|drva|дрва|pelet|пелет|nafta|нафта/i.test(u);
+  const isBareNumber = !hasStrongKeywords && preferredField !== null &&
+    // Short message (bare answer, not a multi-field sentence)
+    u.length < 50 &&
+    // No commas/semicolons (separators that indicate multi-field content)
+    !/[,;]/.test(u) &&
+    // No specific field units
+    !/m2|м2|кв|%|€|£|\$/i.test(u);
+  const preferredExtractor = preferredField ? FIELD_TO_EXTRACTOR[preferredField] : null;
+
   let priceExtracted = false;
   for (const rule of EXTRACTION_RULES) {
     // If a price (cleanPrice or monthlyRent) was already extracted from THIS
     // message, skip number-sniffing extractors that can accidentally pick up
     // price words like "stopeeset" → floor=50 or "tri" → bedrooms=3.
     if (priceExtracted && PRICE_SENSITIVE_EXTRACTORS.has(rule.name)) {
+      continue;
+    }
+    // If the message has NO strong field-specific keywords (just bare number words
+    // like "pet mislam"), only allow number-sniffing extractors that match the
+    // current preferredField. This prevents a bare number from populating
+    // multiple unrelated fields.
+    if (isBareNumber && NUMBER_SNIFFING_EXTRACTORS.has(rule.name) && rule !== preferredExtractor) {
       continue;
     }
     const result = rule(u, currentData);

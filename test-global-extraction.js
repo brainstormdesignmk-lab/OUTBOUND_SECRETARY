@@ -353,6 +353,12 @@ assert("EC4c: cleanPrice NOT extracted from '100 m2, 3 kat'", result.cleanPrice 
 assert("EC4c: totalSqm=100", result.totalSqm === 100, `got ${result.totalSqm}`);  assert("EC4c: floor=3", result.floor === 3, `got ${result.floor}`);
   assert("EC4c: yearBuilt NOT extracted from floor context '100 m2, 3 kat'", result.yearBuilt === undefined, `got ${result.yearBuilt}`);
 
+  // Test 37d: "pet mislam" with preferredField='elevator' → nothing extracted (bare number, no keywords)
+  result = runGlobalExtraction("pet mislam", {}, "pet mislam");
+  assert("EC4d: bedrooms NOT extracted from 'pet mislam' (bare number)", result.bedrooms === undefined, `got ${result.bedrooms}`);
+  assert("EC4d: floor NOT extracted from 'pet mislam' (bare number)", result.floor === undefined, `got ${result.floor}`);
+  assert("EC4d: totalSqm NOT extracted from 'pet mislam'", result.totalSqm === undefined, `got ${result.totalSqm}`);
+
   // Test 38: Message with mixed relevance
 result = runGlobalExtraction("interesen mi e stanot, kolku e kvadratura?", {}, "interesen mi e stanot, kolku e kvadratura?");
 assert("EC5: question extracts nothing", Object.keys(result).length === 0, `got ${Object.keys(result).join(', ')}`);
