@@ -8,6 +8,18 @@
 // Macedonian number words
 // ========================================
 export function parseMacedonianNumber(text) {
+  // For merged forms (no spaces between words) like "peesetisest" → 56,
+  // "sedumdesetidva" → 72, "stodvaesetipet" → 125 — very common in Viber/SMS.
+  // parseNumberWords handles these correctly with its accumulation logic
+  // (finds the tens root, then adds the "i" + ones remainder).
+  // Only trigger for text > 3 chars to avoid interfering with short words
+  // like "tri" or "pet" that the simple includes() check handles correctly.
+  const trimmed = text.trim();
+  if (!/\s/.test(trimmed) && trimmed.length > 3) {
+    const mergedResult = parseNumberWords(text);
+    if (mergedResult !== null) return mergedResult;
+  }
+
   const words = {
     'еден': 1, 'edna': 1, 'eden': 1,
     'два': 2, 'dva': 2,
@@ -38,7 +50,7 @@ export function parseMacedonianNumber(text) {
 
   const sorted = Object.entries(words).sort((a, b) => b[0].length - a[0].length);
   for (const [word, num] of sorted) {
-    if (text.includes(word)) return num;
+    if (trimmed.includes(word)) return num;
   }
   return null;
 }
