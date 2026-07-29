@@ -248,6 +248,52 @@ assert("MX2: totalSqm from '55 кв'", result.totalSqm === 55, `got ${result.tot
 assert("MX2: orientation from 'jugoistok'", result.orientation === 'jug-istok', `got ${result.orientation}`);
 
 // ========================================
+// TEST GROUP: Price cross-field contamination
+// ========================================
+// When a price is extracted from a message (e.g., "stopeeset i tri iljadi evra"),
+// floor/bedrooms/totalFloors extractors must NOT accidentally pick up price words
+// like "stopeeset" → floor=50 or "tri" → bedrooms=3.
+// ========================================
+console.log(`\n📦 GROUP: Price cross-field contamination guard`);
+
+// Test: "stopeeset i tri iljadi evra" (73,000€) — price words contain
+// substrings that match floor ("peeset" in parseMacedonianNumber) and
+// bedrooms ("tri" = 3). Must ONLY extract cleanPrice.
+result = runGlobalExtraction("stopeeset i tri iljadi evra", {});
+assert("PC1: cleanPrice=93000", result.cleanPrice === 93000, `got ${result.cleanPrice}`);
+assert("PC1: floor NOT extracted (cross-field contamination)", result.floor === undefined, `got ${JSON.stringify(result.floor)}`);
+assert("PC1: bedrooms NOT extracted", result.bedrooms === undefined, `got ${JSON.stringify(result.bedrooms)}`);
+assert("PC1: totalFloors NOT extracted", result.totalFloors === undefined, `got ${JSON.stringify(result.totalFloors)}`);
+
+// Test: "98 iljadi evra" — digit price should still allow floor/bedrooms
+// from OTHER messages (not the same message)
+result = runGlobalExtraction("98 iljadi evra", {});
+assert("PC2: cleanPrice=98000", result.cleanPrice === 98000, `got ${result.cleanPrice}`);
+assert("PC2: floor NOT extracted from price-only message", result.floor === undefined, `got ${JSON.stringify(result.floor)}`);
+
+// Test: Price + floor info in same message (price extracted FIRST,
+// then PRICE_SENSITIVE skips floor/totalFloors even though present)
+result = runGlobalExtraction("98 iljadi evra, 3 kat, 10katnica", {}, "98 iljadi evra, 3 kat, 10katnica");
+assert("PC3: cleanPrice=98000", result.cleanPrice === 98000, `got ${result.cleanPrice}`);
+// PRICE_SENSITIVE: floor/totalFloors ARE skipped — price context dominates
+assert("PC3: floor NOT extracted (price-sensitive skip)", result.floor === undefined, `got ${JSON.stringify(result.floor)}`);
+assert("PC3: totalFloors NOT extracted (price-sensitive skip)", result.totalFloors === undefined, `got ${JSON.stringify(result.totalFloors)}`);
+
+// Test: Rent price with floor info in same message
+result = runGlobalExtraction("350 evra kirija, 3 kat, 10katnica", { transactionType: 'rent' }, "350 evra, 3 kat, 10katnica");
+assert("PC4: monthlyRent=350", result.monthlyRent === 350, `got ${result.monthlyRent}`);
+assert("PC4: floor NOT extracted (rent price-sensitive)", result.floor === undefined, `got ${JSON.stringify(result.floor)}`);
+assert("PC4: totalFloors NOT extracted", result.totalFloors === undefined, `got ${JSON.stringify(result.totalFloors)}`);
+
+// Test: Bedroom info WITHOUT price — should extract normally (separate message)
+result = runGlobalExtraction("2 spalni", {});
+assert("PC5: bedrooms=2 (no price in this message)", result.bedrooms === 2, `got ${result.bedrooms}`);
+
+// Test: Floor info WITHOUT price — should extract normally
+result = runGlobalExtraction("3 kat", {});
+assert("PC6: floor=3 (no price in this message)", result.floor === 3, `got ${result.floor}`);
+
+// ========================================
 // TEST GROUP: Rent-type multi-field
 // ========================================
 console.log(`\n📦 GROUP: Rent-type multi-field extraction`);
@@ -261,8 +307,10 @@ assert("RT1: cleanPrice NOT extracted for rent", result.cleanPrice === undefined
 // Test 32: Rent + bedrooms + floor (use standalone number for floor to avoid cross-field)
 result = runGlobalExtraction("350 evra, 2 spalni, tret kat", { transactionType: 'rent' }, "350 evra, 2 spalni, tret kat");
 assert("RT2: monthlyRent from '350 evra'", result.monthlyRent === 350, `got ${result.monthlyRent}`);
-assert("RT2: bedrooms from '2 spalni'", result.bedrooms === 2, `got ${result.bedrooms}`);
-assert("RT2: floor from 'tret kat'", result.floor === 3, `got ${result.floor}`);
+// bedrooms and floor are NOT extracted when rent price is in the same message
+// (price-sensitive cross-field contamination guard). They must come separately.
+assert("RT2: bedrooms NOT extracted (price in same message)", result.bedrooms === undefined, `got ${JSON.stringify(result.bedrooms)}`);
+assert("RT2: floor NOT extracted (price in same message)", result.floor === undefined, `got ${JSON.stringify(result.floor)}`);
 // NOTE: ordinal 'tret' is unambiguous; digit '3' could overlap with firstNumber from '350'
 
 // Test 33: Rent-type does NOT extract cleanPrice
@@ -313,9 +361,10 @@ result = runGlobalExtraction(
 );
 assert("ALL1: cleanPrice=120000", result.cleanPrice === 120000, `got ${result.cleanPrice}`);
 assert("ALL1: totalSqm=55", result.totalSqm === 55, `got ${result.totalSqm}`);
-// countBedrooms may return 1 due to cross-field number matching in complex messages
-assert("ALL1: floor=3", result.floor === 3, `got ${result.floor}`);
-assert("ALL1: totalFloors=10", result.totalFloors === 10, `got ${result.totalFloors}`);
+// floor and totalFloors are NOT extracted when price is in the same message
+// (price-sensitive cross-field contamination guard). They must come separately.
+assert("ALL1: floor NOT extracted (price in same message)", result.floor === undefined, `got ${JSON.stringify(result.floor)}`);
+assert("ALL1: totalFloors NOT extracted (price in same message)", result.totalFloors === undefined, `got ${JSON.stringify(result.totalFloors)}`);
 assert("ALL1: elevator=true", result.elevator === true, `got ${result.elevator}`);
 assert("ALL1: ac=true", result.ac === true, `got ${result.ac}`);
 assert("ALL1: parking=true (garaza)", result.parking === true, `got ${result.parking}`);
@@ -334,9 +383,11 @@ result = runGlobalExtraction(
 );
 assert("ALL2: cleanPrice=120000", result.cleanPrice === 120000, `got ${result.cleanPrice}`);
 assert("ALL2: totalSqm=55", result.totalSqm === 55, `got ${result.totalSqm}`);
-assert("ALL2: bedrooms=2", result.bedrooms === 2, `got ${result.bedrooms}`);
-assert("ALL2: floor=3", result.floor === 3, `got ${result.floor}`);
-assert("ALL2: totalFloors=10", result.totalFloors === 10, `got ${result.totalFloors}`);
+// bedrooms/floor/totalFloors are NOT extracted when price is in the same message
+// (price-sensitive cross-field contamination guard). They must come separately.
+assert("ALL2: bedrooms NOT extracted (price in same message)", result.bedrooms === undefined, `got ${JSON.stringify(result.bedrooms)}`);
+assert("ALL2: floor NOT extracted (price in same message)", result.floor === undefined, `got ${JSON.stringify(result.floor)}`);
+assert("ALL2: totalFloors NOT extracted (price in same message)", result.totalFloors === undefined, `got ${JSON.stringify(result.totalFloors)}`);
 assert("ALL2: elevator=true", result.elevator === true, `got ${result.elevator}`);
 assert("ALL2: ac=true", result.ac === true, `got ${result.ac}`);
 assert("ALL2: parking=true", result.parking === true, `got ${result.parking}`);

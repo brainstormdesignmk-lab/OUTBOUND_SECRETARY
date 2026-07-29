@@ -292,6 +292,15 @@ const EXTRACTION_RULES = [
   extractDocumentationClean
 ];
 
+// Extractors that can accidentally pick up price words (iljadi/evra) as
+// floor/bedroom/totalFloors values. These are skipped when a price was
+// extracted from the same message to prevent cross-field contamination.
+const PRICE_SENSITIVE_EXTRACTORS = new Set([
+  'extractFloor',
+  'extractBedrooms',
+  'extractTotalFloors'
+]);
+
 // ========================================
 // runGlobalExtraction — Main entry point
 // ========================================
@@ -301,7 +310,14 @@ const EXTRACTION_RULES = [
 // ========================================
 function runGlobalExtraction(u, currentData) {
   const updates = {};
+  let priceExtracted = false;
   for (const rule of EXTRACTION_RULES) {
+    // If a price (cleanPrice or monthlyRent) was already extracted from THIS
+    // message, skip number-sniffing extractors that can accidentally pick up
+    // price words like "stopeeset" → floor=50 or "tri" → bedrooms=3.
+    if (priceExtracted && PRICE_SENSITIVE_EXTRACTORS.has(rule.name)) {
+      continue;
+    }
     const result = rule(u, currentData);
     if (result) {
       // Only add fields that aren't already set
@@ -309,6 +325,13 @@ function runGlobalExtraction(u, currentData) {
         const existing = currentData[key];
         if (existing === undefined || existing === null) {
           updates[key] = value;
+          // Track whether a price/rent was newly extracted from THIS message.
+          // Only set when the value is actually stored (not when it already exists
+          // in currentData), to prevent false positives from extractPrice matching
+          // numbers in non-price contexts like "10katnica" → extractPrice("10katnica") → 10.
+          if (key === 'cleanPrice' || key === 'monthlyRent') {
+            priceExtracted = true;
+          }
         }
       }
     }

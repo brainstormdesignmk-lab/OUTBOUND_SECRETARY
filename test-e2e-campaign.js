@@ -263,21 +263,26 @@ async function runScenario2() {
   const session = createSession('sale');
   let res;
 
-  // Turn 1: Price + sqm + bedrooms + floor all in one message
-  res = await sendMessage(session, "120 iljadi, 55 m2, 2 spalni, 3 kat");
+  // Turn 1: Price + sqm (NOT bedrooms/floor — price-sensitive contamination guard
+  // blocks bedrooms, floor, totalFloors when price is in the same message)
+  res = await sendMessage(session, "120 iljadi, 55 m2");
   assert("S2-T1: type=QUESTION", res.type === "QUESTION", `got ${res.type}`);
   assert("S2-T1: cleanPrice=120000", session.collectedData.cleanPrice === 120000, `got ${session.collectedData.cleanPrice}`);
   assert("S2-T1: totalSqm=55", session.collectedData.totalSqm === 55, `got ${session.collectedData.totalSqm}`);
-  assert("S2-T1: bedrooms=2", session.collectedData.bedrooms === 2, `got ${session.collectedData.bedrooms}`);
-  assert("S2-T1: floor=3", session.collectedData.floor === 3, `got ${session.collectedData.floor}`);
-  // Next field should be terraceSqm (terrace-specific word NOT present in input)
+  // bedrooms and floor NOT extracted (price in same message)
+  assert("S2-T1: bedrooms NOT extracted with price", session.collectedData.bedrooms === undefined, `got ${session.collectedData.bedrooms}`);
+  assert("S2-T1: floor NOT extracted with price", session.collectedData.floor === undefined, `got ${session.collectedData.floor}`);
+  // Next field should be terraceSqm
   assert("S2-T1: nextField=terraceSqm", res.nextField === "terraceSqm", `got ${res.nextField}`);
 
-  // Turn 2: Terrace + totalFloors in one message (+ lift for elevator)
-  res = await sendMessage(session, "ima terasa 15m2, 10katnica, lift");
+  // Turn 2: Terrace + bedrooms + floor + totalFloors + elevator in one message
+  // (No price in this message → all extractors run normally)
+  res = await sendMessage(session, "ima terasa 15m2, 2 spalni, 3 kat, 10katnica, lift");
   assert("S2-T2: type=QUESTION", res.type === "QUESTION", `got ${res.type}`);
   assert("S2-T2: hasTerrace=true", session.collectedData.hasTerrace === true, `got ${session.collectedData.hasTerrace}`);
   assert("S2-T2: terraceSqm=15", session.collectedData.terraceSqm === 15, `got ${session.collectedData.terraceSqm}`);
+  assert("S2-T2: bedrooms=2", session.collectedData.bedrooms === 2, `got ${session.collectedData.bedrooms}`);
+  assert("S2-T2: floor=3", session.collectedData.floor === 3, `got ${session.collectedData.floor}`);
   assert("S2-T2: totalFloors=10", session.collectedData.totalFloors === 10, `got ${session.collectedData.totalFloors}`);
   assert("S2-T2: elevator=true", session.collectedData.elevator === true, `got ${session.collectedData.elevator}`);
   // Next: should be heating (not heatingFollowUp since "parno" not mentioned)
