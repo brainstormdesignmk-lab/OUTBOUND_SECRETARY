@@ -553,7 +553,9 @@ if (/kako bi sorabotuvale|како би соработувале|како да �
           console.log(`[TERRACE: none]`);
         }
         // Has terrace with or without size
-        else if (/ima|има|terasa|тераса|terrace|kv|кв|kvadrati|квадрати|m2|m²/i.test(u) || isPositive(u)) {
+        // NOTE: Only match terrace-SPECIFIC words, not generic sqm words like 'kvadrati'/'m2'
+        // (those are handled by the global extraction pass for totalSqm)
+        else if (/ima|има|terasa|тераса|terrace|teras|терас/i.test(u) || isPositive(u)) {
           const firstNum = extractTerraceNumber(u);
           if (firstNum !== null && firstNum > 0 && firstNum < 100) {
             session.collectedData.hasTerrace = true;

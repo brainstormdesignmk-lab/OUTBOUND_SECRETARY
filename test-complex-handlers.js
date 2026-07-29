@@ -43,8 +43,9 @@ function handleTerrace(u, data) {
       data.hasTerrace = false;
       data.terraceSqm = 0;
       return null;
-    }
-    if (/ima|има|terasa|тераса|terrace|kv|кв|kvadrati|квадрати|m2|m²/i.test(u) || isPositive(u)) {
+    }        // NOTE: Must stay in sync with service.js — only match terrace-specific words,
+        // not generic sqm words like 'kvadrati'/'m2' (those are for totalSqm)
+        if (/ima|има|terasa|тераса|terrace|teras|терас/i.test(u) || isPositive(u)) {
       const firstNum = extractTerraceNumber(u);
       if (firstNum !== null && firstNum > 0 && firstNum < 100) {
         data.hasTerrace = true;
@@ -199,11 +200,12 @@ console.log(`━━━━━━━━━━━━━━━━━━━━━━�
   assert("T7: 'da, 8m2' → hasTerrace=true, sqm=8", d.hasTerrace === true && d.terraceSqm === 8, `got hasTerrace=${d.hasTerrace}, sqm=${d.terraceSqm}`);
 })();
 
-// T8: Terrace with known size — "kvadrati 12"
+// T8: Generic sqm word "kvadrati" should NOT trigger terrace handler (bug fix)
+// 'kvadrati' is now only used by global extraction pass for totalSqm, not terrace
 (() => {
   const d = freshData();
   handleTerrace("kvadrati 12", d);
-  assert("T8: 'kvadrati 12' → hasTerrace=true, sqm=12", d.hasTerrace === true && d.terraceSqm === 12, `got hasTerrace=${d.hasTerrace}, sqm=${d.terraceSqm}`);
+  assert("T8: 'kvadrati 12' → NOT extracted (generic sqm word)", d.hasTerrace === undefined && d.terraceSqm === undefined, `got hasTerrace=${d.hasTerrace}, sqm=${d.terraceSqm}`);
 })();
 
 // T9: Terrace without size — "ima" → follow-up

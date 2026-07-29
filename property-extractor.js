@@ -270,7 +270,11 @@ export function countBedrooms(text) {
   const wordNum = parseMacedonianNumber(u);
   if (wordNum !== null && wordNum >= 0 && wordNum <= 10) return wordNum;
   const firstNum = extractFirstNumber(u);
-  if (firstNum !== null && firstNum >= 0 && firstNum <= 20) return firstNum;
+  if (firstNum !== null && firstNum >= 0 && firstNum <= 20) {
+    // Skip if message contains other-field context (sqm, floor, terrace, price)
+    if (/m2|м2|кв|kvadrati|квадрати|sqm|kat|кат|sprat|спрат|terasa|тераса|m²|evra|евра/i.test(u)) return null;
+    return firstNum;
+  }
 
   if (roomCount === 1) return 1;
 

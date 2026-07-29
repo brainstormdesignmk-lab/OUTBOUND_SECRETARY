@@ -77,9 +77,14 @@ function extractFloor(u, data) {
     const num = parseInt(floorMatch[1]);
     if (num >= 0 && num <= 50) return { floor: num };
   }
-  // Fallback: extract first reasonable number
+  // Fallback: extract first reasonable number — but skip if another field context present
+  // (e.g., "2 spalni" → number 2 is about bedrooms, not floor)
   const firstNum = extractFirstNumber(u);
-  if (firstNum !== null && firstNum >= 0 && firstNum <= 50) return { floor: firstNum };
+  if (firstNum !== null && firstNum >= 0 && firstNum <= 50) {
+    // Skip if the message contains context from another field
+    if (/m2|м2|кв|kvadrati|квадрати|kv|sqm|spalni|спални|terasa|тераса/i.test(u)) return null;
+    return { floor: firstNum };
+  }
   const wordNum = parseMacedonianNumber(u);
   if (wordNum !== null && wordNum >= 0 && wordNum <= 50) return { floor: wordNum };
   return null;
@@ -183,22 +188,24 @@ function extractRenovated(u, data) {
   if (renovYearBefore) {
     return { renovated: true, renovationYear: parseInt(renovYearBefore[1]) };
   }
-  // Fallback: any year in the message
-  const yearMatch = u.match(/(?:19|20)\d{2}(?=[taтг\s,.;!]|$)/);
-  if (yearMatch) {
-    return { renovated: true, renovationYear: parseInt(yearMatch[0].substring(0, 4)) };
-  }
-  if (/90ti|90 ти|90-ти|90ти|деведесетти/i.test(u)) {
-    return { renovated: true, renovationYear: 1995 };
-  }
-  if (/80ti|80 ти|80-ти|80ти/i.test(u)) {
-    return { renovated: true, renovationYear: 1985 };
-  }
-  if (/2000ti|2000 ти|двеилјадити/i.test(u)) {
-    return { renovated: true, renovationYear: 2005 };
-  }
+  // Renovation-specific words (no year) — just "renoviran" means yes, year unknown
   if (/реновиран|renoviran|обновен|obnoven|novo|нов|sreden|среден|kompletno renoviran|комплетно реновиран|delumno renoviran|делумно реновиран|skoro|скоро|nedavno|недавно|pre|пред|osvezhivme|освеживме|go osvezivme|го освеживме/i.test(u)) {
     return { renovated: true, renovationYear: null };
+  }
+  // Fallback: any year in the message — but ONLY if renovation word is present
+  // (otherwise bare "2015 godina" would incorrectly set renovated=true)
+  const yearMatch = u.match(/(?:19|20)\d{2}(?=[taтг\s,.;!]|$)/);
+  if (yearMatch && /renoviran|реновиран|obnoven|обновен|osvezh|освеж/i.test(u)) {
+    return { renovated: true, renovationYear: parseInt(yearMatch[0].substring(0, 4)) };
+  }
+  if (/90ti|90 ти|90-ти|90ти|деведесетти/i.test(u) && /renoviran|реновиран|obnoven|обновен/i.test(u)) {
+    return { renovated: true, renovationYear: 1995 };
+  }
+  if (/80ti|80 ти|80-ти|80ти/i.test(u) && /renoviran|реновиран|obnoven|обновен/i.test(u)) {
+    return { renovated: true, renovationYear: 1985 };
+  }
+  if (/2000ti|2000 ти|двеилјадити/i.test(u) && /renoviran|реновиран|obnoven|обновен/i.test(u)) {
+    return { renovated: true, renovationYear: 2005 };
   }
   if (/pred|пред|pri|при/i.test(u)) {
     const years = u.match(/\d+/);
