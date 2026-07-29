@@ -316,9 +316,16 @@ function parseYearBuilt(text) {
   const exactYearMatch = text.match(/\b(19\d{2}|20\d{2})\b/);
   if (exactYearMatch) return parseInt(exactYearMatch[1]);
 
+  // Skip 2-digit matches that are part of sqm/price context ('80 m2', '50 кв', '350 evra', '98 iljadi')
+  // or floor/building-story context ('13 sprata', '10 katnica', '5 kat').
+  // Only extract 2-digit years when message is purely numeric (bare '98', '13')
+  // or has explicit year context words (izgraden, godina, etc.).
   const twoDigit = text.match(/\b(\d{2})\b/);
   if (twoDigit) {
     const year = parseInt(twoDigit[1]);
+    // Skip if followed by sqm, price, floor, or building-story context
+    const afterMatch = text.slice(twoDigit.index + twoDigit[0].length).trim();
+    if (/^(m2|м2|кв|kvadrati|квадрати|kvadrata|квадрата|sqm|evra|евра|eur|iljadi|илјади|iljade|илјаде|sprat|спрат|kat|кат|katnica|катница|sprata|спрата|kata|ката|kati|кати|eta|ета|etazha|етажа|spraevi|спраеви|spratovi|спратови|katovi|катови)/i.test(afterMatch)) return null;
     if (year >= 0 && year <= 30) return 2000 + year;
     if (year >= 70 && year <= 99) return 1900 + year;
   }
@@ -336,6 +343,7 @@ function parseYearBuilt(text) {
     if (/nekoja|некоја|nekoi|некои|неколку|некое|nekoe/i.test(text)) return 1995;
     return 1990;
   }
+
 
   if (/osemdeset|осумдесет|80/i.test(text)) {
     if (/nekoja|некоја|nekoi|некои|неколку|некое|nekoe/i.test(text)) return 1985;
@@ -840,9 +848,11 @@ assertEqual(parseMacedonianNumber("seeset"), 60, "B3: 'seeset' → 60 (fixed!)")
 // B6/B10: substring issue — "dvanaeset" should be 12, not 2
 assertEqual(parseMacedonianNumber("dvanaeset"), 12, "B6/B10: 'dvanaeset' → 12 (⚠ current: 2 — substring match bug!)");
 
-assertEqual(parseMacedonianNumber("cetirinaeset"), 14, "B6: 'cetirinaeset' → 14 (⚠ current: 4)");
+assertEqual(parseMacedonianNumber("cetirinaeset"), 14, "B6: 'cetirinaeset' → 14 (⚠ current: 4)");  // B16: 2-digit year should NOT extract from floor/building-story context
+  assertEqual(parseYearBuilt("zgradata ima 13 sprata"), null, "B16: 'zgradata ima 13 sprata' → null (floor context, not year)");
+  assertEqual(parseYearBuilt("10 katnica"), null, "B16: '10 katnica' → null (building story context)");
 
-// Working cases
+  // Working cases
 assertEqual(parseMacedonianNumber("dva"), 2, "dva → 2");
 assertEqual(parseMacedonianNumber("tri"), 3, "tri → 3");
 assertEqual(parseMacedonianNumber("pet"), 5, "pet → 5");

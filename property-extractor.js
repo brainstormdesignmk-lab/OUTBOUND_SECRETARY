@@ -489,12 +489,15 @@ export function parseYearBuilt(text) {
   if (exactYearMatch) return parseInt(exactYearMatch[1]);
 
   // Skip 2-digit matches that are part of sqm/price context ('80 m2', '50 кв', '350 evra', '98 iljadi')
+  // or floor/building-story context ('13 sprata', '10 katnica', '5 kat').
+  // Only extract 2-digit years when message is purely numeric (bare '98', '13')
+  // or has explicit year context words (izgraden, godina, etc.).
   const twoDigit = text.match(/\b(\d{2})\b/);
   if (twoDigit) {
     const year = parseInt(twoDigit[1]);
-    // Skip if followed by sqm or price context
+    // Skip if followed by sqm, price, floor, or building-story context
     const afterMatch = text.slice(twoDigit.index + twoDigit[0].length).trim();
-    if (/^(m2|м2|кв|kvadrati|квадрати|kvadrata|квадрата|sqm|evra|евра|eur|iljadi|илјади|iljade|илјаде)/i.test(afterMatch)) return null;
+    if (/^(m2|м2|кв|kvadrati|квадрати|kvadrata|квадрата|sqm|evra|евра|eur|iljadi|илјади|iljade|илјаде|sprat|спрат|kat|кат|katnica|катница|sprata|спрата|kata|ката|kati|кати|eta|ета|etazha|етажа|spraevi|спраеви|spratovi|спратови|katovi|катови)/i.test(afterMatch)) return null;
     if (year >= 0 && year <= 30) return 2000 + year;
     if (year >= 70 && year <= 99) return 1900 + year;
   }

@@ -350,10 +350,10 @@ result = runGlobalExtraction("dve golemi i edna detska", {}, "dve golemi i edna 
   // Test 37c: "100 m2, 3 kat" should NOT extract cleanPrice (no price keywords)
 result = runGlobalExtraction("100 m2, 3 kat", {}, "100 m2, 3 kat");
 assert("EC4c: cleanPrice NOT extracted from '100 m2, 3 kat'", result.cleanPrice === undefined, `got ${result.cleanPrice}`);
-assert("EC4c: totalSqm=100", result.totalSqm === 100, `got ${result.totalSqm}`);
-assert("EC4c: floor=3", result.floor === 3, `got ${result.floor}`);
+assert("EC4c: totalSqm=100", result.totalSqm === 100, `got ${result.totalSqm}`);  assert("EC4c: floor=3", result.floor === 3, `got ${result.floor}`);
+  assert("EC4c: yearBuilt NOT extracted from floor context '100 m2, 3 kat'", result.yearBuilt === undefined, `got ${result.yearBuilt}`);
 
-// Test 38: Message with mixed relevance
+  // Test 38: Message with mixed relevance
 result = runGlobalExtraction("interesen mi e stanot, kolku e kvadratura?", {}, "interesen mi e stanot, kolku e kvadratura?");
 assert("EC5: question extracts nothing", Object.keys(result).length === 0, `got ${Object.keys(result).join(', ')}`);
 
