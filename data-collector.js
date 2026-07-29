@@ -356,7 +356,6 @@ const DERIVED_SUBKEYS = new Set([
 function assessConfidence(field, value, input) {
   const hasUncertainty = UNCERTAINTY_WORDS.test(input);
   if (hasUncertainty) {
-    console.log(`[CONFIDENCE: ${field} = MEDIUM (uncertainty words)]`);
     return 'MEDIUM';
   }
 
@@ -364,7 +363,6 @@ function assessConfidence(field, value, input) {
   // their parent extractor. If they reached this point, the parent already
   // verified the context — HIGH.
   if (DERIVED_SUBKEYS.has(field)) {
-    console.log(`[CONFIDENCE: ${field} = HIGH (derived sub-key)]`);
     return 'HIGH';
   }
 
@@ -372,7 +370,6 @@ function assessConfidence(field, value, input) {
   // have dedicated extractors with their own context guards (e.g., extractElevator requires
   // "lift" or "лифт"). If the extractor returned a value, the context was verified — HIGH.
   if (typeof value === 'boolean' || BINARY_CONFIDENCE_FIELDS.has(field)) {
-    console.log(`[CONFIDENCE: ${field} = HIGH (binary extractor confirmed)]`);
     return 'HIGH';
   }
 
@@ -381,14 +378,12 @@ function assessConfidence(field, value, input) {
   // keyword context like "godina" or "izgraden".
   if ((field === 'yearBuilt' || field === 'renovationYear') &&
       typeof value === 'number' && value >= 1900 && value <= 2030) {
-    console.log(`[CONFIDENCE: ${field} = HIGH (year-like number)]`);
     return 'HIGH';
   }
 
   // Check field-specific keywords for numeric/string fields
   const keywordRegex = FIELD_CONFIDENCE_KEYWORDS[field];
   if (keywordRegex && keywordRegex.test(input)) {
-    console.log(`[CONFIDENCE: ${field} = HIGH (keyword match)]`);
     return 'HIGH';
   }
 
@@ -398,13 +393,10 @@ function assessConfidence(field, value, input) {
   // User might be answering the current question with a word number.
   const hasDigits = /\d+/.test(input);
   if (hasDigits || /jedn|dve|tri|cetiri|pet|sest|sedum|osum|devet|deset|stoti|илjadi/i.test(input)) {
-    // Bare digit or word number — could be correct answer to current question
-    console.log(`[CONFIDENCE: ${field} = MEDIUM (bare number)]`);
     return 'MEDIUM';
   }
 
   // String value (orientation, heating, etc.) without keyword context → LOW
-  console.log(`[CONFIDENCE: ${field} = LOW (no context)]`);
   return 'LOW';
 }
 

@@ -606,20 +606,36 @@ if (/kako bi sorabotuvale|како би соработувале|како да �
       const toStore = {};     // HIGH or volunteered-MEDIUM → store immediately
       let provisionalValue = null;  // MEDIUM for current field → ask confirmation
 
+      const extractedLog = [];
+      const rejectedLog = [];
       for (const [key, value] of Object.entries(rawUpdates)) {
         const confidence = assessConfidence(key, value, u);
+        const score = confidence === 'HIGH' ? 0.95 : confidence === 'MEDIUM' ? 0.60 : 0.10;
         if (confidence === 'HIGH') {
           toStore[key] = value;
-          console.log(`[GLOBAL: ${key} = ${JSON.stringify(value)} (HIGH)]`);
+          extractedLog.push({ key, value, score });
         } else if (confidence === 'MEDIUM' && key === nextField) {
           provisionalValue = { field: key, value };
-          console.log(`[PROVISIONAL: ${key} = ${JSON.stringify(value)} (MEDIUM, await confirm)]`);
+          extractedLog.push({ key, value, score: 0.60, pending: true });
         } else if (confidence === 'MEDIUM') {
-          // Volunteered field — store silently (user might not be answering current question)
           toStore[key] = value;
-          console.log(`[GLOBAL: ${key} = ${JSON.stringify(value)} (volunteered MEDIUM)]`);
+          extractedLog.push({ key, value, score, volunteered: true });
+        } else {
+          rejectedLog.push({ key, value, reason: 'context mismatch' });
         }
-        // LOW → discard, no log needed
+      }
+      // Print extraction summary
+      if (extractedLog.length > 0 || rejectedLog.length > 0) {
+        console.log(`--- EXTRACTION ---`);
+        console.log(`MESSAGE: ${JSON.stringify(userInput)}`);
+        for (const e of extractedLog) {
+          const tag = e.pending ? ' (PENDING)' : e.volunteered ? ' (volunteered)' : '';
+          console.log(`  EXTRACTED: ${e.key}=${JSON.stringify(e.value)} (${e.score.toFixed(2)})${tag}`);
+        }
+        for (const r of rejectedLog) {
+          console.log(`  REJECTED: ${r.key}=${JSON.stringify(r.value)} (${r.reason})`);
+        }
+        console.log(`------------------`);
       }
 
       // Store HIGH and volunteered-MEDIUM values
