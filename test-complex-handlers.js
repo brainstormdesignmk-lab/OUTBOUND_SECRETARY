@@ -109,7 +109,7 @@ function handlePhotos(u, data, hasScraperPhotos) {
       data.photos = true;
     }
   } else if (hasScraperPhotos) {
-    if (isPositive(u) || /da|да|se|се|aktuelni|актуелни|okej|океј|moze|може|se aktuelni|се актуелни|aktuelni se|актуелни се|da se|да се|se isti|се исти|isti se|исти се/i.test(u)) {
+    if (isPositive(u) || (/da|да|se|се|aktuelni|актуелни|okej|океј|moze|може|se aktuelni|се актуелни|aktuelni se|актуелни се|da se|да се|se isti|се исти|isti se|исти се/i.test(u) && !/neaktuelni|неактуелни/i.test(u))) {
       data.photosPermission = true;
       data.photosSource = "SCRAPER";
       data.photosStatus = "SCRAPER_APPROVED";
@@ -260,6 +260,44 @@ console.log(`━━━━━━━━━━━━━━━━━━━━━━�
   assert("T15: 'nema parking' → hasTerrace=false (limitation: nema parking in pattern)", 
     d.hasTerrace === false && d.terraceSqm === 0, 
     `got hasTerrace=${d.hasTerrace}, sqm=${d.terraceSqm}`);
+})();
+
+// T16: Terrace follow-up answer — bare number "15" (user responds just the number)
+(() => {
+  const d = freshData();
+  handleTerrace("15", d);
+  assert("T16: bare number '15' → NOT extracted (no terrace word, not isPositive)", d.hasTerrace === undefined, `got hasTerrace=${d.hasTerrace}`);
+  // NOTE: isPositive("15") is false, bare numbers don't trigger the handler.
+  // This is a known limitation for the follow-up scenario.
+  // In practice the user typically says "da, 15" or "ima 15".
+})();
+
+// T17: Terrace — "da, ima" without size → follow-up
+(() => {
+  const d = freshData();
+  const result = handleTerrace("da, ima", d);
+  assert("T17: 'da, ima' without size → follow-up", result !== null && result.type === "QUESTION", `got ${JSON.stringify(result)}`);
+})();
+
+// T18: Terrace — Cyrillic "нема" (no) → hasTerrace=false
+(() => {
+  const d = freshData();
+  handleTerrace("нема", d);
+  assert("T18: 'нема' → hasTerrace=false", d.hasTerrace === false && d.terraceSqm === 0, `got hasTerrace=${d.hasTerrace}, sqm=${d.terraceSqm}`);
+})();
+
+// T19: Terrace — "terasa 10m2" without "ima" → still works via terrace-specific word
+(() => {
+  const d = freshData();
+  handleTerrace("terasa 10m2", d);
+  assert("T19: 'terasa 10m2' → hasTerrace=true, sqm=10", d.hasTerrace === true && d.terraceSqm === 10, `got hasTerrace=${d.hasTerrace}, sqm=${d.terraceSqm}`);
+})();
+
+// T20: Terrace — "ok" with number via isPositive
+(() => {
+  const d = freshData();
+  handleTerrace("ok 12m2", d);
+  assert("T20: 'ok 12m2' → hasTerrace=true, sqm=12", d.hasTerrace === true && d.terraceSqm === 12, `got hasTerrace=${d.hasTerrace}, sqm=${d.terraceSqm}`);
 })();
 
 
@@ -430,6 +468,65 @@ console.log(`━━━━━━━━━━━━━━━━━━━━━━�
   const d = freshData();
   handleHeating("пелети", d, 'heating');
   assert("H22: 'пелети' → heating=solid_fuel", d.heating === "solid_fuel" && d.heatingType === "wood_pellets", `got heating=${d.heating}`);
+})();
+
+// H23: Cyrillic "далечно" → district
+(() => {
+  const d = freshData();
+  handleHeating("далечно", d, 'heating');
+  assert("H23: 'далечно' → heating=district", d.heating === "district", `got heating=${d.heating}`);
+})();
+
+// H24: "individualno" → private_central
+(() => {
+  const d = freshData();
+  handleHeating("individualno", d, 'heating');
+  assert("H24: 'individualno' → heating=central, type=private_central", d.heating === "central" && d.heatingType === "private_central", `got heating=${d.heating}`);
+})();
+
+// H25: Cyrillic "термопумпа" (heat pump) → electric/inverter
+(() => {
+  const d = freshData();
+  handleHeating("термопумпа", d, 'heating');
+  assert("H25: 'термопумпа' → heating=electric, type=inverter", d.heating === "electric" && d.heatingType === "inverter", `got heating=${d.heating}`);
+})();
+
+// H26: "kalorifer" → electric
+(() => {
+  const d = freshData();
+  handleHeating("kalorifer", d, 'heating');
+  assert("H26: 'kalorifer' → heating=electric, type=electric", d.heating === "electric" && d.heatingType === "electric", `got heating=${d.heating}`);
+})();
+
+// H27: Parno follow-up — "sopstveno parno" answer (compound phrase)
+(() => {
+  const d = freshData();
+  handleHeating("parno", d, 'heating');
+  handleHeating("sopstveno parno", d, null);
+  assert("H27: parno→'sopstveno parno' → central, type=private_central", d.heating === "central" && d.heatingType === "private_central" && d.heatingFollowUp === false, `got heating=${d.heating}, type=${d.heatingType}`);
+})();
+
+// H28: Parno follow-up — "gradsko parno" answer (compound phrase)
+(() => {
+  const d = freshData();
+  handleHeating("parno", d, 'heating');
+  handleHeating("gradsko parno", d, null);
+  assert("H28: parno→'gradsko parno' → district", d.heating === "district" && d.heatingType === "district" && d.heatingFollowUp === false, `got heating=${d.heating}, type=${d.heatingType}`);
+})();
+
+// H29: Already set → no change with new input (nextField !== 'heating', so handler skips)
+(() => {
+  const d = { heating: "district", heatingType: "district", heatingFollowUp: false };
+  handleHeating("parno", d, null);
+  assert("H29: already set → unchanged by 'parno'", d.heating === "district" && d.heatingFollowUp === false, `got heating=${d.heating}`);
+})();
+
+// H30: "moe parno" during follow-up → private_central
+(() => {
+  const d = freshData();
+  handleHeating("parno", d, 'heating');
+  handleHeating("moe parno", d, null);
+  assert("H30: parno→'moe parno' → central, type=private_central", d.heating === "central" && d.heatingType === "private_central", `got heating=${d.heating}, type=${d.heatingType}`);
 })();
 
 
@@ -618,6 +715,78 @@ console.log(`━━━━━━━━━━━━━━━━━━━━━━�
   const d = freshData();
   handlePhotos("tuka da vi pratam", d, false);
   assert("P25: 'tuka da vi pratam' → VIBER_PENDING", d.photosPermission === true && d.photosSource === "VIBER_PENDING", `got source=${d.photosSource}`);
+})();
+
+// P26: Normal flow — "ke vi ispratam" (I'll send them to you)
+(() => {
+  const d = freshData();
+  handlePhotos("ke vi ispratam", d, false);
+  assert("P26: 'ke vi ispratam' → VIBER_PENDING", d.photosPermission === true && d.photosSource === "VIBER_PENDING", `got source=${d.photosSource}`);
+})();
+
+// P27: Normal flow — "moze da pratam" (I can send)
+(() => {
+  const d = freshData();
+  handlePhotos("moze da pratam", d, false);
+  assert("P27: 'moze da pratam' → VIBER_PENDING", d.photosPermission === true && d.photosSource === "VIBER_PENDING", `got source=${d.photosSource}`);
+})();
+
+// P28: Normal flow — "ima na oglas" (photos on the ad)
+(() => {
+  const d = freshData();
+  handlePhotos("ima na oglas", d, false);
+  assert("P28: 'ima na oglas' → VIBER_PENDING", d.photosPermission === true && d.photosSource === "VIBER_PENDING", `got source=${d.photosSource}`);
+})();
+
+// P29: Already processed — VIBER_RECEIVED → photos=true
+(() => {
+  const d = { photosStatus: 'VIBER_RECEIVED' };
+  handlePhotos("ne", d, false);
+  assert("P29: VIBER_RECEIVED already processed → photos=true", d.photos === true, `got photos=${d.photos}`);
+})();
+
+// P30: Already processed — PHOTOGRAPHY_NEEDED → photos=true
+(() => {
+  const d = { photosStatus: 'PHOTOGRAPHY_NEEDED' };
+  handlePhotos("da", d, false);
+  assert("P30: PHOTOGRAPHY_NEEDED already processed → photos=true", d.photos === true, `got photos=${d.photos}`);
+})();
+
+// P31: Already processed — SCRAPER_NOT_CURRENT → photos=true
+(() => {
+  const d = { photosStatus: 'SCRAPER_NOT_CURRENT' };
+  handlePhotos("da", d, true);
+  assert("P31: SCRAPER_NOT_CURRENT already processed → photos=true", d.photos === true, `got photos=${d.photos}`);
+})();
+
+// P32: Normal flow — "nema momentalno" (don't have currently) → NONE
+(() => {
+  const d = freshData();
+  handlePhotos("nema momentalno", d, false);
+  assert("P32: 'nema momentalno' → NONE", d.photosPermission === false && d.photosSource === "NONE", `got source=${d.photosSource}`);
+})();
+
+// P33: Normal flow — "da imam" (I have, short form) → VIBER_PENDING
+(() => {
+  const d = freshData();
+  handlePhotos("da imam", d, false);
+  assert("P33: 'da imam' → VIBER_PENDING", d.photosPermission === true && d.photosSource === "VIBER_PENDING", `got source=${d.photosSource}`);
+})();
+
+// P34: Scraper flow — Cyrillic "актуелни" → approved
+(() => {
+  const d = freshData();
+  handlePhotos("актуелни", d, true);
+  assert("P34: 'актуелни' with scraper → SCRAPER_APPROVED", d.photosSource === "SCRAPER" && d.photosStatus === "SCRAPER_APPROVED", `got source=${d.photosSource}`);
+})();
+
+// P35: Scraper flow — "neaktuelni" (not current) → SCRAPER_NOT_CURRENT
+// NOTE: "neaktuelni" does NOT directly match the positive regex ("aktuelni" would,
+// but "neaktuelni" is different). Falls through to isNegative which matches it.
+(() => {
+  const d = freshData();
+  handlePhotos("neaktuelni", d, true);
+  assert("P35: 'neaktuelni' → SCRAPER_NOT_CURRENT via isNegative", d.photosSource === "SCRAPER_NOT_CURRENT", `got source=${d.photosSource}`);
 })();
 
 

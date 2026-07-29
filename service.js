@@ -628,7 +628,7 @@ if (/kako bi sorabotuvale|како би соработувале|како да �
           }
           console.log(`[PHOTOS: already processed, photos=${session.collectedData.photos}]`);
         } else if (hasScraperPhotos) {
-          if (isPositive(u) || /da|да|se|се|aktuelni|актуелни|okej|океј|moze|може|se aktuelni|се актуелни|aktuelni se|актуелни се|da se|да се|se isti|се исти|isti se|исти се/i.test(u)) {
+          if (isPositive(u) || (/da|да|se|се|aktuelni|актуелни|okej|океј|moze|може|se aktuelni|се актуелни|aktuelni se|актуелни се|da se|да се|se isti|се исти|isti se|исти се/i.test(u) && !/neaktuelni|неактуелни/i.test(u))) {
             session.collectedData.photosPermission = true;
             session.collectedData.photosSource = "SCRAPER";
             session.collectedData.photosStatus = "SCRAPER_APPROVED";
