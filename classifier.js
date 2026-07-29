@@ -150,6 +150,36 @@ export function classifyIntent(userInput, conversation) {
   if (/(nemam|немам)\s*(doverba|доверба)/i.test(u)) return { intent: "INTERESTED", confidence: 0.6, reason: "nemam doverba" };
 
   // ==========================================
+  // 3.5. UNDERSTANDING / CONCESSION patterns
+  // The owner shows understanding of the model or concedes to the idea.
+  // These are strong buying signals — close to acceptance.
+  // ==========================================
+  // "jas ne plakjam nisto" (I don't pay anything) — they understand they pay nothing
+  if (/(ne|не)\s*(plakjam|плаќам|naplakjam|наплаќам)/i.test(u) && !/koj|кој|kako|како|dali|дали|sto|што/i.test(u)) {
+    return { intent: "ACCEPTED", confidence: 0.85, reason: "ne plakjam — owner understands they pay nothing" };
+  }
+  // "vie go prodavate/prodadete" (you sell it) — owner confirms their role
+  if (/(vie go|вие го|vie da go|вие да го).{0,20}(prodava|продава|proda|прода|zeman|земан)/i.test(u) && !/kako|како|dali|дали|zosto|зошто|koj|кој/i.test(u)) {
+    return { intent: "ACCEPTED", confidence: 0.8, reason: "vie go prodavate — owner confirms the model" };
+  }
+  // "ne e loso" (it's not bad) — mild positive signal
+  if (/(pa|па).{0,10}ne.{0,10}(loso|лошо|dobro|добро)/i.test(u) && !/ama|ама|ama|ama|sepak|сепак|no|но/i.test(u)) {
+    return { intent: "INTERESTED", confidence: 0.75, reason: "pa ne e loso — mild positive" };
+  }
+  // "mi se razjasni", "seга разбирам", "mi e jasno" (it's clear to me)
+  if (/(mi|ми).{0,15}(razjasni|разјасни|jasno|јасно|razbira|разбира)/i.test(u)) {
+    return { intent: "INTERESTED", confidence: 0.8, reason: "clear understanding — owner engaged" };
+  }
+  // "taka moze", "okej probame" (okay let's try) — conditional acceptance
+  if (/(taka|така|okej|океј|ok|ок).{0,10}(moze|може|probame|пробаме|da probame|да пробаме)/i.test(u)) {
+    return { intent: "INTERESTED", confidence: 0.85, reason: "conditional acceptance" };
+  }
+  // "ne (znam|sum) ama probame" (I don't know BUT let's try) — reluctant acceptance
+  if (/(ne|не).{0,20}(ama|ама|no|но|sepak|сепак).{0,20}(probame|пробаме|moze|може|okej|океј)/i.test(u)) {
+    return { intent: "INTERESTED", confidence: 0.8, reason: "reluctant acceptance" };
+  }
+
+  // ==========================================
   // 4. AMBIGUOUS default — mild interest
   //    (With context boost: if Ana was explaining commission, boost to INTERESTED)
   // ==========================================

@@ -98,7 +98,7 @@ function isAskingHowItWorks(text) {
 // HELPER: Check if asking about clients
 // ========================================
 function isAskingAboutClients(text) {
-  return /клиент|klient|клиенти|klienti|заинтересиран|zainteresiran|купци|kupci|spremen|ready|imat klient|imate klient|klient spremen|заинтересиран купувач|klienti zainteresirani|клиенти заинтересирани|imate klienti|имате клиенти|klient zainteresiran|клиент заинтересиран|imate gotov klient|имате готов клиент|klienti|клиенти|kupuvac|купувач|kupuvaci|купувачи/i.test(text);
+  return /imat klient|imate klient|имате клиент|klient spremen|клиент спремен|zainteresiran kupuvac|заинтересиран купувач|klienti zainteresirani|клиенти заинтересирани|imate klienti|имате клиенти|klient zainteresiran|клиент заинтересиран|imate gotov klient|имате готов клиент|imate kupuvac|имате купувач|kupuvac spremen|купувач спремен|najdovte klient|најдовте клиент|najdovte kupuvac|најдовте купувач|imavте li klienti|имавте ли клиенти|dali imate klient|дали имате клиент|dali imate kupuvac|дали имате купувач|ima li zainteresirani|има ли заинтересирани|imaте gotov|имате готов/i.test(text);
 }
 
 // ========================================

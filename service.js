@@ -375,8 +375,8 @@ export async function generateResponse(session, userInput) {
       };
     }
 
-   // HARDCODED: Client question
-    if (/клиент|klient|клиенти|klienti|заинтересиран|zainteresiran|купци|kupci|spremen|ready|imat klient|imate klient|klient spremen|заинтересиран купувач|klienti zainteresirani|клиенти заинтересирани|imate klienti|имате клиенти|klient zainteresiran|клиент заинтересиран|imate gotov klient|имате готов клиент/i.test(u)) {
+   // HARDCODED: Client question (requires longer phrase context, not bare words)
+    if (/imat klient|imate klient|имате клиент|klient spremen|клиент спремен|zainteresiran kupuvac|заинтересиран купувач|klienti zainteresirani|клиенти заинтересирани|imate klienti|имате клиенти|klient zainteresiran|клиент заинтересиран|imate gotov klient|имате готов клиент|imate kupuvac|имате купувач|kupuvac spremen|купувач спремен|najdovte klient|најдовте клиент|najdovte kupuvac|најдовте купувач|dali imate klient|дали имате клиент|dali imate kupuvac|дали имате купувач|ima li zainteresirani|има ли заинтересирани|imate gotov|имате готов|najdovte|најдовте|klient e|клиент е|kupuvac e|купувач е|koi se klientite|кои се клиентите/i.test(u)) {
       return {
         text: "Постојано имаме потенцијални клиенти заинтересирани за тој реон. Дали да почнеме со соработка?",
         type: "NORMAL"
