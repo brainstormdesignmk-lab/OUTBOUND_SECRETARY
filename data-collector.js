@@ -166,7 +166,12 @@ function extractOrientation(u, data) {
 function extractFurnished(u, data) {
   if (data.furnished !== undefined && data.furnished !== null) return null;
   // Require furniture-specific context — don't match bare "ne" (could be any question)
-  if (/prazen|правен|gol|гол|bez namestaj|без мебел|nenamesten|ненаместен|prazno|празно|gola sostojba|гола состојба|ne e namesten|не е наместен|prav|прав/i.test(u)) {
+  // NOTE: Short patterns like "gol" or "prav" are intentionally excluded because they
+  // false-match as substrings in non-furniture words (e.g., "gol" matches "golemi" = big).
+  // Only specific furniture phrases are matched: "prazen/правен" (empty), "bez namestaj/без мебел"
+  // (no furniture), "nenamesten/ненаместен" (unfurnished), "prazno/празно" (empty),
+  // "gola sostojba/гола состојба" (bare condition), "ne e namesten/не е наместен" (not furnished).
+  if (/prazen|правен|bez namestaj|без мебел|nenamesten|ненаместен|prazno|празно|gola sostojba|гола состојба|ne e namesten|не е наместен/i.test(u)) {
     return { furnished: false, furnishedLevel: "empty" };
   }
   if (/komplet|ful|full|kompletno|celosno|целосно|m paket|м пакет|top namesten|топ наместен|namesten|наместен|opremen|опремен|namestaj|мебел|kompletno namesten|комплетно наместен|se prodava namesten|се продава наместен|so namestaj|со мебел|namesten|наместен/i.test(u)) {

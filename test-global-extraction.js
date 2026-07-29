@@ -343,11 +343,15 @@ assert("EC3: '1000 m2' matches totalSqm=1000 via regex", result.totalSqm === 100
 result = runGlobalExtraction("zdravo, kako si?", {}, "zdravo, kako si?");
 assert("EC4: greeting extracts nothing", Object.keys(result).length === 0, `got ${Object.keys(result).join(', ')}`);
 
-// Test 37b: "100 m2, 3 kat" should NOT extract cleanPrice (no price keywords)
+// Test 37b: "dve golemi i edna detska" should NOT extract furnished (false positive from 'gol' in 'golemi')
+result = runGlobalExtraction("dve golemi i edna detska", {}, "dve golemi i edna detska");
+assert("EC4b: furnished NOT extracted from bedroom answer (gol false positive)", result.furnished === undefined, `got ${JSON.stringify(result.furnished)}`);
+
+// Test 37c: "100 m2, 3 kat" should NOT extract cleanPrice (no price keywords)
 result = runGlobalExtraction("100 m2, 3 kat", {}, "100 m2, 3 kat");
-assert("EC4b: cleanPrice NOT extracted from '100 m2, 3 kat'", result.cleanPrice === undefined, `got ${result.cleanPrice}`);
-assert("EC4b: totalSqm=100", result.totalSqm === 100, `got ${result.totalSqm}`);
-assert("EC4b: floor=3", result.floor === 3, `got ${result.floor}`);
+assert("EC4c: cleanPrice NOT extracted from '100 m2, 3 kat'", result.cleanPrice === undefined, `got ${result.cleanPrice}`);
+assert("EC4c: totalSqm=100", result.totalSqm === 100, `got ${result.totalSqm}`);
+assert("EC4c: floor=3", result.floor === 3, `got ${result.floor}`);
 
 // Test 38: Message with mixed relevance
 result = runGlobalExtraction("interesen mi e stanot, kolku e kvadratura?", {}, "interesen mi e stanot, kolku e kvadratura?");
