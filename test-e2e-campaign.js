@@ -263,18 +263,22 @@ async function runScenario2() {
   const session = createSession('sale');
   let res;
 
-  // Turn 1: Price only (no sqm bonus — preferred field priority means cleanPrice
-  // is extracted and totalSqm is NOT bonus-extracted from the same message)
+  // Turn 1: Price with explicit sqm keyword → BOTH extracted (bonus pass)
+  // "120 iljadi, 55 m2" has price context (iljadi) + sqm context (m2).
+  // The group pass extracts cleanPrice=120000. The bonus pass then safely
+  // extracts totalSqm=55 because "55 m2" is unambiguous (sqm keyword present).
+  // bedrooms/floor are NOT extracted (PRICE_SENSITIVE guards block them since
+  // cleanPrice was already extracted from this message).
   res = await sendMessage(session, "120 iljadi, 55 m2");
   assert("S2-T1: type=QUESTION", res.type === "QUESTION", `got ${res.type}`);
   assert("S2-T1: cleanPrice=120000", session.collectedData.cleanPrice === 120000, `got ${session.collectedData.cleanPrice}`);
-  // totalSqm NOT extracted (preferred field cleanPrice found first, skip global)
-  assert("S2-T1: totalSqm NOT extracted (priority: current field only)", session.collectedData.totalSqm === undefined, `got ${session.collectedData.totalSqm}`);
-  // bedrooms and floor NOT extracted (price in same message)
+  // totalSqm IS bonus-extracted because "55 m2" clearly indicates sqm, not price
+  assert("S2-T1: totalSqm bonus-extracted=55", session.collectedData.totalSqm === 55, `got ${session.collectedData.totalSqm}`);
+  // bedrooms and floor NOT extracted (PRICE_SENSITIVE guard: price was in same message)
   assert("S2-T1: bedrooms NOT extracted with price", session.collectedData.bedrooms === undefined, `got ${session.collectedData.bedrooms}`);
   assert("S2-T1: floor NOT extracted with price", session.collectedData.floor === undefined, `got ${session.collectedData.floor}`);
-  // Next field should be totalSqm (since it wasn't bonus-extracted)
-  assert("S2-T1: nextField=totalSqm", res.nextField === "totalSqm", `got ${res.nextField}`);
+  // Next field should be terraceSqm (since totalSqm was bonus-extracted)
+  assert("S2-T1: nextField=terraceSqm (sqm already filled)", res.nextField === "terraceSqm", `got ${res.nextField}`);
 
   // Turn 2: Total sqm (separate message, as current question)
   res = await sendMessage(session, "55 kvadrati");

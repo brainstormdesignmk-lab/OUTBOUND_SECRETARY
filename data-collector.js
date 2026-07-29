@@ -8,6 +8,7 @@
 // ========================================
 import {
   parseMacedonianNumber,
+  parseNumberWords,
   parseOrdinalFloor,
   extractFirstNumber,
   countBedrooms,
@@ -44,6 +45,13 @@ function extractTotalSqm(u, data) {
   // Sqm-specific context: match number before m2/кв/квадрати words
   const sqmMatch = u.match(/(\d{2,4})\s*(m2|м2|квадрати|кв|sqm|kvadrati|kvadrata|квадрата|квадрат|kv|кв)/i);
   if (sqmMatch) return { totalSqm: parseInt(sqmMatch[1]) };
+  // Word-based sqm: parse Macedonian number words before sqm keyword
+  // e.g., "seeset i pet kvadrati" → 65, "trideset m2" → 30
+  const sqmWordMatch = u.match(/(\S+(?:\s+\S+){0,4})\s*(kvadrati|квадрати|kvadrata|квадрата|m2|м2|kv|кв|sqm)/i);
+  if (sqmWordMatch) {
+    const parsed = parseNumberWords(sqmWordMatch[1]);
+    if (parsed !== null && parsed >= 10 && parsed <= 999) return { totalSqm: parsed };
+  }
   // Fallback: first reasonable number — but skip if near price context (evra/iljadi)
   const firstNum = extractFirstNumber(u);
   if (firstNum !== null && firstNum >= 10 && firstNum <= 999) {
@@ -300,8 +308,36 @@ const EXTRACTION_RULES = [
   extractYearBuilt,
   extractRenovated,
   extractRenovationYear,
+  extractTerrace,
   extractDocumentationClean
 ];
+
+// ========================================
+// Terrace extraction (simple context-based, not complex follow-up)
+// ========================================
+function extractTerrace(u, data) {
+  // Skip if already set
+  if (data.hasTerrace !== undefined && data.hasTerrace !== null) return null;
+  if (data.terraceSqm !== undefined && data.terraceSqm !== null) return null;
+  // Require terrace-specific context
+  if (!/terasa|тераса|terrace/i.test(u)) return null;
+  // Match number after terrace word: "terasa od 3 m2" → cap 1 = "3"
+  // Uses non-capturing group (?:terasa|тераса) to scope alternation properly
+  const terraceMatch = u.match(/(?:terasa|тераса).{0,20}?(\d{1,4})\s*(kvadrata|kvadrati|m2|м2|kv|кв|sqm)/i);
+  if (terraceMatch) {
+    const num = parseInt(terraceMatch[1]);
+    if (num >= 1 && num <= 500) return { hasTerrace: true, terraceSqm: num };
+  }
+  // Also try number-before-terrace: "3 m2 terasa"
+  // Uses (?:terasa|тераса) to scope alternation and ensures the extracted
+  // number is the one NEAREST to "terasa", not the first number in the message.
+  const terraceBefore = u.match(/(\d{1,4})\s*(kvadrata|kvadrati|m2|м2|kv|кв|sqm).{0,20}?(?:terasa|тераса)/i);
+  if (terraceBefore) {
+    const num = parseInt(terraceBefore[1]);
+    if (num >= 1 && num <= 500) return { hasTerrace: true, terraceSqm: num };
+  }
+  return null; // No number near terrace — leave follow-up to service.js
+}
 
 // Map from workflow field name to dedicated extractor function.
 // Used by runGlobalExtraction's preferredField logic to extract
@@ -349,6 +385,13 @@ const PRICE_SENSITIVE_EXTRACTORS = new Set([
   'extractFloor',
   'extractBedrooms',
   'extractTotalFloors'
+]);
+
+// Year-sniffing extractors that use parseYearBuilt's 2-digit fallback.
+// These should NOT run on bare numbers like "10" → 2010.
+// When isBareNumber is true, these extractors are skipped.
+const YEAR_SNIFFING_EXTRACTORS = new Set([
+  'extractYearBuilt'
 ]);
 
 // Number-sniffing extractors that use parseMacedonianNumber or extractFirstNumber
@@ -414,19 +457,24 @@ function runGlobalExtraction(u, currentData, preferredField) {
           }
         }
       }
-      return updates; // Return group results — do NOT fall through to full pass
+      // Fall through to STEP 2 (bonus pass) — scan for additional volunteered info
+      // like terrace size, orientation, etc. that the user added to their answer.
     }
-    // Unknown preferredField — fall through to full extraction pass
+    // Unknown preferredField — also fall through to STEP 2
   }
 
-  // STEP 2: Full extraction pass — bonus info discovery.
-  // Only reached when preferredField is not set (persuasion mode, or
-  // service.js calls without a specific nextField).
+  // STEP 2: Bonus extraction pass — scan for ADDITIONAL property facts.
+  // Reached after the group-restricted pass (if preferredField was set)
+  // OR directly when preferredField was not set (full discovery mode).
   //
-  // Detect whether the message has strong field-specific keywords.
-  // If not (just bare number words like "pet mislam"), number-sniffing
-  // extractors are skipped — preventing a single bare number from
-  // populating bedrooms + floor + totalSqm.
+  // This pass runs ALL extractors BUT with safety guards:
+  // - Bare numbers (no strong keywords) skip NUMBER_SNIFFING_EXTRACTORS
+  //   (bedrooms, floor, totalSqm) and YEAR_SNIFFING_EXTRACTORS (yearBuilt)
+  // - This prevents "10" → yearBuilt=2010 while allowing legitimate
+  //   multi-field extraction like "65 m2 so terasa od 3 m2".
+  //
+  // Essential for catching volunteered info (terrace, orientation, parking)
+  // that the user adds to their answer for the current question.
   const hasStrongKeywords = /spaln|спалн|detsk|детск|gostinsk|гостинск|golem|голем|mala|мала|soba|соба|sobi|соби|kat|кат|sprat|спрат|katnica|катница|sprata|спрата|potkrovje|поткровје|prizemje|приземје|prv|прв|vtor|втор|tret|трет|cetvrt|четврт|m2|м2|kvadrati|квадрати|kv|кв|sqm|lift|лифт|elevator|klima|клима|inverter|инвертер|parking|паркинг|garaza|гаража|garage|гараж|terasa|тераса|terrace|namest|мебел|namestaj|мебел|opremen|опремен|izgraden|граден|godina|година|gradba|градба|renov|ренов|cist|чист|hipotek|хипотек|ostavinsk|оставинск|foto|фото|slik|слик|viber|вајбер|advokat|адвокат|notar|нотар|danok|данок|provizija|провизија|dogovor|договор|parno|парно|greene|греење|struja|струја|drva|дрва|pelet|пелет|nafta|нафта/i.test(u);
   const isBareNumber = !hasStrongKeywords &&
     // Short message (bare answer, not a multi-field sentence)
@@ -436,7 +484,13 @@ function runGlobalExtraction(u, currentData, preferredField) {
     // No specific field units
     !/m2|м2|кв|%|€|£|\$/i.test(u);
 
+  // Track price extraction in THIS call (both group pass and bonus pass)
   let priceExtracted = false;
+  // Check if Step 1 already extracted a price
+  if (updates.cleanPrice !== undefined || updates.monthlyRent !== undefined) {
+    priceExtracted = true;
+  }
+
   for (const rule of EXTRACTION_RULES) {
     // If a price (cleanPrice or monthlyRent) was already extracted from THIS
     // message, skip number-sniffing extractors that can accidentally pick up
@@ -450,9 +504,20 @@ function runGlobalExtraction(u, currentData, preferredField) {
     if (isBareNumber && NUMBER_SNIFFING_EXTRACTORS.has(rule.name)) {
       continue;
     }
+    // If the message is a bare number, skip year-sniffing extractors that
+    // can accidentally convert "10" to yearBuilt=2010.
+    if (isBareNumber && YEAR_SNIFFING_EXTRACTORS.has(rule.name)) {
+      continue;
+    }
+    // Skip if this field was already extracted by Step 1 (group pass)
+    // Check rule's output name — for simple single-field extractors, we can
+    // check if the key exists in updates. For multi-field extractors (e.g.,
+    // extractParking returns { parking, parkingType }), we check the primary key.
     const result = rule(u, currentData);
     if (result) {
       for (const [key, value] of Object.entries(result)) {
+        // Don't overwrite what Step 1 already extracted
+        if (key in updates) continue;
         const existing = currentData[key];
         if (existing === undefined || existing === null) {
           updates[key] = value;

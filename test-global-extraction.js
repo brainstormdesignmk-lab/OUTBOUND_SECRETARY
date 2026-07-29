@@ -105,6 +105,20 @@ assert("N3: empty string extracts nothing", Object.keys(result).length === 0);
 result = runGlobalExtraction("5 m2", {});
 assert("N4: '5 m2' doesn't match totalSqm (5 < 10)", result.totalSqm === undefined, `got ${result.totalSqm}`);
 
+// Test: Word-based sqm — "seeset i pet kvadrati" → 65
+result = runGlobalExtraction("seeset i pet kvadrati", {});
+assert("N5: 'seeset i pet kvadrati' → totalSqm=65 (word-based)", result.totalSqm === 65, `got ${result.totalSqm}`);
+
+// Test: Terrace + sqm in one message — "65 kvadrati so terasa od 3 m2"
+result = runGlobalExtraction("65 kvadrati so terasa od 3 m2", {});
+assert("N6: '65 kvadrati so terasa od 3 m2' → totalSqm=65", result.totalSqm === 65, `got ${result.totalSqm}`);
+assert("N6: terrace extracted from same message", result.hasTerrace === true && result.terraceSqm === 3, `got ${JSON.stringify(result.hasTerrace)}/${result.terraceSqm}`);
+
+// Test: Word-based sqm + terrace — "seeset i pet kvadrati so terasa od 3 m2"
+result = runGlobalExtraction("seeset i pet kvadrati so terasa od 3 m2", {});
+assert("N7: word-based sqm + terrace → totalSqm=65", result.totalSqm === 65, `got ${result.totalSqm}`);
+assert("N7: terrace from same message → hasTerrace=true, terraceSqm=3", result.hasTerrace === true && result.terraceSqm === 3, `got ${JSON.stringify(result.hasTerrace)}/${result.terraceSqm}`);
+
 // ========================================
 // TEST GROUP: Field-targeted extraction (no unrestricted global)
 // ========================================
@@ -125,7 +139,7 @@ assert("FT2: yearBuilt NOT extracted from bare '10'", result.yearBuilt === undef
 
 // Test: "10" without preferredField (full pass) → should extract yearBuilt (persuasion mode)
 result = runGlobalExtraction("10", {});
-assert("FT3: '10' without preferredField → yearBuilt=2010 (unrestricted pass)", result.yearBuilt === 2010, `got ${result.yearBuilt}`);
+assert("FT3: '10' without preferredField → yearBuilt NOT extracted (no guessing)", result.yearBuilt === undefined, `got ${JSON.stringify(result.yearBuilt)}`);
 
 // ========================================
 // TEST GROUP: Already-set fields
