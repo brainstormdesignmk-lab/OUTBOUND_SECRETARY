@@ -516,6 +516,74 @@ async function runScenario4() {
 }
 
 // ========================================
+// SCENARIO 5: Terrace follow-up — "ne znam" with other info (regression test)
+// ========================================
+// Simulates the exact bug from the user's campaign:
+// Ana asks: "Дали знаете колку квадрати е терасата?"
+// Owner: "ne znam ama zgradata ima 13 sprata"
+//
+// Before the fix:
+//   - Global extraction set totalFloors=13 (from "13 sprata")
+//   - Global extraction set yearBuilt=2013 (from "13")
+//   - extractTerraceNumber grabbed "13" from "13 sprata" → terraceSqm=13
+//   - "ne znam" check never fired (terraceSqm was already 13)
+//
+// After the fix:
+//   - pendingFollowUp='terraceSqm' → global extraction skipped
+//   - "ne znam" check runs FIRST → hasTerrace=true, terraceSqm=null
+//   - totalFloors, yearBuilt NOT extracted
+// ========================================
+console.log(`\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
+console.log(`📋 SCENARIO 5: Terrace follow-up — "ne znam" with other info`);
+console.log(`━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
+
+async function runScenario5() {
+  const session = createSession('sale');
+  let res;
+
+  // Turn 1: Price
+  console.log(`\n  === Turn 1: "120 iljadi evra" ===`);
+  res = await sendMessage(session, "120 iljadi evra");
+  assert("S5-T1: type=QUESTION", res.type === "QUESTION", `got ${res.type}`);
+  assert("S5-T1: nextField=totalSqm", res.nextField === "totalSqm", `got ${res.nextField}`);
+  assert("S5-T1: cleanPrice=120000", session.collectedData.cleanPrice === 120000, `got ${session.collectedData.cleanPrice}`);
+
+  // Turn 2: Total sqm
+  console.log(`\n  === Turn 2: "55 kvadrati" ===`);
+  res = await sendMessage(session, "55 kvadrati");
+  assert("S5-T2: type=QUESTION", res.type === "QUESTION", `got ${res.type}`);
+  assert("S5-T2: nextField=terraceSqm", res.nextField === "terraceSqm", `got ${res.nextField}`);
+  assert("S5-T2: totalSqm=55", session.collectedData.totalSqm === 55, `got ${session.collectedData.totalSqm}`);
+
+  // Turn 3: "ima terasa" → triggers follow-up (sets pendingFollowUp='terraceSqm')
+  console.log(`\n  === Turn 3: "ima terasa" → triggers terrace follow-up ===`);
+  res = await sendMessage(session, "ima terasa");
+  assert("S5-T3: type=QUESTION", res.type === "QUESTION", `got ${res.type}`);
+  assert("S5-T3: asks about terrace size", res.text.includes("колку квадрати") || res.text.includes("m2"), `text: ${res.text.substring(0, 40)}`);
+  assert("S5-T3: pendingFollowUp=terraceSqm", session.pendingFollowUp === 'terraceSqm', `got ${session.pendingFollowUp}`);
+  // hasTerrace should still be undefined (we asked follow-up, haven't answered yet)
+  assert("S5-T3: hasTerrace still undefined", session.collectedData.hasTerrace === undefined, `got ${session.collectedData.hasTerrace}`);
+
+  // Turn 4: "ne znam ama zgradata ima 13 sprata" → THE BUG REPRODUCTION
+  // Before fix: totalFloors=13, yearBuilt=2013, terraceSqm=13 (ALL WRONG)
+  // After fix: hasTerrace=true, terraceSqm=null, no other fields extracted
+  console.log(`\n  === Turn 4: "ne znam ama zgradata ima 13 sprata" ===`);
+  res = await sendMessage(session, "ne znam ama zgradata ima 13 sprata");
+  assert("S5-T4: type=QUESTION", res.type === "QUESTION", `got ${res.type}`);
+  assert("S5-T4: nextField=bedrooms (next after terrace)", res.nextField === "bedrooms", `got ${res.nextField}`);
+  // Critical: terrace should be "yes, size unknown"
+  assert("S5-T4: hasTerrace=true (from 'ne znam' check)", session.collectedData.hasTerrace === true, `got ${session.collectedData.hasTerrace}`);
+  assert("S5-T4: terraceSqm=null", session.collectedData.terraceSqm === null, `got ${session.collectedData.terraceSqm}`);
+  // Critical: should NOT extract from "13 sprata"
+  assert("S5-T4: totalFloors NOT extracted (global skipped)", session.collectedData.totalFloors === undefined, `got ${session.collectedData.totalFloors}`);
+  assert("S5-T4: yearBuilt NOT extracted (global skipped)", session.collectedData.yearBuilt === undefined, `got ${session.collectedData.yearBuilt}`);
+  // pendingFollowUp should be cleared
+  assert("S5-T4: pendingFollowUp cleared", session.pendingFollowUp === null, `got ${session.pendingFollowUp}`);
+
+  console.log(`   ✔ Scenario 5 complete: "ne znam" with unrelated info handled correctly`);
+}
+
+// ========================================
 // RUN ALL SCENARIOS
 // ========================================
 (async () => {
@@ -528,6 +596,7 @@ async function runScenario4() {
     await runScenario2();
     await runScenario3();
     await runScenario4();
+    await runScenario5();
 
     // SUMMARY
     console.log(`\n=======================================================`);

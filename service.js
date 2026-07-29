@@ -281,6 +281,9 @@ export async function generateResponse(session, userInput) {
     if (!session.rejectionCount) {
       session.rejectionCount = 0;
     }
+    if (!session.pendingFollowUp) {
+      session.pendingFollowUp = null;
+    }
 
     const u = userInput.toLowerCase().trim();
     const conv = session.messages?.filter(m => m.text).map(m => `${m.role === 'model' ? 'Ана' : 'Сопственик'}: ${m.text}`).join('\n') || "";
@@ -548,11 +551,20 @@ if (/kako bi sorabotuvale|како би соработувале|како да �
     // Runs for BOTH persuasion and data collection phases.
     // This captures property details the owner volunteers during conversation
     // even before formal data collection starts.
+    //
+    // SKIP if a follow-up (pendingField) is active — e.g., we just asked
+    // "kolku kvadrati e terasata?" and the reply should ONLY go to the
+    // terrace handler, not to global extractors that could false-match
+    // numbers like "13" from "ne znam ama zgradata ima 13 sprata".
     // ========================================
-    const updates = runGlobalExtraction(u, session.collectedData);
-    for (const [key, value] of Object.entries(updates)) {
-      session.collectedData[key] = value;
-      console.log(`[GLOBAL: ${key} = ${JSON.stringify(value)}]`);
+    if (!session.pendingFollowUp) {
+      const updates = runGlobalExtraction(u, session.collectedData);
+      for (const [key, value] of Object.entries(updates)) {
+        session.collectedData[key] = value;
+        console.log(`[GLOBAL: ${key} = ${JSON.stringify(value)}]`);
+      }
+    } else {
+      console.log(`[PENDING FOLLOW-UP: ${session.pendingFollowUp} — global extraction skipped]`);
     }
 
     // ========================================
@@ -564,49 +576,88 @@ if (/kako bi sorabotuvale|како би соработувале|како да �
 
       // === terraceSqm (Handles ALL cases) ===
       if (session.collectedData.terraceSqm === undefined && session.collectedData.hasTerrace === undefined) {
-        // FIRST: Try to extract a terrace number — only accept if:
-        //   a) the message has "terasa" context (e.g., "terasa 5m2"), OR
-        //   b) there's NO generic sqm phrasing (bare word like "pet" = follow-up answer)
-        // Generic sqm like "55 kvadrati" is totalSqm, NOT terrace
-        const firstNum = extractTerraceNumber(u);
-        if (firstNum !== null && firstNum > 0 && firstNum < 100) {
-          // Accept as terrace size if:
-          //   a) "terasa" context present ("terasa 15m2"), OR
-          //   b) has "ima"/positive word ("ima 15m2" = has 15m2 terrace), OR
-          //   c) no generic sqm or price phrasing (bare word like "pet" = follow-up answer)
-          // Reject:
-          //   - generic sqm without context ("55 kvadrati" = totalSqm, not terrace)
-          //   - price context ("98 iljadi" = price, not terrace)
-          const hasTerraceContext = /terasa|тераса|terrace|teras|терас|ima|има|da|да|ok|океј|moze|може/i.test(u);
-          const hasGenericSqm = /kvadrati|квадрати|m2|м2|kv|кв|sqm/i.test(u);
-          const hasPriceContext = /iljadi|илјади|evra|евра|eur|evro|евро/i.test(u);
-          if ((hasTerraceContext || (!hasGenericSqm && !hasPriceContext))) {
+
+        // PENDING FOLLOW-UP: When we just asked "kolku kvadrati?", process the
+        // reply with "ne znam" and "nema" checks FIRST, before number extraction.
+        // This prevents extractTerraceNumber from grabbing unrelated numbers like
+        // "13" from "ne znam ama zgradata ima 13 sprata" → terraceSqm=13.
+        if (session.pendingFollowUp === 'terraceSqm') {
+          // "ne znam" reply
+          if (/ne znam|не знам|незнам|neznam|ne znam tocno|не знам точно|ne sum siguren|не сум сигурен/i.test(u)) {
             session.collectedData.hasTerrace = true;
-            session.collectedData.terraceSqm = firstNum;
-            console.log(`[TERRACE: ${firstNum}m2]`);
+            session.collectedData.terraceSqm = null;
+            session.pendingFollowUp = null;
+            console.log(`[TERRACE: yes, size unknown]`);
+          }
+          // True negative response
+          else if (/^0$|nema terasa|нема тераса|nema|нема|без|bez|nema|нема|bez terasa|без тераса|nema parking|нема паркинг/i.test(u) && !/ima|има|kv|кв|m2|м2|kvadrat|квадрат/i.test(u)) {
+            session.collectedData.hasTerrace = false;
+            session.collectedData.terraceSqm = 0;
+            session.pendingFollowUp = null;
+            console.log(`[TERRACE: none]`);
+          }
+          // Try to extract a bare number answer (e.g., "pet" = 5)
+          else {
+            const firstNum = extractTerraceNumber(u);
+            if (firstNum !== null && firstNum > 0 && firstNum < 100) {
+              session.collectedData.hasTerrace = true;
+              session.collectedData.terraceSqm = firstNum;
+              session.pendingFollowUp = null;
+              console.log(`[TERRACE: ${firstNum}m2]`);
+            } else {
+              // Nothing matched — clear pending so normal flow resumes
+              session.pendingFollowUp = null;
+            }
           }
         }
-        // "ne znam" reply — only when terraceSqm is the current workflow field
-        if (session.collectedData.terraceSqm === undefined && nextField === 'terraceSqm' && /ne znam|не знам|незнам|neznam|ne znam tocno|не знам точно|ne sum siguren|не сум сигурен/i.test(u)) {
-          session.collectedData.hasTerrace = true;
-          session.collectedData.terraceSqm = null;
-          console.log(`[TERRACE: yes, size unknown]`);
-        }
-        // True negative responses — only when terraceSqm is the current workflow field
-        else if (session.collectedData.terraceSqm === undefined && nextField === 'terraceSqm' && /^0$|nema terasa|нема тераса|nema|нема|без|bez|nema|нема|bez terasa|без тераса|nema parking|нема паркинг/i.test(u) && !/ima|има|kv|кв|m2|м2|kvadrat|квадрат/i.test(u)) {
-          session.collectedData.hasTerrace = false;
-          session.collectedData.terraceSqm = 0;
-          console.log(`[TERRACE: none]`);
-        }
-        // Has terrace (with ima/terasa context) but no number found
-        // Only ask follow-up if terraceSqm is the current workflow field
-        // Otherwise silently wait — the workflow will ask when it's time
-        else if (session.collectedData.terraceSqm === undefined && nextField === 'terraceSqm' && (/ima|има|terasa|тераса|terrace|teras|терас/i.test(u) || isPositive(u))) {
-          console.log(`[TERRACE: yes, size unknown — asking follow-up]`);
-          return {
-            text: 'Дали знаете колку квадрати е терасата?',
-            type: "QUESTION"
-          };
+
+        // NORMAL FLOW (no pending follow-up, or pending was cleared)
+        if (session.collectedData.terraceSqm === undefined && session.collectedData.hasTerrace === undefined) {
+          // FIRST: Try to extract a terrace number — only accept if:
+          //   a) the message has "terasa" context (e.g., "terasa 5m2"), OR
+          //   b) there's NO generic sqm phrasing (bare word like "pet" = follow-up answer)
+          // Generic sqm like "55 kvadrati" is totalSqm, NOT terrace
+          const firstNum = extractTerraceNumber(u);
+          if (firstNum !== null && firstNum > 0 && firstNum < 100) {
+            // Accept as terrace size if:
+            //   a) "terasa" context present ("terasa 15m2"), OR
+            //   b) has "ima"/positive word ("ima 15m2" = has 15m2 terrace), OR
+            //   c) no generic sqm or price phrasing (bare word like "pet" = follow-up answer)
+            // Reject:
+            //   - generic sqm without context ("55 kvadrati" = totalSqm, not terrace)
+            //   - price context ("98 iljadi" = price, not terrace)
+            const hasTerraceContext = /terasa|тераса|terrace|teras|терас|ima|има|da|да|ok|океј|moze|може/i.test(u);
+            const hasGenericSqm = /kvadrati|квадрати|m2|м2|kv|кв|sqm/i.test(u);
+            const hasPriceContext = /iljadi|илјади|evra|евра|eur|evro|евро/i.test(u);
+            if ((hasTerraceContext || (!hasGenericSqm && !hasPriceContext))) {
+              session.collectedData.hasTerrace = true;
+              session.collectedData.terraceSqm = firstNum;
+              console.log(`[TERRACE: ${firstNum}m2]`);
+            }
+          }
+          // "ne znam" reply — only when terraceSqm is the current workflow field
+          if (session.collectedData.terraceSqm === undefined && nextField === 'terraceSqm' && /ne znam|не знам|незнам|neznam|ne znam tocno|не знам точно|ne sum siguren|не сум сигурен/i.test(u)) {
+            session.collectedData.hasTerrace = true;
+            session.collectedData.terraceSqm = null;
+            console.log(`[TERRACE: yes, size unknown]`);
+          }
+          // True negative responses — only when terraceSqm is the current workflow field
+          else if (session.collectedData.terraceSqm === undefined && nextField === 'terraceSqm' && /^0$|nema terasa|нема тераса|nema|нема|без|bez|nema|нема|bez terasa|без тераса|nema parking|нема паркинг/i.test(u) && !/ima|има|kv|кв|m2|м2|kvadrat|квадрат/i.test(u)) {
+            session.collectedData.hasTerrace = false;
+            session.collectedData.terraceSqm = 0;
+            console.log(`[TERRACE: none]`);
+          }
+          // Has terrace (with ima/terasa context) but no number found
+          // Only ask follow-up if terraceSqm is the current workflow field
+          // Otherwise silently wait — the workflow will ask when it's time
+          else if (session.collectedData.terraceSqm === undefined && nextField === 'terraceSqm' && (/ima|има|terasa|тераса|terrace|teras|терас/i.test(u) || isPositive(u))) {
+            console.log(`[TERRACE: yes, size unknown — asking follow-up]`);
+            session.pendingFollowUp = 'terraceSqm';
+            return {
+              text: 'Дали знаете колку квадрати е терасата?',
+              type: "QUESTION"
+            };
+          }
         }
       }
 
@@ -616,21 +667,25 @@ if (/kako bi sorabotuvale|како би соработувале|како да �
           session.collectedData.heating = "district";
           session.collectedData.heatingType = "district";
           session.collectedData.heatingFollowUp = false;
+          session.pendingFollowUp = null;
           console.log(`[HEATING: district]`);
         } else if (/centralno|централно|central|sopstveno|сопствено|individualno|индивидуално|svoja|своја|kotel|kotlarnica|котларница|сопствена|sopstvena|moe|мое|nase|наше|licno|лично|zgradata|зградата|na zgradata|на зградата|sopstveno parno|сопствено парно|moe parno|мое парно|nase parno|наше парно|licno parno|лично парно|parno moe|парно мое|parno nase|парно наше|parno licno|парно лично|parno na zgradata|парно на зградата|sopstveno|сопствено|sopstveno parno|сопствено парно/i.test(u)) {
           session.collectedData.heating = "central";
           session.collectedData.heatingType = "private_central";
           session.collectedData.heatingFollowUp = false;
+          session.pendingFollowUp = null;
           console.log(`[HEATING: private_central]`);
         } else if (/klima|клима|inverter|инвертер|split|сплит|invertor|инвертор|klima inverter|клима инвертер|термопумпа|toplotna|топлотна|na klima|на клима|se gream|се греам/i.test(u)) {
           session.collectedData.heating = "electric";
           session.collectedData.heatingType = "inverter";
           session.collectedData.heatingFollowUp = false;
+          session.pendingFollowUp = null;
           console.log(`[HEATING: inverter]`);
         } else if (/struja|струја|electric|термо|термосистем|termo|radijatori|радијатори|kalorifer|калорифер/i.test(u)) {
           session.collectedData.heating = "electric";
           session.collectedData.heatingType = "electric";
           session.collectedData.heatingFollowUp = false;
+          session.pendingFollowUp = null;
           console.log(`[HEATING: electric]`);
         } else if (/drva|дрва|peleti|пелети|pellet|пелет|nafta|нафта|loz|лож|огрев|ogrev|jаглен|jaglen|uglen|у́глен/i.test(u)) {
           if (/drva|дрва|peleti|пелети|pellet|пелет|ogrev|огрев/i.test(u)) {
@@ -641,9 +696,11 @@ if (/kako bi sorabotuvale|како би соработувале|како да �
             session.collectedData.heatingType = "oil";
           }
           session.collectedData.heatingFollowUp = false;
+          session.pendingFollowUp = null;
           console.log(`[HEATING: ${session.collectedData.heatingType}]`);
         } else if (/parno|парно/i.test(u) && !session.collectedData.heatingFollowUp) {
           session.collectedData.heatingFollowUp = true;
+          session.pendingFollowUp = 'heating';
           return {
             text: "Какво парно? Градско или сопствено?",
             type: "QUESTION"
@@ -653,9 +710,14 @@ if (/kako bi sorabotuvale|како би соработувале|како да �
           session.collectedData.heating = "parno_unknown";
           session.collectedData.heatingType = "unknown";
           session.collectedData.heatingFollowUp = false;
+          session.pendingFollowUp = null;
           console.log(`[HEATING: parno_unknown (defaulted)]`);
         }
       }
+
+      // Safety net: clear pendingFollowUp before photo/ownerName/address handlers
+      // in case pendingFollowUp was left set from a previous unanswered follow-up
+      session.pendingFollowUp = null;
 
       // === photos (complex stateful handler with scraper logic) ===
       if (nextField === 'photos') {
