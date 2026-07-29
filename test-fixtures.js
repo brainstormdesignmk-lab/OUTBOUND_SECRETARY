@@ -484,9 +484,29 @@ function countBedrooms(text) {
     const matches = u.match(new RegExp(word, 'gi'));
     if (matches) roomCount += matches.length;
   }
+
+  // 3. Multi-room list: "dve golemi i edna detska" → 3, "tri golemi spalni i edna detska" → 4
+  // Runs BEFORE roomCount >= 2 check because this parser can detect MORE bedrooms than
+  // room types (e.g., 3 large bedrooms + 1 children's room = 4, but room types = 2).
+  // Split on commas or standalone "i"/"и" with spaces around them (NOT bare "i" inside
+  // words like "spalni", which would incorrectly split a room word).
+  const roomSegments = u.split(/\s*,\s*|\s+(?:i|и)\s+/);
+  if (roomSegments.length >= 2) {
+    let roomsFromList = 0;
+    for (const seg of roomSegments) {
+      if (/(spaln|спалн|detsk|детск|gostinsk|гостинск|golem|голем|mala|мала|soba|соба|sobi|соби)/i.test(seg)) {
+        const num = parseMacedonianNumber(seg);
+        if (num !== null && num >= 1 && num <= 20) {
+          roomsFromList += num;
+        }
+      }
+    }
+    if (roomsFromList >= 2) return roomsFromList;
+  }
+
   if (roomCount >= 2) return roomCount;
 
-  // 3. Check for number-word + room-word pattern directly (B14)
+  // 4. Check for number-word + room-word pattern directly (B14)
   // Runs BEFORE parseMacedonianNumber to avoid substring-order issues
   const numberRoomMatch = u.match(/([a-zа-я]+)\s+(spalni|спални|spalna|спална|detski|детски|detska|детска|gostinski|гостински|gostinska|гостинска)/i);
   if (numberRoomMatch) {
@@ -499,13 +519,24 @@ function countBedrooms(text) {
     }
   }
 
-  // 4. Fall back to number extraction on full text
+  // 5. Fall back to number extraction on full text
   const wordNum = parseMacedonianNumber(u);
-  if (wordNum !== null && wordNum >= 0 && wordNum <= 10) return wordNum;
+  if (wordNum !== null && wordNum >= 0 && wordNum <= 10) {
+    // Skip if the only number words are actually ordinal floor references
+    const hasOrdinalContext = /(tret|трет|vtor|втор|prv|прв|cetvrt|четврт|petti|петти|sesti|шести|sedmi|седми|osmi|осми|devetti|деветти)\s*(kat|кат|sprat|спрат)/i.test(u);
+    if (hasOrdinalContext) return null;
+    // Skip if message contains terrace or question context (could be answering terrace/other follow-up)
+    if (/terasa|тераса|zosto|зошто|zasto|зашто/i.test(u)) return null;
+    return wordNum;
+  }
   const firstNum = extractFirstNumber(u);
-  if (firstNum !== null) return firstNum;
+  if (firstNum !== null && firstNum >= 0 && firstNum <= 20) {
+    // Skip if message contains other-field context (sqm, floor, terrace, price)
+    if (/m2|м2|кв|kvadrati|квадрати|sqm|kat|кат|sprat|спрат|terasa|тераса|m²|evra|евра/i.test(u)) return null;
+    return firstNum;
+  }
 
-  // 5. Single room word with no number
+  // 6. Single room word with no number
   if (roomCount === 1) return 1;
 
   return null;
@@ -1161,11 +1192,16 @@ assertEqual(countBedrooms("dve spalni i detska"), 2, "'dve spalni i detska' → 
 assertEqual(countBedrooms("cetiri"), 4, "'cetiri' → 4 (fallback)");
 
 // Multiple room-words: спална + детска = 2 (caught by roomCount >= 2)
-assertEqual(countBedrooms("edna spalna i edna detska"), 2, "'edna spalna i edna detska' → 2 (room words)");
-assertEqual(countBedrooms("spalna, detska i gostinska"), 3, "'spalna, detska i gostinska' → 3 (3 room words)");
+assertEqual(countBedrooms("edna spalna i edna detska"), 2, "'edna spalna i edna detska' → 2 (room words)");  assertEqual(countBedrooms("spalna, detska i gostinska"), 3, "'spalna, detska i gostinska' → 3 (3 room words)");
 
-// ============================================================
-// TEST GROUP: parseOrientation
+  // Multi-room list parser: number-word + adjective + room-word patterns
+  assertEqual(countBedrooms("dve golemi i edna detska"), 3, "'dve golemi i edna detska' → 3 (dve=2 + edna=1 via multi-room parser)");
+  assertEqual(countBedrooms("tri golemi spalni i edna detska"), 4, "'tri golemi spalni i edna detska' → 4 (tri=3 + edna=1)");
+  assertEqual(countBedrooms("dve golemi"), 2, "'dve golemi' → 2 (single segment falls through, handled by fallback)");
+  assertEqual(countBedrooms("55 m2, 3 kat, ima lift"), null, "'55 m2, 3 kat, ima lift' → null (no room context in any segment)");
+
+  // ============================================================ 
+  // TEST GROUP: parseOrientation
 // ============================================================
 console.log(`\n📦 GROUP: parseOrientation`);
 
@@ -1228,8 +1264,7 @@ assertEqual(countBedrooms("osum spalni"), 8, "B14: 'osum spalni' → 8");
 
 // Plural room words should be matched
 assertEqual(countBedrooms("dve detski"), 2, "B14: 'dve detski' → 2");
-assertEqual(countBedrooms("edna gostinska i edna spalna"), 2, "B14: 'edna gostinska i edna spalna' → 2");
-assertEqual(countBedrooms("dve spalni i edna detska"), 2, "B14: 'dve spalni i edna detska' → 2 (roomCount>=2)");
+assertEqual(countBedrooms("edna gostinska i edna spalna"), 2, "B14: 'edna gostinska i edna spalna' → 2");  assertEqual(countBedrooms("dve spalni i edna detska"), 3, "B14: 'dve spalni i edna detska' → 3 (dve=2 + edna=1 via multi-room parser)");
 
 // ============================================================
 // TEST GROUP: B15 — Terrace word-based numbers

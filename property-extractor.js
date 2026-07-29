@@ -247,6 +247,26 @@ export function countBedrooms(text) {
     const matches = u.match(new RegExp(word, 'gi'));
     if (matches) roomCount += matches.length;
   }
+
+  // Multi-room list: "dve golemi i edna detska" → 3, "tri golemi spalni i edna detska" → 4
+  // Runs BEFORE roomCount >= 2 check because this parser can detect MORE bedrooms than
+  // room types (e.g., 3 large bedrooms + 1 children's room = 4, but room types = 2).
+  // Split on commas or standalone "i"/"и" with spaces around them (NOT bare "i" inside
+  // words like "spalni", which would incorrectly split a room word).
+  const roomSegments = u.split(/\s*,\s*|\s+(?:i|и)\s+/);
+  if (roomSegments.length >= 2) {
+    let roomsFromList = 0;
+    for (const seg of roomSegments) {
+      if (/(spaln|спалн|detsk|детск|gostinsk|гостинск|golem|голем|mala|мала|soba|соба|sobi|соби)/i.test(seg)) {
+        const num = parseMacedonianNumber(seg);
+        if (num !== null && num >= 1 && num <= 20) {
+          roomsFromList += num;
+        }
+      }
+    }
+    if (roomsFromList >= 2) return roomsFromList;
+  }
+
   if (roomCount >= 2) return roomCount;
 
   // Digit before room word: '2 spalni', '2 спални' etc.

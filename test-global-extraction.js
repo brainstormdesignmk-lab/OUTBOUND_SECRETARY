@@ -344,10 +344,10 @@ result = runGlobalExtraction("zdravo, kako si?", {}, "zdravo, kako si?");
 assert("EC4: greeting extracts nothing", Object.keys(result).length === 0, `got ${Object.keys(result).join(', ')}`);
 
 // Test 37b: "dve golemi i edna detska" should NOT extract furnished (false positive from 'gol' in 'golemi')
-result = runGlobalExtraction("dve golemi i edna detska", {}, "dve golemi i edna detska");
-assert("EC4b: furnished NOT extracted from bedroom answer (gol false positive)", result.furnished === undefined, `got ${JSON.stringify(result.furnished)}`);
+result = runGlobalExtraction("dve golemi i edna detska", {}, "dve golemi i edna detska");  assert("EC4b: furnished NOT extracted from bedroom answer (gol false positive)", result.furnished === undefined, `got ${JSON.stringify(result.furnished)}`);
+  assert("EC4b: bedrooms=3 from 'dve golemi i edna detska'", result.bedrooms === 3, `got ${result.bedrooms}`);
 
-// Test 37c: "100 m2, 3 kat" should NOT extract cleanPrice (no price keywords)
+  // Test 37c: "100 m2, 3 kat" should NOT extract cleanPrice (no price keywords)
 result = runGlobalExtraction("100 m2, 3 kat", {}, "100 m2, 3 kat");
 assert("EC4c: cleanPrice NOT extracted from '100 m2, 3 kat'", result.cleanPrice === undefined, `got ${result.cleanPrice}`);
 assert("EC4c: totalSqm=100", result.totalSqm === 100, `got ${result.totalSqm}`);
