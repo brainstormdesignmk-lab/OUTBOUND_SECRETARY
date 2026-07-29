@@ -583,20 +583,22 @@ if (/kako bi sorabotuvale|како би соработувале|како да �
             console.log(`[TERRACE: ${firstNum}m2]`);
           }
         }
-        // "ne znam" reply (follow-up question response)
-        if (session.collectedData.terraceSqm === undefined && /ne znam|не знам|незнам|neznam|ne znam tocno|не знам точно|ne sum siguren|не сум сигурен/i.test(u)) {
+        // "ne znam" reply — only when terraceSqm is the current workflow field
+        if (session.collectedData.terraceSqm === undefined && nextField === 'terraceSqm' && /ne znam|не знам|незнам|neznam|ne znam tocno|не знам точно|ne sum siguren|не сум сигурен/i.test(u)) {
           session.collectedData.hasTerrace = true;
           session.collectedData.terraceSqm = null;
           console.log(`[TERRACE: yes, size unknown]`);
         }
-        // True negative responses
-        else if (session.collectedData.terraceSqm === undefined && /^0$|nema terasa|нема тераса|nema|нема|без|bez|nema|нема|bez terasa|без тераса|nema parking|нема паркинг/i.test(u) && !/ima|има|kv|кв|m2|м2|kvadrat|квадрат/i.test(u)) {
+        // True negative responses — only when terraceSqm is the current workflow field
+        else if (session.collectedData.terraceSqm === undefined && nextField === 'terraceSqm' && /^0$|nema terasa|нема тераса|nema|нема|без|bez|nema|нема|bez terasa|без тераса|nema parking|нема паркинг/i.test(u) && !/ima|има|kv|кв|m2|м2|kvadrat|квадрат/i.test(u)) {
           session.collectedData.hasTerrace = false;
           session.collectedData.terraceSqm = 0;
           console.log(`[TERRACE: none]`);
         }
         // Has terrace (with ima/terasa context) but no number found
-        else if (session.collectedData.terraceSqm === undefined && (/ima|има|terasa|тераса|terrace|teras|терас/i.test(u) || isPositive(u))) {
+        // Only ask follow-up if terraceSqm is the current workflow field
+        // Otherwise silently wait — the workflow will ask when it's time
+        else if (session.collectedData.terraceSqm === undefined && nextField === 'terraceSqm' && (/ima|има|terasa|тераса|terrace|teras|терас/i.test(u) || isPositive(u))) {
           console.log(`[TERRACE: yes, size unknown — asking follow-up]`);
           return {
             text: 'Дали знаете колку квадрати е терасата?',
