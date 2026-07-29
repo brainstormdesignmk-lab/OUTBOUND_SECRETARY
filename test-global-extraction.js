@@ -299,6 +299,14 @@ assert("PC1d: cleanPrice=93000 (devedeset=90 + tri=3 = 93 × 1000, long form)", 
 result = runGlobalExtraction("dveste iljadi evra", {});
 assert("PC1e: cleanPrice=200000 (dveste=200 × 1000)", result.cleanPrice === 200000, `got ${result.cleanPrice}`);
 
+// Test: "trieste iljadi evra" — standalone hundreds (trieste=300)
+result = runGlobalExtraction("trieste iljadi evra", {});
+assert("PC1f: cleanPrice=300000 (trieste=300 × 1000)", result.cleanPrice === 300000, `got ${result.cleanPrice}`);
+
+// Test: "sedumdeset iljadi" — irregular tens (sedumdeset=70)
+result = runGlobalExtraction("sedumdeset iljadi", {});
+assert("PC1g: cleanPrice=70000 (sedumdeset=70 × 1000)", result.cleanPrice === 70000, `got ${result.cleanPrice}`);
+
 assert("PC1: floor NOT extracted (cross-field contamination)", result.floor === undefined, `got ${JSON.stringify(result.floor)}`);
 assert("PC1: bedrooms NOT extracted", result.bedrooms === undefined, `got ${JSON.stringify(result.bedrooms)}`);
 assert("PC1: totalFloors NOT extracted", result.totalFloors === undefined, `got ${JSON.stringify(result.totalFloors)}`);

@@ -1277,6 +1277,8 @@ assertEqual(extractPrice("dvaeset iljadi"), 20000, "B13: 'dvaeset iljadi' → 20
 assertEqual(extractPrice("triest iljadi"), 30000, "B13: 'triest iljadi' → 30000");
 assertEqual(extractPrice("pedeset iljadi"), 50000, "B13: 'pedeset iljadi' → 50000");
 assertEqual(extractPrice("seeset iljadi"), 60000, "B13: 'seeset iljadi' → 60000");
+assertEqual(extractPrice("sedumdeset iljadi"), 70000, "B13: 'sedumdeset iljadi' → 70000");
+assertEqual(extractPrice("trieste iljadi"), 300000, "B13: 'trieste iljadi' → 300000");
 
 // Multi-word with "i": stodvaeset i X iljadi
 assertEqual(extractPrice("stodvaeset i pet iljadi"), 125000, "B13: 'stodvaeset i pet iljadi' → 125000");
