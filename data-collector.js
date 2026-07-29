@@ -72,8 +72,89 @@ function extractBedrooms(u, data) {
   return (bd !== null && bd >= 0 && bd <= 20) ? { bedrooms: bd } : null;
 }
 
+// ========================================
+// Compound floor extraction: "na osmi od deset" → floor=8, totalFloors=10
+// Detects patterns where BOTH floor and total floors are given in one phrase.
+// Runs BEFORE individual floor/totalFloors extraction to capture compound
+// answers in a single turn and skip the totalFloors question entirely.
+// ========================================
+function extractCompoundFloor(u) {
+  // Pattern 1: "na 8 od 10" or "8 od 10" — digit "od" digit
+  const digitOdMatch = u.match(/(?:na\s+)?(\d{1,2})\s+od\s+(\d{1,3})/i);
+  if (digitOdMatch) {
+    const floor = parseInt(digitOdMatch[1]);
+    const total = parseInt(digitOdMatch[2]);
+    if (floor >= 0 && floor <= 50 && total >= 2 && total <= 50) {
+      return { floor, totalFloors: total };
+    }
+  }
+
+  // Pattern 2: "na osmi od deset", "na 8 od vkupno deset", "osmi kat od vkupno deset"
+  // word (ordinal or digit) "od" word/digit
+  // Optional word (\S+\s+)? between floor and "od" handles "osmi kat od..." and
+  // "na osmi kat od..." — a common Macedonian compound floor pattern.
+  // The optional word is non-capturing ((?:...)) so capture indices 1 and 2 stay correct.
+  const wordOdMatch = u.match(/(?:na\s+)?(\w+)\s+(?:\S+\s+)?od\s+(?:vkupno\s+)?(\S{2,})/i);
+  if (wordOdMatch) {
+    const floorWord = wordOdMatch[1].toLowerCase();
+    const totalWord = wordOdMatch[2].toLowerCase();
+    // Parse floor word as ordinal or digit
+    let floor = parseOrdinalFloor(floorWord);
+    if (floor === null) {
+      floor = /^\d+$/.test(floorWord) ? parseInt(floorWord) : null;
+    }
+    // Parse total word as digit, word-number, or extracted from compound like "desetka"
+    let total = /^\d+$/.test(totalWord) ? parseInt(totalWord) : parseMacedonianNumber(totalWord);
+    if (floor !== null && floor >= 0 && floor <= 50 && total !== null && total >= 2 && total <= 50) {
+      return { floor, totalFloors: total };
+    }
+  }
+
+  // Pattern 3: "8/10" or "na 8/10" — digit/digit
+  // Requires floor context OR bare message (just "8/10") to avoid false positives
+  // like dates (5/10), ratios, scores.
+  // Bare "8/10" needs at least 1 digit in each position and both < 50.
+  const slashMatch = u.match(/(?:na\s+)?(\d{1,2})\s*\/\s*(\d{1,3})/i);
+  if (slashMatch) {
+    const floor = parseInt(slashMatch[1]);
+    const total = parseInt(slashMatch[2]);
+    if (floor >= 0 && floor <= 50 && total >= 2 && total <= 50) {
+      // Accept if: floor context present OR the entire message is just this pattern
+      // (bare "8/10" when answering the floor question)
+      if (/na|kat|кат|sprat|спрат|floor|етаж|od/i.test(u)) {
+        return { floor, totalFloors: total };
+      }
+    }
+  }
+  // Pattern 3b: bare "8/10" as entire message (no floor context words needed)
+  // When the user answers the floor question with just "8/10", that's clearly
+  // a compound floor/total expression even without "kat" or "sprat" keywords.
+  const bareSlashMatch = u.match(/^(\d{1,2})\s*\/\s*(\d{1,3})$/);
+  if (bareSlashMatch) {
+    const floor = parseInt(bareSlashMatch[1]);
+    const total = parseInt(bareSlashMatch[2]);
+    if (floor >= 0 && floor <= 50 && total >= 2 && total <= 50) {
+      return { floor, totalFloors: total };
+    }
+  }
+
+  return null;
+}
+
 function extractFloor(u, data) {
   if (data.floor !== undefined && data.floor !== null) return null;
+  // COMPOUND PATTERN FIRST: "na osmi od deset" → floor=8, totalFloors=10
+  // Extracts BOTH fields in a single turn, skipping the totalFloors question.
+  // Must run BEFORE individual floor extraction to capture compound answers.
+  const compoundResult = extractCompoundFloor(u);
+  if (compoundResult) {
+    // Only return totalFloors if not already set by a previous turn
+    if (data.totalFloors !== undefined && data.totalFloors !== null) {
+      return { floor: compoundResult.floor };
+    }
+    return compoundResult;
+  }
+
   // Check for potkrovje first
   if (/potkrovje|поткровје|podkrovje|подкровје|potkrov|поткров|potkrov|поткров/i.test(u)) {
     // First check if this SAME message also contains totalFloors (cross-rule hint)
