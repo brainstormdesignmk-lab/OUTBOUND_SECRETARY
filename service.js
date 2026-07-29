@@ -573,11 +573,14 @@ if (/kako bi sorabotuvale|како би соработувале|како да �
           // Accept as terrace size if:
           //   a) "terasa" context present ("terasa 15m2"), OR
           //   b) has "ima"/positive word ("ima 15m2" = has 15m2 terrace), OR
-          //   c) no generic sqm phrasing at all (bare word like "pet" = follow-up answer)
-          // Reject generic sqm without context ("55 kvadrati" = totalSqm, not terrace)
+          //   c) no generic sqm or price phrasing (bare word like "pet" = follow-up answer)
+          // Reject:
+          //   - generic sqm without context ("55 kvadrati" = totalSqm, not terrace)
+          //   - price context ("98 iljadi" = price, not terrace)
           const hasTerraceContext = /terasa|тераса|terrace|teras|терас|ima|има|da|да|ok|океј|moze|може/i.test(u);
           const hasGenericSqm = /kvadrati|квадрати|m2|м2|kv|кв|sqm/i.test(u);
-          if (hasTerraceContext || !hasGenericSqm) {
+          const hasPriceContext = /iljadi|илјади|evra|евра|eur|evro|евро/i.test(u);
+          if ((hasTerraceContext || (!hasGenericSqm && !hasPriceContext))) {
             session.collectedData.hasTerrace = true;
             session.collectedData.terraceSqm = firstNum;
             console.log(`[TERRACE: ${firstNum}m2]`);
