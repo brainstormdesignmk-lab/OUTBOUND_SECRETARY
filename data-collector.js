@@ -313,6 +313,102 @@ const EXTRACTION_RULES = [
 ];
 
 // ========================================
+// CONFIDENCE ASSESSMENT
+// ========================================
+// Returns 'HIGH' | 'MEDIUM' | 'LOW' for an extracted value
+// based on the input message and the target field.
+//
+// HIGH = explicit keyword match ("65 m2", "3 kat", "ima lift")
+// MEDIUM = uncertainty words present ("mislam okolu 65") OR bare number with partial context
+// LOW = unreliable / no context (discarded entirely)
+// ========================================
+
+// Words that indicate uncertain answers
+const UNCERTAINTY_WORDS = /mislam|okolu|околу|приближно|otprilika|отприлика|mozda|можеби|можда|negde|негде|valjda|ваљда|priblizno|приблизно|neshto vaka|нешто вака|tocno ne|точно не|ne znam|не знам|neznam|треба да|treba da|posle|после/i;
+
+// Required context keywords per field for HIGH confidence
+// If these keywords are present in the message AND the value was extracted,
+// confidence is HIGH. Otherwise MEDIUM (or LOW for binary fields with no context).
+const FIELD_CONFIDENCE_KEYWORDS = {
+  'cleanPrice': /iljadi|илјади|evra|евра|eur|evro|евро|cena|цена|baren|барам|sakam|сакам|za mene|за мене/i,
+  'totalSqm': /m2|м2|kvadrati|квадрати|kv|кв|sqm|kvadrata|квадрата/i,
+  'bedrooms': /spaln|спалн|detsk|детск|soba|соба|sobi|соби|gostinsk|гостинск|soben|собен|golem|голем|mala|мала/i,
+  'floor': /kat|кат|sprat|спрат|potkrovje|поткровје|prizemje|приземје|floor|етаж|etazh/i,
+  'totalFloors': /katnica|катница|kata|ката|sprata|спрата|kati|кати|eta|ета|sprat|спрат|zgradata|зградата|vkupno|вкупно/i,
+  'yearBuilt': /izgraden|граден|godina|година|gradba|градба|graden|граден|izgradba|изградба|zavrshen|завршен|star|стар/i,
+  'monthlyRent': /kirija|кирија|mesecno|месечно/i,
+  'orientation': /orientacija|ориентација|strana|страна|jug|север|istok|запад|zapad|sever|jugoistok|jugozapad|severoistok|severozapad|исток|југ|североисток|северозапад|југоисток|југозапад|pravec|правец/i,
+  'terraceSqm': /terasa|тераса|terrace|m2|м2|kvadrati|квадрати/i
+};
+
+// Binary fields that require explicit keyword match for HIGH confidence
+const BINARY_CONFIDENCE_FIELDS = new Set([
+  'elevator', 'ac', 'parking', 'furnished', 'documentationClean', 'renovated', 'heating'
+]);
+
+// Derived sub-keys from multi-field extractors (e.g., furnishedLevel from extractFurnished).
+// These are always side-effects of their parent field extraction and should inherit HIGH.
+const DERIVED_SUBKEYS = new Set([
+  'furnishedLevel', 'parkingType', 'orientationPrimary', 'orientationSecondary',
+  'documentationIssues', 'heatingType', 'heating'
+]);
+
+function assessConfidence(field, value, input) {
+  const hasUncertainty = UNCERTAINTY_WORDS.test(input);
+  if (hasUncertainty) {
+    console.log(`[CONFIDENCE: ${field} = MEDIUM (uncertainty words)]`);
+    return 'MEDIUM';
+  }
+
+  // Derived sub-keys (furnishedLevel, parkingType, etc.) are side-effects of
+  // their parent extractor. If they reached this point, the parent already
+  // verified the context — HIGH.
+  if (DERIVED_SUBKEYS.has(field)) {
+    console.log(`[CONFIDENCE: ${field} = HIGH (derived sub-key)]`);
+    return 'HIGH';
+  }
+
+  // Binary fields (elevator, ac, parking, furnished, renovated, documentationClean, heating)
+  // have dedicated extractors with their own context guards (e.g., extractElevator requires
+  // "lift" or "лифт"). If the extractor returned a value, the context was verified — HIGH.
+  if (typeof value === 'boolean' || BINARY_CONFIDENCE_FIELDS.has(field)) {
+    console.log(`[CONFIDENCE: ${field} = HIGH (binary extractor confirmed)]`);
+    return 'HIGH';
+  }
+
+  // Special: year-like numbers (1900-2030) for yearBuilt or renovationYear.
+  // A 4-digit number in this range is almost certainly a year, even without
+  // keyword context like "godina" or "izgraden".
+  if ((field === 'yearBuilt' || field === 'renovationYear') &&
+      typeof value === 'number' && value >= 1900 && value <= 2030) {
+    console.log(`[CONFIDENCE: ${field} = HIGH (year-like number)]`);
+    return 'HIGH';
+  }
+
+  // Check field-specific keywords for numeric/string fields
+  const keywordRegex = FIELD_CONFIDENCE_KEYWORDS[field];
+  if (keywordRegex && keywordRegex.test(input)) {
+    console.log(`[CONFIDENCE: ${field} = HIGH (keyword match)]`);
+    return 'HIGH';
+  }
+
+  // Numeric-or-string field without uncertainty but also without strong
+  // field-specific keywords — might be a volunteered bare number.
+  // Example: "pedeset" without "kvadrati" → MEDIUM, not LOW.
+  // User might be answering the current question with a word number.
+  const hasDigits = /\d+/.test(input);
+  if (hasDigits || /jedn|dve|tri|cetiri|pet|sest|sedum|osum|devet|deset|stoti|илjadi/i.test(input)) {
+    // Bare digit or word number — could be correct answer to current question
+    console.log(`[CONFIDENCE: ${field} = MEDIUM (bare number)]`);
+    return 'MEDIUM';
+  }
+
+  // String value (orientation, heating, etc.) without keyword context → LOW
+  console.log(`[CONFIDENCE: ${field} = LOW (no context)]`);
+  return 'LOW';
+}
+
+// ========================================
 // Terrace extraction (simple context-based, not complex follow-up)
 // ========================================
 function extractTerrace(u, data) {
@@ -533,5 +629,6 @@ function runGlobalExtraction(u, currentData, preferredField) {
 
 export {
   runGlobalExtraction,
+  assessConfidence,
   EXTRACTION_RULES
 };

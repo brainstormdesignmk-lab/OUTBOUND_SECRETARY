@@ -42,7 +42,7 @@ import {
 } from './objections.js';
 
 // Global extraction pass
-import { runGlobalExtraction } from './data-collector.js';
+import { runGlobalExtraction, assessConfidence } from './data-collector.js';
 
 // Persuasion phase (prompt builder + response post-processor)
 import { buildPersuasionContext, buildPersuasionPrompt, postProcessPersuasionResponse } from './persuasion.js';
@@ -283,6 +283,9 @@ export async function generateResponse(session, userInput) {
     }
     if (!session.pendingFollowUp) {
       session.pendingFollowUp = null;
+    }
+    if (!session.pendingConfirmation) {
+      session.pendingConfirmation = null;
     }
 
     const u = userInput.toLowerCase().trim();
@@ -547,6 +550,42 @@ if (/kako bi sorabotuvale|како би соработувале|како да �
     }
 
     // ========================================
+    // PENDING CONFIRMATION HANDLER (BEFORE global extraction)
+    // If the previous turn asked for confirmation (MEDIUM confidence),
+    // check the current answer and either confirm or correct.
+    // ========================================
+    if (session.pendingConfirmation) {
+      const pField = session.pendingConfirmation.field;
+      const pValue = session.pendingConfirmation.value;
+      // User confirms
+      if (/^da$|^да$|tocno|точно|ok|океј|moze|може|se|се|potvrd|потврд|tocno e|точно е|taka e|така е|da taka e|да така е|potvrduvam|потврдувам|potvrdi|потврди|da e|да е|tocno e taka|точно е така|upravo|управо|tok|ток|taka|така/i.test(u)) {
+        session.collectedData[pField] = pValue;
+        session.pendingConfirmation = null;
+        console.log(`[CONFIRMED: ${pField} = ${JSON.stringify(pValue)}]`);
+        // Fall through to normal flow — field is now filled
+      }
+      // User rejects — ask same question again
+      else if (/^ne$|^не$|ne e tocno|не е точно|greska|грешка|pogresno|погрешно|ne e taka|не е така|ne tok|не ток/i.test(u)) {
+        session.pendingConfirmation = null;
+        console.log(`[REJECTED: ${pField} = ${JSON.stringify(pValue)} — ask again]`);
+        const propertyLabel = session.adMemory?.propertyType === 'apartment' ? 'станот' : 'имотот';
+        const confirmQuestion = getQuestion(pField, session.adMemory?.propertyType || 'apartment');
+        return { text: `Разбирам, да прашам повторно. ${confirmQuestion}`, type: "QUESTION", nextField: pField };
+      }
+      // User provides a different number — let extraction handle it
+      else if (/\d/.test(u) || /promeni|измени|izmeni|измени|cetiri|pet|sest|sedum|osum|devet|deset|stoti|iljadi|илјади|edna|dve|tri/i.test(u)) {
+        session.pendingConfirmation = null;
+        console.log(`[CONFIRMATION: user providing new value — let extraction handle]`);
+        // Fall through to normal extraction
+      }
+      // Unclear answer — prompt again
+      else {
+        const confirmQuestion = getQuestion(pField, session.adMemory?.propertyType || 'apartment');
+        return { text: `Ве молам, потврдете. Дали точната вредност е ${pValue}?`, type: "QUESTION", nextField: pField };
+      }
+    }
+
+    // ========================================
     // GLOBAL EXTRACTION PASS — extracts all simple fields from EVERY message
     // Runs for BOTH persuasion and data collection phases.
     // This captures property details the owner volunteers during conversation
@@ -558,10 +597,46 @@ if (/kako bi sorabotuvale|како би соработувале|како да �
     // numbers like "13" from "ne znam ama zgradata ima 13 sprata".
     // ========================================
     if (!session.pendingFollowUp) {
-      const updates = runGlobalExtraction(u, session.collectedData, nextField);
-      for (const [key, value] of Object.entries(updates)) {
-        session.collectedData[key] = value;
-        console.log(`[GLOBAL: ${key} = ${JSON.stringify(value)}]`);
+      const rawUpdates = runGlobalExtraction(u, session.collectedData, nextField);
+      // Split extracted values by confidence level
+      // HIGH → store immediately
+      // MEDIUM for current field → set pendingConfirmation (ask user)
+      // MEDIUM for volunteered (non-current) field → store silently
+      // LOW → discard entirely
+      const toStore = {};     // HIGH or volunteered-MEDIUM → store immediately
+      let provisionalValue = null;  // MEDIUM for current field → ask confirmation
+
+      for (const [key, value] of Object.entries(rawUpdates)) {
+        const confidence = assessConfidence(key, value, u);
+        if (confidence === 'HIGH') {
+          toStore[key] = value;
+          console.log(`[GLOBAL: ${key} = ${JSON.stringify(value)} (HIGH)]`);
+        } else if (confidence === 'MEDIUM' && key === nextField) {
+          provisionalValue = { field: key, value };
+          console.log(`[PROVISIONAL: ${key} = ${JSON.stringify(value)} (MEDIUM, await confirm)]`);
+        } else if (confidence === 'MEDIUM') {
+          // Volunteered field — store silently (user might not be answering current question)
+          toStore[key] = value;
+          console.log(`[GLOBAL: ${key} = ${JSON.stringify(value)} (volunteered MEDIUM)]`);
+        }
+        // LOW → discard, no log needed
+      }
+
+      // Store HIGH and volunteered-MEDIUM values
+      for (const [key, value] of Object.entries(toStore)) {
+        // Don't overwrite values already set by confirmed high-confidence extraction
+        if (session.collectedData[key] === undefined || session.collectedData[key] === null) {
+          session.collectedData[key] = value;
+        }
+      }
+
+      // Handle MEDIUM for current field — ask confirmation instead of storing
+      if (provisionalValue) {
+        session.pendingConfirmation = provisionalValue;
+        const confirmQuestion = getQuestion(provisionalValue.field, session.adMemory?.propertyType || 'apartment');
+        const confirmText = `Дали точната вредност е ${provisionalValue.value}? ${confirmQuestion}`;
+        // Return confirmation question — don't fall through to complex handlers
+        return { text: confirmText, type: "QUESTION", nextField: provisionalValue.field };
       }
     } else {
       console.log(`[PENDING FOLLOW-UP: ${session.pendingFollowUp} — global extraction skipped]`);
