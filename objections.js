@@ -115,6 +115,23 @@ function isAskingAboutLegalCosts(text) {
   return /advokat|адвокат|notar|нотар|danok|данок/i.test(text);
 }
 
+// ========================================
+// HELPER: Check if asking about the agency itself (name, location, experience)
+// These must be answered BEFORE continuing with the sales/commission script.
+// Priority: agency questions > objections > data collection.
+// ========================================
+function isAskingAboutAgency(text) {
+  // "koja agencija ste?" (which agency are you?), "kako se vika agencijata?" (what's the name?)
+  // "kolku vreme rabotite?" (how long have you been working?)
+  // "kade vi e kancelarijata?" (where is your office?), "od kade rabotite?" (where from?)
+  // "imate iskustvo?" (do you have experience?), "imate klienti?" (do you have clients?)
+  // "koj ve vodi?" (who leads you?), "koja e vashata firma?" (what's your company?)
+  // IMPORTANT: Negative lookahead for provizija/procent prevents false matches
+  // from commission questions like "shto rabotite so provizijata?" which should
+  // be handled by the commission/objection handler, NOT by the agency handler.
+  return /agencija|агенциј|firma|фирм|kancelari|канцелари|biro|биро|vreme rabotite|време работите|iskustvo|искуство|godini rabotite|години работите|kako se vika|како се вика|kako se vikate|како се викате|koja ste|која сте|koj ve vodi|кој ве води|vodi agencijata|води агенцијата|kade rabotite|каде работите|od kade rabotite|од каде работите|kade vi e|каде ви е|kade se naogja|каде се наоѓа|shto rabotite(?!\s+so\s+(provizija|провизија|procent|процент))|што работите(?!\s+со\s+(провизија|provizija|процент|procent))|shto e toa metropolis|што е тоа metropolis|sto e metropolis|што е метрополис|sto e metro polis|metropolis agencija|metropolis агенција|angažirate|ангажирате|vraboteni|вработени|kolektiv|колектив|ime na agencijata|име на агенцијата/i.test(text);
+}
+
 export {
   OBJECTION_RESPONSES,
   matchObjection,
@@ -126,5 +143,6 @@ export {
   isAskingHowItWorks,
   isAskingAboutClients,
   isAskingWhereToSendPhotos,
-  isAskingAboutLegalCosts
+  isAskingAboutLegalCosts,
+  isAskingAboutAgency
 };

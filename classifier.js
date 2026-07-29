@@ -5,6 +5,14 @@
 // ========================================
 
 // ========================================
+// Centralized conversation-continuation words pattern
+// Exported for use by service.js to keep in sync.
+// These words after an affirmative mean "yes continue talking"
+// NOT "yes I accept cooperation".
+// ========================================
+export const CONV_CONTINUATION_WORDS = /(?:prodolz|продолж|slusam|слушам|slusham|objasn|објасн|kazh|каж|izvoli|изволи|pojasn|појасн|poveke|повеќе|samo\s*(prasaj|прашај)|slobodno|слободно)/i;
+
+// ========================================
 // Parse conversation context from the conversation string
 // Extracts last N messages, returning Ana's last message and user's last message
 // conversation format: "Ана: message\nСопственик: message\nАна: message..."
@@ -117,8 +125,7 @@ export function classifyIntent(userInput, conversation) {
   // "da objasnis", "da kazes" mean "yes continue talking" — NOT "yes I accept cooperation".
   // The owner is giving conversational permission, not committing to the agency.
   // These must run BEFORE the catch-all "affirmative start" pattern below.
-  const CONV_WORDS = /(?:prodolz|продолж|slusam|слушам|slusham|objasn|објасн|kazh|каж|izvoli|изволи|pojasn|појасн|poveke|повеќе)/i;
-  if (/^(da|да|ajde|ајде|moze|може|dobro|добро)([,.\s]|$)/i.test(u) && CONV_WORDS.test(u)) {
+  if (/^(da|да|ajde|ајде|moze|може|dobro|добро)([,.\s]|$)/i.test(u) && CONV_CONTINUATION_WORDS.test(u)) {
     return { intent: "INTERESTED", confidence: 0.7, reason: "conversation continuation, not cooperation" };
   }
   // "da moze" (and variants): "yes you may", "yes go ahead" — conversation continuation

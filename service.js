@@ -24,7 +24,7 @@ import {
 } from './property-extractor.js';
 
 // Intent classification (pure, stateless)
-import { classifyIntent } from './classifier.js';
+import { classifyIntent, CONV_CONTINUATION_WORDS as convContWords } from './classifier.js';
 
 // Objection library (hardcoded responses + checker functions)
 import {
@@ -38,7 +38,8 @@ import {
   isAskingHowItWorks,
   isAskingAboutClients,
   isAskingWhereToSendPhotos,
-  isAskingAboutLegalCosts
+  isAskingAboutLegalCosts,
+  isAskingAboutAgency
 } from './objections.js';
 
 // Global extraction pass
@@ -329,7 +330,24 @@ export async function generateResponse(session, userInput) {
     }
 
     // ========================================
-    // HARDCODED: Objection Router (BEFORE anything else)
+    // HARDCODED: Agency Questions (HIGHEST priority — answer BEFORE anything else)
+    // When the owner asks about the agency itself (name, experience, location),
+    // answer immediately. Never continue data collection until the question is addressed.
+    // ========================================
+    if (isAskingAboutAgency(u)) {
+      const agencyAnswers = [
+        'Ние сме Metropolis, агенција за недвижности. Работиме повеќе од 10 години и имаме искуство со продажба и издавање на станови, куќи и деловни простори. Дали имате некое друго прашање?',
+        'Јас сум Ана од Metropolis. Metropolis е агенција за недвижности со повеќегодишно искуство на македонскиот пазар. Нашата канцеларија е во Скопје. Дали сакате да дознаете нешто повеќе?',
+        'Metropolis е агенција за недвижности. Работиме професионално и одговорно, и имаме голема база на клиенти. Канцеларијата ни е во Скопје. Дали сакате да продолжиме со соработката?'
+      ];
+      return {
+        text: agencyAnswers[Math.floor(Math.random() * agencyAnswers.length)],
+        type: "NORMAL"
+      };
+    }
+
+    // ========================================
+    // HARDCODED: Objection Router
     // ========================================
 
         // Check for price quotes like "baram 156iljadi", "сакам 120000", "цена 150000"
@@ -352,7 +370,7 @@ export async function generateResponse(session, userInput) {
         text: `Вие барате ${price.toLocaleString()} евра. Тоа е вашата чиста цена, а ние додаваме над неа. Дали сте расположени да соработуваме?`,
         type: "NORMAL"
       };
-    } // ← THIS BRACE WAS MISSING!
+    }
 
     // HARDCODED: Koj plakja Advokat / Notar / Danok? (any one → answer all three)
     if (isAskingAboutLegalCosts(u)) {
@@ -499,7 +517,8 @@ if (/kako bi sorabotuvale|како би соработувале|како да �
       // after an affirmative are conversation continuations, NOT cooperation.
       // The classifier handles the common cases ("da moze", "moze" alone),
       // this gate catches edge cases.
-      const isConvContinuation = /prodolz|продолж|slusam|слушам|objasn|објасн|kazh|каж|izvoli|изволи|pojasn|појасн|poveke|повеќе|samo\s*(prasaj|прашај)|slobodno|слободно|izvoli|изволи/i.test(u);
+      // Uses the centralized CONV_CONTINUATION_WORDS pattern from classifier.js
+      const isConvContinuation = convContWords.test(u);
       if (classification.intent === "ACCEPTED" && classification.confidence > 0.7 && isConvContinuation) {
         console.log(`[COOPERATION: GATE BLOCKED — conversation continuation (${classification.reason})]`);
         phase = "PERSUASION";
