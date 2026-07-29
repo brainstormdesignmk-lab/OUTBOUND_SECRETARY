@@ -91,7 +91,11 @@ function extractFloor(u, data) {
     return { floor: firstNum };
   }
   const wordNum = parseMacedonianNumber(u);
-  if (wordNum !== null && wordNum >= 0 && wordNum <= 50) return { floor: wordNum };
+  if (wordNum !== null && wordNum >= 0 && wordNum <= 50) {
+    // Skip if message contains terrace or question context (could be answering terrace/other follow-up)
+    if (/terasa|тераса|zosto|зошто|zasto|зашто/i.test(u)) return null;
+    return { floor: wordNum };
+  }
   return null;
 }
 

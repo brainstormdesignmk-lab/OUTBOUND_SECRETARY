@@ -564,34 +564,44 @@ if (/kako bi sorabotuvale|како би соработувале|како да �
 
       // === terraceSqm (Handles ALL cases) ===
       if (session.collectedData.terraceSqm === undefined && session.collectedData.hasTerrace === undefined) {
-        // Case 1: "ne znam" reply (follow-up question response)
-        if (/ne znam|не знам|незнам|neznam|ne znam tocno|не знам точно|ne sum siguren|не сум сигурен/i.test(u)) {
+        // FIRST: Try to extract a terrace number — only accept if:
+        //   a) the message has "terasa" context (e.g., "terasa 5m2"), OR
+        //   b) there's NO generic sqm phrasing (bare word like "pet" = follow-up answer)
+        // Generic sqm like "55 kvadrati" is totalSqm, NOT terrace
+        const firstNum = extractTerraceNumber(u);
+        if (firstNum !== null && firstNum > 0 && firstNum < 100) {
+          // Accept as terrace size if:
+          //   a) "terasa" context present ("terasa 15m2"), OR
+          //   b) has "ima"/positive word ("ima 15m2" = has 15m2 terrace), OR
+          //   c) no generic sqm phrasing at all (bare word like "pet" = follow-up answer)
+          // Reject generic sqm without context ("55 kvadrati" = totalSqm, not terrace)
+          const hasTerraceContext = /terasa|тераса|terrace|teras|терас|ima|има|da|да|ok|океј|moze|може/i.test(u);
+          const hasGenericSqm = /kvadrati|квадрати|m2|м2|kv|кв|sqm/i.test(u);
+          if (hasTerraceContext || !hasGenericSqm) {
+            session.collectedData.hasTerrace = true;
+            session.collectedData.terraceSqm = firstNum;
+            console.log(`[TERRACE: ${firstNum}m2]`);
+          }
+        }
+        // "ne znam" reply (follow-up question response)
+        if (session.collectedData.terraceSqm === undefined && /ne znam|не знам|незнам|neznam|ne znam tocno|не знам точно|ne sum siguren|не сум сигурен/i.test(u)) {
           session.collectedData.hasTerrace = true;
           session.collectedData.terraceSqm = null;
           console.log(`[TERRACE: yes, size unknown]`);
         }
         // True negative responses
-        else if (/^0$|nema terasa|нема тераса|nema|нема|без|bez|nema|нема|bez terasa|без тераса|nema parking|нема паркинг/i.test(u) && !/ima|има|kv|кв|m2|м2|kvadrat|квадрат/i.test(u)) {
+        else if (session.collectedData.terraceSqm === undefined && /^0$|nema terasa|нема тераса|nema|нема|без|bez|nema|нема|bez terasa|без тераса|nema parking|нема паркинг/i.test(u) && !/ima|има|kv|кв|m2|м2|kvadrat|квадрат/i.test(u)) {
           session.collectedData.hasTerrace = false;
           session.collectedData.terraceSqm = 0;
           console.log(`[TERRACE: none]`);
         }
-        // Has terrace with or without size
-        // NOTE: Only match terrace-SPECIFIC words, not generic sqm words like 'kvadrati'/'m2'
-        // (those are handled by the global extraction pass for totalSqm)
-        else if (/ima|има|terasa|тераса|terrace|teras|терас/i.test(u) || isPositive(u)) {
-          const firstNum = extractTerraceNumber(u);
-          if (firstNum !== null && firstNum > 0 && firstNum < 100) {
-            session.collectedData.hasTerrace = true;
-            session.collectedData.terraceSqm = firstNum;
-            console.log(`[TERRACE: ${firstNum}m2]`);
-          } else {
-            console.log(`[TERRACE: yes, size unknown — asking follow-up]`);
-            return {
-              text: 'Дали знаете колку квадрати е терасата?',
-              type: "QUESTION"
-            };
-          }
+        // Has terrace (with ima/terasa context) but no number found
+        else if (session.collectedData.terraceSqm === undefined && (/ima|има|terasa|тераса|terrace|teras|терас/i.test(u) || isPositive(u))) {
+          console.log(`[TERRACE: yes, size unknown — asking follow-up]`);
+          return {
+            text: 'Дали знаете колку квадрати е терасата?',
+            type: "QUESTION"
+          };
         }
       }
 

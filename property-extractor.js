@@ -269,11 +269,14 @@ export function countBedrooms(text) {
 
   // Fallback: parse word number (e.g. 'dve spalni' → 2, 'tri' → 3)
   // BUT skip if the word number is actually an ordinal floor reference (tret kat, vtor sprat)
+  // OR if the message is about a different field (terrace follow-up, question words)
   const wordNum = parseMacedonianNumber(u);
   if (wordNum !== null && wordNum >= 0 && wordNum <= 10) {
     // Skip if the only number words are actually ordinal floor references
     const hasOrdinalContext = /(tret|трет|vtor|втор|prv|прв|cetvrt|четврт|petti|петти|sesti|шести|sedmi|седми|osmi|осми|devetti|деветти)\s*(kat|кат|sprat|спрат)/i.test(u);
     if (hasOrdinalContext) return null;
+    // Skip if message contains terrace or question context (answering terrace/other follow-up)
+    if (/terasa|тераса|zosto|зошто|zasto|зашто/i.test(u)) return null;
     return wordNum;
   }
   const firstNum = extractFirstNumber(u);
