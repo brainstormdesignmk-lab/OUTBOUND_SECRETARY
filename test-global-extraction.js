@@ -142,9 +142,12 @@ console.log(`\n📦 GROUP: Edge cases`);
 result = runGlobalExtraction("potkrovje", {}, "potkrovje");
 assert("E1: potkrovje defaults to floor=7 (6+1)", result.floor === 7, `got ${result.floor}`);
 
-// Test 16: Potkrovje WITH totalFloors in currentData → correct floor
-result = runGlobalExtraction("potkrovje, 10katnica", { totalFloors: 10 }, "potkrovje, 10katnica");
-assert("E2: potkrovje with totalFloors=10 → floor=11", result.floor === 11, `got ${result.floor}`);
+// Test 16: Potkrovje WITH 10katnica in same message — cross-rule extraction
+// NOTE: This tests the cross-rule hint: extractFloor should find "10katnica"
+// in the SAME message and use 10 instead of defaulting to 6.
+result = runGlobalExtraction("potkrovje, 10katnica", {}, "potkrovje, 10katnica");
+assert("E2: potkrovje+10katnica → floor=11 (cross-rule hint)", result.floor === 11, `got ${result.floor}`);
+assert("E2: potkrovje+10katnica → totalFloors=10", result.totalFloors === 10, `got ${result.totalFloors}`);
 
 // Test 17: Ordinal floor
 result = runGlobalExtraction("vtor kat", {}, "vtor kat");

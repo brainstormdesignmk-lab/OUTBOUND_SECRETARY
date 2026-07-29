@@ -66,7 +66,9 @@ function extractFloor(u, data) {
   if (data.floor !== undefined && data.floor !== null) return null;
   // Check for potkrovje first
   if (/potkrovje|поткровје|podkrovje|подкровје|potkrov|поткров|potkrov|поткров/i.test(u)) {
-    const totalFloors = data.totalFloors || 6;
+    // First check if this SAME message also contains totalFloors (cross-rule hint)
+    const storyHint = u.match(/(\d{1,3})\s*(katnica|катница|kata|ката|sprata|спрата|sprat|спрат|eta|ета|etaža|етажа)/i);
+    const totalFloors = storyHint ? parseInt(storyHint[1]) : (data.totalFloors || 6);
     return { floor: totalFloors + 1 };
   }
   // Ordinal floors (прв, втор, трет, петти, etc.)

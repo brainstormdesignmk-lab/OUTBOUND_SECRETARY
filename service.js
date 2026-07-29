@@ -528,10 +528,8 @@ if (/kako bi sorabotuvale|како би соработувале|како да �
     if (phase === "DATA_COLLECTION") {
       const updates = runGlobalExtraction(u, session.collectedData, userInput);
       for (const [key, value] of Object.entries(updates)) {
-        if (session.collectedData[key] === undefined || session.collectedData[key] === null) {
-          session.collectedData[key] = value;
-          console.log(`[GLOBAL: ${key} = ${JSON.stringify(value)}]`);
-        }
+        session.collectedData[key] = value;
+        console.log(`[GLOBAL: ${key} = ${JSON.stringify(value)}]`);
       }
 
       // ========================================
