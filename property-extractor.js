@@ -387,7 +387,9 @@ export function extractPrice(text) {
         const lastWord = words[words.length - 1];
         const singleWord = parseNumberWords(lastWord);
         if (singleWord !== null && singleWord > parsed) continue;
-        return parsed * 1000;
+        const result = parsed * 1000;
+        console.log({ raw: text, normalized: u, beforeIljadi, phrase, parsedNumber: parsed, result });
+        return result;
       }
     }
   }

@@ -1213,9 +1213,12 @@ assertEqual(countBedrooms("edna spalna i edna detska"), 2, "'edna spalna i edna 
   // Additional multi-room patterns: Cyrillic/Latin variants, 3+ way splits
   assertEqual(countBedrooms("dva spalni i edna detska i edna gostinska"), 4, "'dva spalni i edna detska i edna gostinska' → 4 (dva=2 + edna=1 + edna=1)");
   assertEqual(countBedrooms("cetiri spalni i dve detski"), 6, "'cetiri spalni i dve detski' → 6 (cetiri=4 + dve=2)");
-  assertEqual(countBedrooms("5 sobi"), 5, "'5 sobi' → 5 (digit + sobi via extractFirstNumber fallback)");
+  assertEqual(countBedrooms("5 sobi"), 5, "'5 sobi' → 5 (digit + sobi via extractFirstNumber fallback)");  // ============================================================
+  // stopeeset (сто+педесет=150) + i (and) + dve (2) = 152 × 1000 = 152000
+  // ============================================================
+  assertEqual(countBedrooms("stopeeset i dve iljadi"), null, "'stopeeset i dve iljadi' → null (not a bedroom message)");
 
-  // ============================================================ 
+  // ============================================================
   // TEST GROUP: parseOrientation
 // ============================================================
 console.log(`\n📦 GROUP: parseOrientation`);

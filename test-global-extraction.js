@@ -258,9 +258,10 @@ console.log(`\n📦 GROUP: Price cross-field contamination guard`);
 
 // Test: "stopeeset i tri iljadi evra" (73,000€) — price words contain
 // substrings that match floor ("peeset" in parseMacedonianNumber) and
-// bedrooms ("tri" = 3). Must ONLY extract cleanPrice.
-result = runGlobalExtraction("stopeeset i tri iljadi evra", {});
-assert("PC1: cleanPrice=153000 (stopeeset=150 = sto+pedeset)", result.cleanPrice === 153000, `got ${result.cleanPrice}`);
+// bedrooms ("tri" = 3). Must ONLY extract cleanPrice.  result = runGlobalExtraction("stopeeset i tri iljadi evra", {});
+  assert("PC1: cleanPrice=153000 (stopeeset=150 + tri=3 = 153 × 1000)", result.cleanPrice === 153000, `got ${result.cleanPrice}`);
+  result = runGlobalExtraction("stopeeset i dve iljadi evra", {});
+  assert("PC1b: cleanPrice=152000 (stopeeset=150 + dve=2 = 152 × 1000)", result.cleanPrice === 152000, `got ${result.cleanPrice}`);
 assert("PC1: floor NOT extracted (cross-field contamination)", result.floor === undefined, `got ${JSON.stringify(result.floor)}`);
 assert("PC1: bedrooms NOT extracted", result.bedrooms === undefined, `got ${JSON.stringify(result.bedrooms)}`);
 assert("PC1: totalFloors NOT extracted", result.totalFloors === undefined, `got ${JSON.stringify(result.totalFloors)}`);
