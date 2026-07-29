@@ -82,7 +82,7 @@ function parseNumberWords(text) {
   let consumedLength = 0;
 
   // Track "sto\/сто" prefix (100) — added ONLY if the match didn't consume "sto" at position 0.
-  // This prevents false prefix when an irregular tens word starts with "sto" (e.g. "stopeeset" = 90).
+  // This prevents false prefix when an irregular tens word starts with "sto" (e.g. "stopeeset" = 150 = сто+педесет).
   let firstMatchIndex = null;
   const getStoPrefix = () => {
     return (firstMatchIndex !== null && firstMatchIndex !== 0 && /^(sto|сто)/i.test(u)) ? 100 : 0;
@@ -134,7 +134,7 @@ function parseNumberWords(text) {
       'triest': 30, 'триест': 30,
       'pedeset': 50, 'педесет': 50,
       'seeset': 60, 'шеесет': 60,
-      'stopeeset': 90, 'стопеесет': 90,
+      'stopeeset': 150, 'стопеесет': 150,
       'deveeset': 90, 'девеесет': 90,
       'osumdeset': 80, 'осумдесет': 80,
       'osemdeset': 80, 'осемдесет': 80,
