@@ -43,6 +43,9 @@ import {
 // Global extraction pass
 import { runGlobalExtraction } from './data-collector.js';
 
+// Persuasion phase (prompt builder + response post-processor)
+import { buildPersuasionContext, buildPersuasionPrompt, postProcessPersuasionResponse } from './persuasion.js';
+
 dotenv.config();
 
 const __filename = fileURLToPath(import.meta.url);
@@ -808,68 +811,8 @@ if (/kako bi sorabotuvale|како би соработувале|како да �
     // ========================================
     // PERSUASION PHASE — Native Macedonian
     // ========================================
-    let persuasionContext = "";
-    if (classification) {
-      if (classification.intent === "INTERESTED" && classification.confidence > 0.5) {
-        persuasionContext = "Сопственикот покажува интерес, но има сомнежи. Одговори на неговите резерви и охрабри го да проба. Користи природен македонски јазик.";
-      } else if (classification.intent === "INTERESTED" && classification.confidence <= 0.5) {
-        persuasionContext = "Сопственикот е несигурен. Бидете пријателски и охрабрувачки, но не и наметливи. Користи природен македонски јазик.";
-      } else if (classification.intent === "REJECTED" && classification.confidence < 0.8) {
-        persuasionContext = "Сопственикот е скептичен. Објасни ги придобивките без притисок. Користи природен македонски јазик.";
-      }
-    }
-
-    const prompt = `
-Ти си Ана, професионална македонска агенка за недвижности.
-
-ЛИНГВИСТИЧКИ ПРАВИЛА (МОРА ДА СЛЕДИШ):
-
-const propertyLabel = session.adMemory?.propertyType === 'apartment' ? 'стан' :
-                          session.adMemory?.propertyType === 'house' ? 'куќа' :
-                          session.adMemory?.propertyType === 'land' ? 'плац' : 'имот';
-
-КРИТИЧНИ ЛИНГВИСТИЧКИ ПРАВИЛА:
-1. НИКОГАШ не кажувај "Ви разбирам". Секогаш кажувај "Ве разбирам".
-2. НИКОГАШ не кажувај "имување", "имотно огласување", "промоција на имотот" како што се користи во превод од англиски.
-3. Користи природни македонски фрази:
-   - Наместо "бесплатна промоција на вашето имотно огласување" → "имаме голем број клиенти заинтересирани"
-   - Наместо "работиме над вашата цена" → "вие ја задржувате вашата цена"
-   - Наместо "вие сте заинтересирани" → "вие сте расположени"
-4. Користи "Ве" кога се однесува на вас (директен објект). Користи "Ви" кога е индиректен објект.
-5. Ако не си сигурна дали е "Ви" или "Ве", користи "Вас" (Вас ве разбирам).
-
-ПРИМЕРИ ЗА ТОЧНА УПОТРЕБА:
-❌ "Ви разбирам" → ✅ "Ве разбирам"
-❌ "Ви благодарам за довербата" → ✅ "Ви благодарам" (тука "Ви" е точно, бидејќи е индиректен објект)
-❌ "Вие сте заинтересирани" → ✅ "Дали сте расположени"
-
-ПРАВИЛА:
-- Одговарај КРАТКО. Максимум 1-2 реченици.
-- НЕ додавај "Ви благодарам за довербата" освен ако не е неопходно.
-- НЕ објаснувај повеќе од потребното.
-- Одговори директно на прашањето.
-- Ако сопственикот праша за обврски, кажи кратко: "Да, немате никакви обврски кон нас."
-- Секогаш заврши со прашање за соработка: "Дали сте расположени да соработуваме?"
-- Пишувај исклучиво на стандарден македонски јазик (македонски книжевен јазик).
-- НЕ користі русизми, украинизми или србизми.
-- НЕ преведувај збор-по-збор од англиски. Преведувај го значењето.
-- НЕ кажувај "работиме над вашата цена". Користи: "вие ја задржувате вашата барана цена, а ние го додаваме нашиот дел над тоа".
-- Користи "имотот" или "станот" правилно. НИКОГАШ не кажувај "станиот".
-- Користи "расположени" наместо "заинтересирани" кога прашуваш за соработка.
-- НЕ повторувај "сопственик" секоја реченица. Користи "Ве разбирам" или "Ви благодарам".
-- Максимум 1-2 реченици.
-
-ПРИМЕР ЗА КРАТОК ОДГОВОР:
-"Да, немате никакви обврски кон нас. Дали сте расположени да соработуваме?"
-"Драго ми е што дознав дека имотот сè уште е слободен. Дали сте расположени да разговараме подетално?"
-
-РАЗГОВОР:
-${conv}
-
-СОПСТВЕНИК: ${userInput}
-
-СЕГА ОДГОВОРИ КРАТКО:
-`;
+    const persuasionContext = buildPersuasionContext(classification);
+    const prompt = buildPersuasionPrompt(conv, userInput, persuasionContext);
 
     const result = await groq.chat.completions.create({
       messages: [
@@ -886,55 +829,8 @@ ${conv}
       max_tokens: 150
     });
 
-    let response = result.choices[0]?.message?.content?.trim() || "Дали сте расположени да соработуваме?";
-    response = cleanResponse(response, '').replace(/^Ана:?\s*/i, '').trim();
-
-    // Remove duplicate phrases (fix for stutter)
-    response = response.replace(/(Дали сте расположени)\s+\1/gi, '$1');
-    response = response.replace(/(\.)\s*\1/g, '.');
-
-        if (!/да ли|дали|\?/.test(response)) {
-      const closings = [
-        "Дали сте расположени да соработуваме?",
-        "Дали да почнеме со соработка?",
-        "Што велите, да пробаме?",
-        "Како ви звучи ова?",
-        "Дали да продолжиме?"
-      ];
-      const closing = closings[Math.floor(Math.random() * closings.length)];
-      response += " " + closing;
-    }
-    // Add variety to closing question - ALWAYS add if not already present
-    const closingQuestions = [
-      "Дали сте расположени да соработуваме?",
-      "Дали да почнеме со соработка?",
-      "Што велите, да пробаме?",
-      "Како ви звучи ова?",
-      "Дали да продолжиме?",
-      "Што мислите?"
-    ];
-
-    if (!/да ли|дали|\?/.test(response)) {
-      const closing = closingQuestions[Math.floor(Math.random() * closingQuestions.length)];
-      response += " " + closing;
-    } else {
-      // If there's already a question, occasionally replace it with a different one
-      // This prevents the same closing question from being used repeatedly
-      for (const q of closingQuestions) {
-        if (response.includes(q)) {
-          // Replace with a different random closing question
-          const newClosing = closingQuestions[Math.floor(Math.random() * closingQuestions.length)];
-          response = response.replace(q, newClosing);
-          break;
-        }
-      }
-    }
-    // HARD FILTER: NEVER mention buyer (sale) or tenant (rent) — let LLM be generic
-    response = response.replace(/купувач|купувачот|купувачи|kupuvac|kupuvacot/gi, '');
-    if (isRent) {
-      response = response.replace(/продажб|продаде|продава|prodazb|prodade|prodava/gi, 'издавањ');
-    }
-    response = response.replace(/\s+/g, ' ').trim();
+    let response = result.choices[0]?.message?.content?.trim() || "";
+    response = postProcessPersuasionResponse(response, isRent);
 
     return { text: response, type: "NORMAL" };
   } catch (e) {
