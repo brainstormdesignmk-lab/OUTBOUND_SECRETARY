@@ -526,7 +526,7 @@ if (/kako bi sorabotuvale|како би соработувале|како да �
     // GLOBAL EXTRACTION PASS — extracts all simple fields from every message
     // ========================================
     if (phase === "DATA_COLLECTION") {
-      const updates = runGlobalExtraction(u, session.collectedData, userInput);
+      const updates = runGlobalExtraction(u, session.collectedData);
       for (const [key, value] of Object.entries(updates)) {
         session.collectedData[key] = value;
         console.log(`[GLOBAL: ${key} = ${JSON.stringify(value)}]`);

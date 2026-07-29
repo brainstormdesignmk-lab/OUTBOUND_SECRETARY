@@ -21,7 +21,7 @@ function assert(label, condition, detail) {
 }
 
 function assertExtract(label, input, currentData, expectedFields, notExpectedFields, detail) {
-  const result = runGlobalExtraction(input, currentData, input);
+  const result = runGlobalExtraction(input, currentData);
   let allMatch = true;
   const mismatches = [];
 
@@ -75,7 +75,7 @@ assert("M4: ac extracted", result.ac === true, `got ${result.ac}`);
 assert("M4: yearBuilt extracted", result.yearBuilt === 2015, `got ${result.yearBuilt}`);
 
 // Test 5: Renovation with embedded year
-result = runGlobalExtraction("da renoviran 2020ta", {}, "da renoviran 2020ta");
+result = runGlobalExtraction("da renoviran 2020ta", {});
 assert("M5: renovated extracted", result.renovated === true, `got ${result.renovated}`);
 assert("M5: renovationYear extracted from same message", result.renovationYear === 2020, `got ${result.renovationYear}`);
 
@@ -90,19 +90,19 @@ assert("M6: documentation extracted", result.documentationClean === true, `got $
 console.log(`\n📦 GROUP: No false positives on bare answers`);
 
 // Test 7: Negative response should NOT extract field-specific data
-result = runGlobalExtraction("ne", {}, "ne");
+result = runGlobalExtraction("ne", {});
 assert("N1: 'ne' extracts nothing", Object.keys(result).length === 0, `got ${Object.keys(result).join(', ')}`);
 
 // Test 8: Affirmative response should NOT extract data without context
-result = runGlobalExtraction("da", {}, "da");
+result = runGlobalExtraction("da", {});
 assert("N2: 'da' extracts nothing", Object.keys(result).length === 0, `got ${Object.keys(result).join(', ')}`);
 
 // Test 9: Empty string
-result = runGlobalExtraction("", {}, "");
+result = runGlobalExtraction("", {});
 assert("N3: empty string extracts nothing", Object.keys(result).length === 0);
 
 // Test 10: Short text shouldn't match sqm (5 < 10 threshold)
-result = runGlobalExtraction("5 m2", {}, "5 m2");
+result = runGlobalExtraction("5 m2", {});
 assert("N4: '5 m2' doesn't match totalSqm (5 < 10)", result.totalSqm === undefined, `got ${result.totalSqm}`);
 
 // ========================================
@@ -111,11 +111,11 @@ assert("N4: '5 m2' doesn't match totalSqm (5 < 10)", result.totalSqm === undefin
 console.log(`\n📦 GROUP: Already-set fields are not overwritten`);
 
 // Test 11: Field already set should not be overwritten
-result = runGlobalExtraction("80 kvadrati", { totalSqm: 55 }, "80 kvadrati");
+result = runGlobalExtraction("80 kvadrati", { totalSqm: 55 });
 assert("A1: totalSqm not overwritten", result.totalSqm === undefined, `got ${result.totalSqm}`);
 
 // Test 12: null field SHOULD be overwritten (null means missing)
-result = runGlobalExtraction("80 kvadrati", { totalSqm: null }, "80 kvadrati");
+result = runGlobalExtraction("80 kvadrati", { totalSqm: null });
 assert("A2: null totalSqm IS overwritten", result.totalSqm === 80, `got ${result.totalSqm}`);
 
 // ========================================
@@ -124,13 +124,13 @@ assert("A2: null totalSqm IS overwritten", result.totalSqm === 80, `got ${result
 console.log(`\n📦 GROUP: Cross-field dependencies`);
 
 // Test 13: renovationYear should NOT be in updates when renovated=false
-result = runGlobalExtraction("2000ta", { renovated: false, renovationYear: null }, "2000ta");
+result = runGlobalExtraction("2000ta", { renovated: false, renovationYear: null });
 assert("D1: renovationYear not returned when renovated=false", 
   !('renovationYear' in result), 
   `got renovationYear=${JSON.stringify(result.renovationYear)}`);
 
 // Test 14: renovationYear SHOULD be extracted if renovated=true  
-result = runGlobalExtraction("2000ta", { renovated: true, renovationYear: null }, "2000ta");
+result = runGlobalExtraction("2000ta", { renovated: true, renovationYear: null });
 assert("D2: renovationYear extracted when renovated=true", result.renovationYear === 2000, `got ${result.renovationYear}`);
 
 // ========================================
@@ -139,7 +139,7 @@ assert("D2: renovationYear extracted when renovated=true", result.renovationYear
 console.log(`\n📦 GROUP: Edge cases`);
 
 // Test 15: Potkrovje without totalFloors → defaults to 6
-result = runGlobalExtraction("potkrovje", {}, "potkrovje");
+result = runGlobalExtraction("potkrovje", {});
 assert("E1: potkrovje defaults to floor=7 (6+1)", result.floor === 7, `got ${result.floor}`);
 
 // Test 16: Potkrovje WITH 10katnica in same message — cross-rule extraction
@@ -150,22 +150,22 @@ assert("E2: potkrovje+10katnica → floor=11 (cross-rule hint)", result.floor ==
 assert("E2: potkrovje+10katnica → totalFloors=10", result.totalFloors === 10, `got ${result.totalFloors}`);
 
 // Test 17: Ordinal floor
-result = runGlobalExtraction("vtor kat", {}, "vtor kat");
+result = runGlobalExtraction("vtor kat", {});
 assert("E3: 'vtor kat' → floor=2", result.floor === 2, `got ${result.floor}`);
 
 // Test 18: Price in different formats
-result = runGlobalExtraction("98 iljadi evra", {}, "98 iljadi evra");
+result = runGlobalExtraction("98 iljadi evra", {});
 assert("E4: '98 iljadi' → cleanPrice=98000", result.cleanPrice === 98000, `got ${result.cleanPrice}`);
 
-result = runGlobalExtraction("156000 evra", {}, "156000 evra");
+result = runGlobalExtraction("156000 evra", {});
 assert("E5: '156000' → cleanPrice=156000", result.cleanPrice === 156000, `got ${result.cleanPrice}`);
 
 // Test 19: Heating NOT extracted by global pass (complex handler in service.js)
-result = runGlobalExtraction("centralno", {}, "centralno");
+result = runGlobalExtraction("centralno", {});
 assert("E7: heating NOT extracted by global pass", result.heating === undefined, `got ${result.heating}`);
 
 // Test 20: Documentation negative detection
-result = runGlobalExtraction("ima hipoteka na stanot", {}, "ima hipoteka na stanot");
+result = runGlobalExtraction("ima hipoteka na stanot", {});
 assert("E8: hipoteka → documentationClean=false", 
   result.documentationClean === false, 
   `got ${JSON.stringify(result.documentationClean)}`);
@@ -174,7 +174,7 @@ assert("E8: hipoteka → documentationIssues='hipoteka'",
   `got ${JSON.stringify(result.documentationIssues)}`);
 
 // Test 21: Renovated with relative year ("pred 2 godini")
-result = runGlobalExtraction("pred 2 godini renoviran", { renovated: true, renovationYear: null }, "pred 2 godini renoviran");
+result = runGlobalExtraction("pred 2 godini renoviran", { renovated: true, renovationYear: null });
 const expectedYear = new Date().getFullYear() - 2;
 assert("E9: 'pred 2 godini' extracts year correctly", 
   result.renovationYear === expectedYear, 
@@ -186,12 +186,12 @@ assert("E9: 'pred 2 godini' extracts year correctly",
 console.log(`\n📦 GROUP: Context-specific extraction`);
 
 // Test 22: "ima lift" should ONLY extract elevator, NOT documentation
-result = runGlobalExtraction("ima lift", {}, "ima lift");
+result = runGlobalExtraction("ima lift", {});
 assert("C1: 'ima lift' → elevator=true", result.elevator === true, `got ${result.elevator}`);
 assert("C1: 'ima lift' → NOT documentationClean", result.documentationClean === undefined, `got ${result.documentationClean}`);
 
 // Test 23: "nema parking" should ONLY set parking=false, NOT renovated/furnished
-result = runGlobalExtraction("nema parking", {}, "nema parking");
+result = runGlobalExtraction("nema parking", {});
 assert("C2: 'nema parking' → parking=false", result.parking === false, `got ${result.parking}`);
 assert("C2: 'nema parking' → NOT furnished", result.furnished === undefined, `got ${result.furnished}`);
 assert("C2: 'nema parking' → NOT renovated", result.renovated === undefined, `got ${result.renovated}`);
@@ -286,7 +286,7 @@ assert("EC2: floor=0 for ground floor", result.floor === 0, `got ${result.floor}
 // NOTE: '1 sobna' means 1-room which countBedrooms may return 0 (studio)
 
 // Test 36: Large number matches sqm via regex (1000 = 4 digits, \\d{2,4} allows it)
-result = runGlobalExtraction("1000 m2", {}, "1000 m2");
+result = runGlobalExtraction("1000 m2", {});
 assert("EC3: '1000 m2' matches totalSqm=1000 via regex", result.totalSqm === 1000, `got ${result.totalSqm}`);
 // NOTE: The regex (\\d{2,4}) allows 4-digit numbers before sqm words
 // Only the extractFirstNumber fallback has the 10-999 limit
@@ -420,11 +420,11 @@ assert("R2: floor from '4 kat'", result.floor === 4, `got ${result.floor}`);
 // NOTE: Non-null values are NOT overwritten by the global pass (design contract)
 
 // Test 45: Owner saying no to specific question
-result = runGlobalExtraction("nema", { nextField: 'elevator' }, "nema");
+result = runGlobalExtraction("nema", { nextField: 'elevator' });
 assert("R3: 'nema' alone extracts nothing (no context)", Object.keys(result).length === 0, `got ${Object.keys(result).join(', ')}`);
 
 // Test 46: Owner says "ima" with lift context
-result = runGlobalExtraction("ima lift", {}, "ima lift");
+result = runGlobalExtraction("ima lift", {});
 assert("R4: 'ima lift' → elevator=true", result.elevator === true, `got ${result.elevator}`);
 assert("R4: 'ima lift' → NOT documentationClean", result.documentationClean === undefined, `got ${result.documentationClean}`);
 assert("R4: 'ima lift' → NOT parking", result.parking === undefined, `got ${result.parking}`);

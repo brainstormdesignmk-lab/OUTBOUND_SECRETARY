@@ -9,12 +9,9 @@
 import {
   parseMacedonianNumber,
   parseOrdinalFloor,
-  isPositive,
-  isNegative,
   extractFirstNumber,
   countBedrooms,
   extractPrice,
-  extractTerraceNumber,
   parseYearBuilt,
   parseOrientation
 } from './property-extractor.js';
@@ -286,10 +283,10 @@ const EXTRACTION_RULES = [
 // { field: value, ... } for any newly extracted data.
 // Does NOT overwrite existing non-null values.
 // ========================================
-function runGlobalExtraction(u, currentData, originalInput) {
+function runGlobalExtraction(u, currentData) {
   const updates = {};
   for (const rule of EXTRACTION_RULES) {
-    const result = rule(u, currentData, originalInput);
+    const result = rule(u, currentData);
     if (result) {
       // Only add fields that aren't already set
       for (const [key, value] of Object.entries(result)) {
