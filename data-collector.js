@@ -83,15 +83,18 @@ function extractFloor(u, data) {
     if (num >= 0 && num <= 50) return { floor: num };
   }
   // Fallback: extract first reasonable number — but skip if another field context present
-  // (e.g., "2 spalni" → number 2 is about bedrooms, not floor)
+  // (e.g., "2 spalni" → number 2 is about bedrooms, not floor).
+  // ALSO: require floor-context words for bare number fallback (no fallback guessing).
+  // "10" without "kat", "sprat", etc. has 0% confidence → return null.
+  const hasFloorContext = /kat|кат|sprat|спрат|floor|sprata|спрата|kata|ката|eta|ета/i.test(u);
   const firstNum = extractFirstNumber(u);
-  if (firstNum !== null && firstNum >= 0 && firstNum <= 50) {
+  if (firstNum !== null && firstNum >= 0 && firstNum <= 50 && hasFloorContext) {
     // Skip if the message contains context from another field
     if (/m2|м2|кв|kvadrati|квадрати|kv|sqm|spalni|спални|terasa|тераса/i.test(u)) return null;
     return { floor: firstNum };
   }
   const wordNum = parseMacedonianNumber(u);
-  if (wordNum !== null && wordNum >= 0 && wordNum <= 50) {
+  if (wordNum !== null && wordNum >= 0 && wordNum <= 50 && hasFloorContext) {
     // Skip if message contains terrace or question context (could be answering terrace/other follow-up)
     if (/terasa|тераса|zosto|зошто|zasto|зашто/i.test(u)) return null;
     return { floor: wordNum };
@@ -108,8 +111,11 @@ function extractTotalFloors(u, data) {
     const num = parseInt(storyMatch[1]);
     if (num >= 1 && num <= 50) return { totalFloors: num };
   }
-  // Also try word-based numbers (e.g., "deset katnica")
-  const wordStoryMatch = u.match(/(\S+)\s*(katnica|катница|sprata|спрата|kati|кати|sprat|спрат|eta)/i);
+  // Also try word-based numbers (e.g., "deset katnica", "deset kata", "pet sprata")
+  // NOTE: "sprat" alone is excluded because ordinal floor words (sesti, tret, etc.)
+  // before "sprat" are matched by extractFloor, not extractTotalFloors.
+  // Only "sprata" (floors, total) and "katnica"/"kata" (story-building) are used.
+  const wordStoryMatch = u.match(/(\S+)\s*(katnica|катница|kata|ката|sprata|спрата|kati|кати|eta)/i);
   if (wordStoryMatch) {
     const wordNum = parseMacedonianNumber(wordStoryMatch[1]);
     if (wordNum !== null && wordNum >= 1 && wordNum <= 50) return { totalFloors: wordNum };
@@ -321,6 +327,21 @@ const FIELD_TO_EXTRACTOR = {
   documentationClean: extractDocumentationClean
 };
 
+// ========================================
+// Field groups for targeted extraction.
+// When preferredField is in a group, ONLY extractors in that group run.
+// Fields not in any group are standalone — only their extractor runs.
+// This prevents yearBuilt from grabbing "10" when nextField=totalFloors.
+// ========================================
+const FIELD_GROUPS = {
+  'floor': ['floor', 'totalFloors'],
+  'totalFloors': ['floor', 'totalFloors'],
+};
+
+function getGroupFields(field) {
+  return FIELD_GROUPS[field] || [field];
+}
+
 // Extractors that can accidentally pick up price words (iljadi/evra) as
 // floor/bedroom/totalFloors values. These are skipped when a price was
 // extracted from the same message to prevent cross-field contamination.
@@ -350,13 +371,13 @@ const NUMBER_SNIFFING_EXTRACTORS = new Set([
 // ========================================
 // Extracts field values from user input.
 //
-// When preferredField is provided:
-//   1. Try the dedicated extractor for that field FIRST.
-//   2. If it extracts a NEW value (high confidence), return immediately
-//      — skip all other extractors. The message answered the question.
-//   3. If it finds nothing, fall through to the full extraction pass.
+// When preferredField is a known field:
+//   Run ONLY extractors in the same field group (floor ↔ totalFloors).
+//   Standalone fields run only their own extractor.
+//   This prevents yearBuilt from grabbing "10" when nextField=totalFloors.
 //
-// Without preferredField: run ALL extractors (global discovery mode).
+// When preferredField is unknown or not set:
+//   Run ALL extractors (global discovery mode).
 //
 // Returns { field: value, ... } for any newly extracted data.
 // Does NOT overwrite existing non-null values in currentData.
@@ -364,49 +385,56 @@ const NUMBER_SNIFFING_EXTRACTORS = new Set([
 function runGlobalExtraction(u, currentData, preferredField) {
   const updates = {};
 
-  // STEP 1: If a specific field is preferred, try its dedicated extractor FIRST.
-  // If it finds the value, the message answered the current question — return
-  // immediately without running the full extraction pass (prevents cross-field
-  // contamination from number-sniffing extractors).
+  // STEP 1: Field-targeted extraction.
+  // When preferredField is a KNOWN field in FIELD_TO_EXTRACTOR, run ONLY
+  // extractors in the same field group. This prevents unrestricted global
+  // extraction from grabbing numbers meant for the current question and
+  // assigning them to unrelated fields (e.g., "10" → yearBuilt=2010).
+  //
+  // When preferredField is NOT a known field (e.g., an input string passed
+  // by test fixtures), fall through to the full extraction pass below.
   if (preferredField) {
     const extractor = FIELD_TO_EXTRACTOR[preferredField];
     if (extractor) {
-      const result = extractor(u, currentData);
-      if (result) {
-        for (const [key, value] of Object.entries(result)) {
-          const existing = currentData[key];
-          if (existing === undefined || existing === null) {
-            updates[key] = value;
-            console.log(`[EXTRACTION: preferred field ${preferredField} = ${JSON.stringify(value)} — ${Object.keys(result).join(',')} found, skip global]`);
+      const groupFields = getGroupFields(preferredField);
+      for (const field of groupFields) {
+        const rule = FIELD_TO_EXTRACTOR[field];
+        if (!rule) continue;
+        // Skip if field already has a value
+        const dataKey = field;
+        if (currentData[dataKey] !== undefined && currentData[dataKey] !== null) continue;
+        const result = rule(u, currentData);
+        if (result) {
+          for (const [key, value] of Object.entries(result)) {
+            const existing = currentData[key];
+            if (existing === undefined || existing === null) {
+              updates[key] = value;
+              console.log(`[EXTRACTION: field ${field} = ${JSON.stringify(value)} (from preferredField=${preferredField}, group=${JSON.stringify(groupFields)})]`);
+            }
           }
         }
-        if (Object.keys(updates).length > 0) {
-          return updates; // Current field extracted — skip all other extractors
-        }
       }
+      return updates; // Return group results — do NOT fall through to full pass
     }
+    // Unknown preferredField — fall through to full extraction pass
   }
 
   // STEP 2: Full extraction pass — bonus info discovery.
-  // Only reached when preferredField wasn't set, has no dedicated extractor,
-  // or its extractor couldn't find a value in this message.
+  // Only reached when preferredField is not set (persuasion mode, or
+  // service.js calls without a specific nextField).
   //
   // Detect whether the message has strong field-specific keywords.
   // If not (just bare number words like "pet mislam"), number-sniffing
-  // extractors that aren't the preferred field are skipped — preventing
-  // a single bare number from populating bedrooms + floor + totalSqm.
-  // Strong field-specific keywords — message is about a specific field, not a bare number.
-  // When these are absent and preferredField is set, only the current field's extractor
-  // should use bare-number matching (prevents "5" or "pet" from setting bedrooms+floor).
+  // extractors are skipped — preventing a single bare number from
+  // populating bedrooms + floor + totalSqm.
   const hasStrongKeywords = /spaln|спалн|detsk|детск|gostinsk|гостинск|golem|голем|mala|мала|soba|соба|sobi|соби|kat|кат|sprat|спрат|katnica|катница|sprata|спрата|potkrovje|поткровје|prizemje|приземје|prv|прв|vtor|втор|tret|трет|cetvrt|четврт|m2|м2|kvadrati|квадрати|kv|кв|sqm|lift|лифт|elevator|klima|клима|inverter|инвертер|parking|паркинг|garaza|гаража|garage|гараж|terasa|тераса|terrace|namest|мебел|namestaj|мебел|opremen|опремен|izgraden|граден|godina|година|gradba|градба|renov|ренов|cist|чист|hipotek|хипотек|ostavinsk|оставинск|foto|фото|slik|слик|viber|вајбер|advokat|адвокат|notar|нотар|danok|данок|provizija|провизија|dogovor|договор|parno|парно|greene|греење|struja|струја|drva|дрва|pelet|пелет|nafta|нафта/i.test(u);
-  const isBareNumber = !hasStrongKeywords && preferredField !== null &&
+  const isBareNumber = !hasStrongKeywords &&
     // Short message (bare answer, not a multi-field sentence)
     u.length < 50 &&
     // No commas/semicolons (separators that indicate multi-field content)
     !/[,;]/.test(u) &&
     // No specific field units
     !/m2|м2|кв|%|€|£|\$/i.test(u);
-  const preferredExtractor = preferredField ? FIELD_TO_EXTRACTOR[preferredField] : null;
 
   let priceExtracted = false;
   for (const rule of EXTRACTION_RULES) {
@@ -417,10 +445,9 @@ function runGlobalExtraction(u, currentData, preferredField) {
       continue;
     }
     // If the message has NO strong field-specific keywords (just bare number words
-    // like "pet mislam"), only allow number-sniffing extractors that match the
-    // current preferredField. This prevents a bare number from populating
-    // multiple unrelated fields.
-    if (isBareNumber && NUMBER_SNIFFING_EXTRACTORS.has(rule.name) && rule !== preferredExtractor) {
+    // like "pet mislam"), skip number-sniffing extractors to prevent a bare number
+    // from populating multiple unrelated fields.
+    if (isBareNumber && NUMBER_SNIFFING_EXTRACTORS.has(rule.name)) {
       continue;
     }
     const result = rule(u, currentData);

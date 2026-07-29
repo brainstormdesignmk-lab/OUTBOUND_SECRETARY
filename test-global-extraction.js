@@ -106,6 +106,28 @@ result = runGlobalExtraction("5 m2", {});
 assert("N4: '5 m2' doesn't match totalSqm (5 < 10)", result.totalSqm === undefined, `got ${result.totalSqm}`);
 
 // ========================================
+// TEST GROUP: Field-targeted extraction (no unrestricted global)
+// ========================================
+console.log(`\n📦 GROUP: Field-targeted extraction — no unrestricted global`);
+
+// Test: "na sesti sprat a zgradata ima deset kata" with preferredField=totalFloors
+// Should extract BOTH floor (sesti=6, 'sprat' context) and totalFloors (deset kata=10, 'kata' context)
+// Should NOT extract yearBuilt (no "10" → 2010 false positive)
+result = runGlobalExtraction("na sesti sprat a zgradata ima deset kata", {}, 'totalFloors');
+assert("FT1: 'deset kata' → totalFloors=10 (word-based match)", result.totalFloors === 10, `got ${result.totalFloors}`);
+assert("FT1: 'sesti sprat' → floor=6 (closely related field)", result.floor === 6, `got ${result.floor}`);
+assert("FT1: yearBuilt NOT extracted (unrestricted global blocked)", result.yearBuilt === undefined, `got ${JSON.stringify(result.yearBuilt)}`);
+
+// Test: "10" with preferredField=totalFloors → should NOT extract yearBuilt=2010
+result = runGlobalExtraction("10", {}, 'totalFloors');
+assert("FT2: '10' with preferredField=totalFloors → nothing extracted (no floor context)", Object.keys(result).length === 0, `got ${Object.keys(result).join(', ')}`);
+assert("FT2: yearBuilt NOT extracted from bare '10'", result.yearBuilt === undefined, `got ${JSON.stringify(result.yearBuilt)}`);
+
+// Test: "10" without preferredField (full pass) → should extract yearBuilt (persuasion mode)
+result = runGlobalExtraction("10", {});
+assert("FT3: '10' without preferredField → yearBuilt=2010 (unrestricted pass)", result.yearBuilt === 2010, `got ${result.yearBuilt}`);
+
+// ========================================
 // TEST GROUP: Already-set fields
 // ========================================
 console.log(`\n📦 GROUP: Already-set fields are not overwritten`);
