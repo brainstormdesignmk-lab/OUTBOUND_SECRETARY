@@ -70,33 +70,44 @@ function extractFloor(u, data) {
 
 function extractTotalFloors(u, data) {
   if (data.totalFloors !== undefined && data.totalFloors !== null) return null;
-  const firstNum = extractFirstNumber(u);
-  if (firstNum !== null && firstNum >= 1 && firstNum <= 50) return { totalFloors: firstNum };
-  const wordNum = parseMacedonianNumber(u);
-  if (wordNum !== null && wordNum >= 1 && wordNum <= 50) return { totalFloors: wordNum };
+  // Look for number adjacent to building-story context words
+  // e.g., "10katnica" → 10, "10 katnica" → 10, "10 spratovi" → 10
+  const storyMatch = u.match(/(\d{1,3})\s*(katnica|катница|kata|ката|sprata|спрата|kati|кати|sprat|спрат|eta|ета|etaža|етажа)/i);
+  if (storyMatch) {
+    const num = parseInt(storyMatch[1]);
+    if (num >= 1 && num <= 50) return { totalFloors: num };
+  }
+  // Also try word-based numbers (e.g., "deset katnica")
+  const wordStoryMatch = u.match(/(\S+)\s*(katnica|катница|sprata|спрата|kati|кати|sprat|спрат|eta)/i);
+  if (wordStoryMatch) {
+    const wordNum = parseMacedonianNumber(wordStoryMatch[1]);
+    if (wordNum !== null && wordNum >= 1 && wordNum <= 50) return { totalFloors: wordNum };
+  }
   return null;
 }
 
 function extractElevator(u, data) {
   if (data.elevator !== undefined && data.elevator !== null) return null;
-  if (isPositive(u) || /lift|лифт|ima|има/i.test(u)) return { elevator: true };
-  if (isNegative(u) || /bez lift|без лифт|nema lift/i.test(u)) return { elevator: false };
+  // Require lift-specific context — don't match bare "da"/"ne"
+  if (/lift|лифт|elevator|ima lift|има лифт/i.test(u)) return { elevator: true };
+  if (/bez lift|без лифт|nema lift/i.test(u)) return { elevator: false };
   return null;
 }
 
 function extractAC(u, data) {
   if (data.ac !== undefined && data.ac !== null) return null;
-  if (isPositive(u)) return { ac: true };
-  if (isNegative(u)) return { ac: false };
+  // Require AC-specific context — cooling/cooling-related words only
+  if (/klima|клима|inverter|инвертер|split|сплит|клима уред|klima ured/i.test(u)) return { ac: true };
+  if (/bez klima|без клима|nema klima/i.test(u)) return { ac: false };
   return null;
 }
 
 function extractParking(u, data) {
   if (data.parking !== undefined && data.parking !== null) return null;
-  if (/nema|нема|без|bez|ne|не|nema parking|нема паркинг|nema garaza|нема гаража/i.test(u)) {
+  if (/nema parking|нема паркинг|nema garaza|нема гаража|bez parking|без паркинг|без гаража|bez garaza/i.test(u)) {
     return { parking: false };
   }
-  if (isPositive(u) || /garaza|гаража|privat|приват|parking|паркинг|garage|гараж|podzemna|подземна|sopstveno|сопствено|pred zgrada|пред зграда|na -|на -|podzemno|подземно/i.test(u)) {
+  if (/garaza|гаража|privat|приват|parking|паркинг|garage|гараж|podzemna|подземна|sopstveno|сопствено|pred zgrada|пред зграда|na -|на -|podzemno|подземно|ima parking|има паркинг|ima garaza|има гаража/i.test(u)) {
     let parkingType = "public";
     if (/garaza|гаража|garage|гараж|podzemna|подземна|podzemno|подземно|na -1|на -1|na -2|на -2|na -|на -|podzemno parking|подземно паркинг|podzemna garaza|подземна гаража|garaza na -|гаража на -/i.test(u)) {
       parkingType = "garage";
@@ -123,14 +134,12 @@ function extractOrientation(u, data) {
 
 function extractFurnished(u, data) {
   if (data.furnished !== undefined && data.furnished !== null) return null;
-  if (/prazen|правен|gol|гол|bez namestaj|без мебел|nenamesten|ненаместен|prazno|празно|gola sostojba|гола состојба|ne e namesten|не е наместен|bez|без|nema|нема|ne|не|ne e|не е|prav|прав/i.test(u)) {
+  // Require furniture-specific context — don't match bare "ne" (could be any question)
+  if (/prazen|правен|gol|гол|bez namestaj|без мебел|nenamesten|ненаместен|prazno|празно|gola sostojba|гола состојба|ne e namesten|не е наместен|prav|прав/i.test(u)) {
     return { furnished: false, furnishedLevel: "empty" };
   }
   if (/komplet|ful|full|kompletno|celosno|целосно|m paket|м пакет|top namesten|топ наместен|namesten|наместен|opremen|опремен|namestaj|мебел|kompletno namesten|комплетно наместен|se prodava namesten|се продава наместен|so namestaj|со мебел|namesten|наместен/i.test(u)) {
     return { furnished: true, furnishedLevel: "full" };
-  }
-  if (isPositive(u)) {
-    return { furnished: true, furnishedLevel: "partial" };
   }
   return null;
 }
@@ -143,13 +152,14 @@ function extractYearBuilt(u, data) {
 
 function extractRenovated(u, data) {
   if (data.renovated !== undefined && data.renovated !== null) return null;
-  if (/ne|не|nema|нема|ne e|не е|bez|без|not renovated|ништо|ne e renoviran|не е реновиран|nema renoviran|нема реновирано|ne e renovirano|не е реновирано|nema renovirano|нема реновирано|ne renoviran|не реновиран|ne e renoviran|не е реновиран|ne e|не е/i.test(u)) {
+  // Require renovation-specific context — don't match bare "ne" (which could be elevator question)
+  if (/ne e renoviran|не е реновиран|nema renoviran|нема реновирано|ne e renovirano|не е реновирано|nema renovirano|нема реновирано|ne renoviran|не реновиран/i.test(u)) {
     return { renovated: false, renovationYear: null };
   }
-  // Check if year is embedded (e.g. "da renoviran 2000ta")
-  const yearMatch = u.match(/\b(19\d{2}|20\d{2})\b/);
+  // Check if year is embedded (e.g. "da renoviran 2000ta" — handle trailing Cyrillic/Latin/год)
+  const yearMatch = u.match(/(?:19|20)\d{2}(?=[taг\s,.;!]|$)/);
   if (yearMatch) {
-    return { renovated: true, renovationYear: parseInt(yearMatch[1]) };
+    return { renovated: true, renovationYear: parseInt(yearMatch[0].substring(0, 4)) };
   }
   if (/90ti|90 ти|90-ти|90ти|деведесетти/i.test(u)) {
     return { renovated: true, renovationYear: 1995 };
@@ -160,7 +170,7 @@ function extractRenovated(u, data) {
   if (/2000ti|2000 ти|двеилјадити/i.test(u)) {
     return { renovated: true, renovationYear: 2005 };
   }
-  if (isPositive(u) || /реновиран|renoviran|обновен|obnoven|novo|нов|sreden|среден|kompletno renoviran|комплетно реновиран|delumno renoviran|делумно реновиран|skoro|скоро|nedavno|недавно|pre|пред|osvezhivme|освеживме|go osvezivme|го освеживме/i.test(u)) {
+  if (/реновиран|renoviran|обновен|obnoven|novo|нов|sreden|среден|kompletno renoviran|комплетно реновиран|delumno renoviran|делумно реновиран|skoro|скоро|nedavno|недавно|pre|пред|osvezhivme|освеживме|go osvezivme|го освеживме/i.test(u)) {
     return { renovated: true, renovationYear: null };
   }
   if (/pred|пред|pri|при/i.test(u)) {
@@ -180,7 +190,7 @@ function extractRenovated(u, data) {
 
 function extractRenovationYear(u, data) {
   if (data.renovationYear !== undefined && data.renovationYear !== null) return null;
-  if (data.renovated === false) return { renovationYear: null }; // Skip
+  if (data.renovated === false) return null; // Already handled by extractRenovated
   if (data.renovated !== true) return null; // Don't extract if renovated status unknown
   const year = parseYearBuilt(u);
   if (year !== null) return { renovationYear: year };
@@ -209,23 +219,10 @@ function extractDocumentationClean(u, data) {
     else if (/teret|терет|zabrana|забрана|zalozen|заложен/i.test(u)) docsIssue = "teret";
     return { documentationClean: false, documentationIssues: docsIssue };
   }
-  if (/cist|чист|ima|има|da|да|nema problem|нема проблем|nema|нема|cista|чиста|cisto|чисто|nema hipoteka|нема хипотека|nema ostavinska|нема оставинска|nema razvod|нема развод|nema sudski|нема судски|cist imoten list|чист имотен лист|ima cist imoten list|има чист имотен лист|nema teret|нема терет|nema zabrana|нема забрана|cisto|чисто|ima|има|na ime|на име|cisto na moe ime|чисто на мое име|na moe ime|на мое име/i.test(u)) {
+  // Require documentation-specific context — don't match bare "da" / "ima"
+  if (/cist imoten|чист имотен|cist|чист|nema hipoteka|нема хипотека|nema ostavinska|нема оставинска|nema teret|нема терет|nema zabrana|нема забрана|cisto na moe ime|чисто на мое име|na moe ime|на мое име|cist imoten list|чист имотен лист/i.test(u)) {
     return { documentationClean: true, documentationIssues: null };
   }
-  return null;
-}
-
-function extractOwnerName(u, data, originalInput) {
-  if (data.ownerName !== undefined && data.ownerName !== null) return null;
-  const src = originalInput || u;
-  if (src.length > 3) return { ownerName: src.trim() };
-  return null;
-}
-
-function extractAddress(u, data, originalInput) {
-  if (data.address !== undefined && data.address !== null) return null;
-  const src = originalInput || u;
-  if (src.length > 3) return { address: src.trim() };
   return null;
 }
 
@@ -249,9 +246,7 @@ const EXTRACTION_RULES = [
   extractYearBuilt,
   extractRenovated,
   extractRenovationYear,
-  extractDocumentationClean,
-  extractOwnerName,
-  extractAddress
+  extractDocumentationClean
 ];
 
 // ========================================

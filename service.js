@@ -657,6 +657,21 @@ if (/kako bi sorabotuvale|како би соработувале|како да �
           }
         }
       }
+      // === ownerName (gated — must be asked explicitly) ===
+      if (nextField === 'ownerName') {
+        if (userInput.trim().length > 0) {
+          session.collectedData.ownerName = userInput.trim();
+          console.log(`[OWNER NAME: ${session.collectedData.ownerName}]`);
+        }
+      }
+
+      // === address (gated — must be asked explicitly) ===
+      if (nextField === 'address') {
+        if (userInput.trim().length > 0) {
+          session.collectedData.address = userInput.trim();
+          console.log(`[ADDRESS: ${session.collectedData.address}]`);
+        }
+      }
     }
 
     console.log(`[PHASE: ${phase}]`);
