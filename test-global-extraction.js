@@ -343,9 +343,28 @@ assert("EC3: '1000 m2' matches totalSqm=1000 via regex", result.totalSqm === 100
 result = runGlobalExtraction("zdravo, kako si?", {}, "zdravo, kako si?");
 assert("EC4: greeting extracts nothing", Object.keys(result).length === 0, `got ${Object.keys(result).join(', ')}`);
 
+// Test 37b: "100 m2, 3 kat" should NOT extract cleanPrice (no price keywords)
+result = runGlobalExtraction("100 m2, 3 kat", {}, "100 m2, 3 kat");
+assert("EC4b: cleanPrice NOT extracted from '100 m2, 3 kat'", result.cleanPrice === undefined, `got ${result.cleanPrice}`);
+assert("EC4b: totalSqm=100", result.totalSqm === 100, `got ${result.totalSqm}`);
+assert("EC4b: floor=3", result.floor === 3, `got ${result.floor}`);
+
 // Test 38: Message with mixed relevance
 result = runGlobalExtraction("interesen mi e stanot, kolku e kvadratura?", {}, "interesen mi e stanot, kolku e kvadratura?");
 assert("EC5: question extracts nothing", Object.keys(result).length === 0, `got ${Object.keys(result).join(', ')}`);
+
+// Test 38b: "80 m2, terasa 5 m2, 3 kat" — no price keywords, cleanPrice NOT set
+result = runGlobalExtraction("80 m2, terasa 5 m2, 3 kat", {}, "80 m2, terasa 5 m2, 3 kat");
+assert("EC5b: cleanPrice NOT extracted (non-price context)", result.cleanPrice === undefined, `got ${result.cleanPrice}`);
+assert("EC5b: totalSqm=80", result.totalSqm === 80, `got ${result.totalSqm}`);
+assert("EC5b: floor=3", result.floor === 3, `got ${result.floor}`);
+
+// Test 38c: "55 kvadrati, tret kat, ima lift" — should NOT extract cleanPrice
+result = runGlobalExtraction("55 kvadrati, tret kat, ima lift", {}, "55 kvadrati, tret kat, ima lift");
+assert("EC5c: cleanPrice NOT extracted from sqm/floor message", result.cleanPrice === undefined, `got ${result.cleanPrice}`);
+assert("EC5c: totalSqm=55", result.totalSqm === 55, `got ${result.totalSqm}`);
+assert("EC5c: floor=3 (tret)", result.floor === 3, `got ${result.floor}`);
+assert("EC5c: elevator=true", result.elevator === true, `got ${result.elevator}`);
 
 // ========================================
 // TEST GROUP: All-fields stress test

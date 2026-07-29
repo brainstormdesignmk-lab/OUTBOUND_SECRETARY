@@ -429,6 +429,16 @@ export function extractPrice(text) {
     return 1000000;
   }
 
+  // Before the aggressive cleanup fallback, check for non-price context words
+  // (sqm, floor, terrace, etc.) WITHOUT any price indicators.
+  // Prevents false positives like "100 m2, 3 kat" → cleanPrice=100.
+  const uClean = text.toLowerCase();
+  const hasPriceKeywords = /iljadi|илјади|evra|евра|eur|evro|евро|cena|цена|plate|плате|plakja|плаќа|kirija|кирија/i.test(uClean);
+  if (!hasPriceKeywords) {
+    const hasNonPriceContext = /m2|м2|kvadrati|квадрати|kvadrata|квадрата|kv|кв|sqm|kat|кат|sprat|спрат|katnica|катница|lift|лифт|klima|клима|garaza|гаража|terasa|тераса|spalni|спални|parking|паркинг|garage|гараж|potkrovje|поткровје/i.test(uClean);
+    if (hasNonPriceContext) return null;
+  }
+
   const cleaned = text.replace(/[\s.,]/g, '');
   const match = cleaned.match(/(\d{3,7})/);
   return match ? parseInt(match[1]) : null;
