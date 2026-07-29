@@ -39,10 +39,20 @@ function extractMonthlyRent(u, data) {
 function extractTotalSqm(u, data) {
   // Skip if already set
   if (data.totalSqm !== undefined && data.totalSqm !== null) return null;
+  // Sqm-specific context: match number before m2/кв/квадрати words
   const sqmMatch = u.match(/(\d{2,4})\s*(m2|м2|квадрати|кв|sqm|kvadrati|kvadrata|квадрата|квадрат|kv|кв)/i);
   if (sqmMatch) return { totalSqm: parseInt(sqmMatch[1]) };
+  // Fallback: first reasonable number — but skip if near price context (evra/iljadi)
   const firstNum = extractFirstNumber(u);
-  if (firstNum !== null && firstNum >= 10 && firstNum <= 999) return { totalSqm: firstNum };
+  if (firstNum !== null && firstNum >= 10 && firstNum <= 999) {
+    // Check if this number is actually a price (near evra/iljadi context)
+    const uClean = u.toLowerCase();
+    if (/iljadi|илјади|evra|евра|eur|evro|евро|kirija|кирија|cena|цена/i.test(uClean)) {
+      // Number near price context — only extract if explicitly with sqm word
+      return null;
+    }
+    return { totalSqm: firstNum };
+  }
   return null;
 }
 
@@ -59,8 +69,16 @@ function extractFloor(u, data) {
     const totalFloors = data.totalFloors || 6;
     return { floor: totalFloors + 1 };
   }
+  // Ordinal floors (прв, втор, трет, петти, etc.)
   const ordinal = parseOrdinalFloor(u);
   if (ordinal !== null) return { floor: ordinal };
+  // Digit floor — find number adjacent to floor context words
+  const floorMatch = u.match(/(\d{1,2})\s*(kat|кат|sprat|спрат|floor|ката|sprata|спрата)/i);
+  if (floorMatch) {
+    const num = parseInt(floorMatch[1]);
+    if (num >= 0 && num <= 50) return { floor: num };
+  }
+  // Fallback: extract first reasonable number
   const firstNum = extractFirstNumber(u);
   if (firstNum !== null && firstNum >= 0 && firstNum <= 50) return { floor: firstNum };
   const wordNum = parseMacedonianNumber(u);
@@ -156,8 +174,18 @@ function extractRenovated(u, data) {
   if (/ne e renoviran|не е реновиран|nema renoviran|нема реновирано|ne e renovirano|не е реновирано|nema renovirano|нема реновирано|ne renoviran|не реновиран/i.test(u)) {
     return { renovated: false, renovationYear: null };
   }
-  // Check if year is embedded (e.g. "da renoviran 2000ta" — handle trailing Cyrillic/Latin/год)
-  const yearMatch = u.match(/(?:19|20)\d{2}(?=[taг\s,.;!]|$)/);
+  // Check if year is embedded — prefer year near renovation keywords
+  // First, try to find year specifically near renovation words
+  const renovYearNear = u.match(/(?:renoviran|реновиран|obnoven|обновен|osvezen|освежен).{0,20}((?:19|20)\d{2})/i);
+  if (renovYearNear) {
+    return { renovated: true, renovationYear: parseInt(renovYearNear[1]) };
+  }
+  const renovYearBefore = u.match(/((?:19|20)\d{2}).{0,20}(?:renoviran|реновиран|obnoven|обновен|osvezen|освежен)/i);
+  if (renovYearBefore) {
+    return { renovated: true, renovationYear: parseInt(renovYearBefore[1]) };
+  }
+  // Fallback: any year in the message
+  const yearMatch = u.match(/(?:19|20)\d{2}(?=[taтг\s,.;!]|$)/);
   if (yearMatch) {
     return { renovated: true, renovationYear: parseInt(yearMatch[0].substring(0, 4)) };
   }

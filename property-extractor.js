@@ -249,6 +249,13 @@ export function countBedrooms(text) {
   }
   if (roomCount >= 2) return roomCount;
 
+  // Digit before room word: '2 spalni', '2 спални' etc.
+  const digitRoomMatch = u.match(/(\d+)\s+(spalni|спални|spalna|спална|detski|детски|detska|детска|gostinski|гостински|gostinska|гостинска)/i);
+  if (digitRoomMatch) {
+    const n = parseInt(digitRoomMatch[1]);
+    if (n >= 1 && n <= 20) return n;
+  }
+
   const numberRoomMatch = u.match(/([a-zа-я]+)\s+(spalni|спални|spalna|спална|detski|детски|detska|детска|gostinski|гостински|gostinska|гостинска)/i);
   if (numberRoomMatch) {
     const num = parseMacedonianNumber(numberRoomMatch[1]);
@@ -437,9 +444,13 @@ export function parseYearBuilt(text) {
   const exactYearMatch = text.match(/\b(19\d{2}|20\d{2})\b/);
   if (exactYearMatch) return parseInt(exactYearMatch[1]);
 
+  // Skip 2-digit matches that are part of sqm/price context ('80 m2', '50 кв', '350 evra')
   const twoDigit = text.match(/\b(\d{2})\b/);
   if (twoDigit) {
     const year = parseInt(twoDigit[1]);
+    // Skip if followed by sqm context (e.g., '80 m2', '80 квадрати')
+    const afterMatch = text.slice(twoDigit.index + twoDigit[0].length).trim();
+    if (/^(m2|м2|кв|kvadrati|квадрати|kvadrata|квадрата|sqm|evra|евра|eur)/i.test(afterMatch)) return null;
     if (year >= 0 && year <= 30) return 2000 + year;
     if (year >= 70 && year <= 99) return 1900 + year;
   }

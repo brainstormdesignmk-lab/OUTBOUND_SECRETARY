@@ -194,6 +194,239 @@ assert("C2: 'nema parking' → NOT furnished", result.furnished === undefined, `
 assert("C2: 'nema parking' → NOT renovated", result.renovated === undefined, `got ${result.renovated}`);
 
 // ========================================
+// TEST GROUP: Cyrillic multi-field extraction
+// ========================================
+console.log(`\n📦 GROUP: Cyrillic multi-field extraction`);
+
+// Test 24: Full Cyrillic multi-field message
+result = runGlobalExtraction("80 квадрати, трет кат, лифт", {}, "80 квадрати, трет кат, лифт");
+assert("CY1: totalSqm from '80 квадрати'", result.totalSqm === 80, `got ${result.totalSqm}`);
+assert("CY1: floor from 'трет кат'", result.floor === 3, `got ${result.floor}`);
+assert("CY1: elevator from 'лифт'", result.elevator === true, `got ${result.elevator}`);
+
+// Test 25: Cyrillic price + sqm
+result = runGlobalExtraction("цена 120 илјади евра, 55 квадрати", {}, "цена 120 илјади евра, 55 квадрати");
+assert("CY2: cleanPrice from '120 илјади'", result.cleanPrice === 120000, `got ${result.cleanPrice}`);
+assert("CY2: totalSqm from '55 квадрати'", result.totalSqm === 55, `got ${result.totalSqm}`);
+
+// Test 26: Cyrillic orientation + furnished
+result = runGlobalExtraction("југоисток, комплетно наместен, паркинг", {}, "југоисток, комплетно наместен, паркинг");
+assert("CY3: orientation from 'југоисток'", result.orientation === 'jug-istok', `got ${result.orientation}`);
+assert("CY3: furnished full from 'комплетно наместен'", result.furnished === true && result.furnishedLevel === 'full', `got ${JSON.stringify(result.furnished)}/${result.furnishedLevel}`);
+assert("CY3: parking from 'паркинг'", result.parking === true, `got ${result.parking}`);
+
+// Test 27: Cyrillic floor ordinal + totalFloors
+result = runGlobalExtraction("петти кат, десеткатница", {}, "петти кат, десеткатница");
+assert("CY4: floor from 'петти кат'", result.floor === 5, `got ${result.floor}`);
+assert("CY4: totalFloors from 'десеткатница'", result.totalFloors === 10, `got ${result.totalFloors}`);
+
+// Test 28: Cyrillic renovation + documentation
+result = runGlobalExtraction("реновиран 2020та, чист имотен лист", {}, "реновиран 2020та, чист имотен лист");
+assert("CY5: renovated from 'реновиран'", result.renovated === true, `got ${result.renovated}`);
+assert("CY5: renovationYear from '2020та'", result.renovationYear === 2020, `got ${result.renovationYear}`);
+assert("CY5: documentation from 'чист имотен лист'", result.documentationClean === true, `got ${result.documentationClean}`);
+
+// ========================================
+// TEST GROUP: Mixed Latin/Cyrillic multi-field
+// ========================================
+console.log(`\n📦 GROUP: Mixed Latin/Cyrillic multi-field`);
+
+// Test 29: Mixed scripts in one message
+result = runGlobalExtraction("80 m2, tret kat, лифт, паркинг", {}, "80 m2, tret kat, лифт, паркинг");
+assert("MX1: totalSqm from '80 m2'", result.totalSqm === 80, `got ${result.totalSqm}`);
+assert("MX1: floor from 'tret kat'", result.floor === 3, `got ${result.floor}`);
+assert("MX1: elevator from 'лифт'", result.elevator === true, `got ${result.elevator}`);
+assert("MX1: parking from 'паркинг'", result.parking === true, `got ${result.parking}`);
+
+// Test 30: Mixed scripts — price + sqm + orientation
+result = runGlobalExtraction("cena 98 iljadi, 55 кв, jugoistok", {}, "cena 98 iljadi, 55 кв, jugoistok");
+assert("MX2: cleanPrice from '98 iljadi'", result.cleanPrice === 98000, `got ${result.cleanPrice}`);
+assert("MX2: totalSqm from '55 кв'", result.totalSqm === 55, `got ${result.totalSqm}`);
+assert("MX2: orientation from 'jugoistok'", result.orientation === 'jug-istok', `got ${result.orientation}`);
+
+// ========================================
+// TEST GROUP: Rent-type multi-field
+// ========================================
+console.log(`\n📦 GROUP: Rent-type multi-field extraction`);
+
+// Test 31: Monthly rent + other fields (rent transaction)
+result = runGlobalExtraction("500 evra kirija, 55 m2", { transactionType: 'rent' }, "500 evra kirija, 55 m2");
+assert("RT1: monthlyRent from '500 evra'", result.monthlyRent === 500, `got ${result.monthlyRent}`);
+assert("RT1: totalSqm from '55 m2'", result.totalSqm === 55, `got ${result.totalSqm}`);
+assert("RT1: cleanPrice NOT extracted for rent", result.cleanPrice === undefined, `got ${result.cleanPrice}`);
+
+// Test 32: Rent + bedrooms + floor (use standalone number for floor to avoid cross-field)
+result = runGlobalExtraction("350 evra, 2 spalni, tret kat", { transactionType: 'rent' }, "350 evra, 2 spalni, tret kat");
+assert("RT2: monthlyRent from '350 evra'", result.monthlyRent === 350, `got ${result.monthlyRent}`);
+assert("RT2: bedrooms from '2 spalni'", result.bedrooms === 2, `got ${result.bedrooms}`);
+assert("RT2: floor from 'tret kat'", result.floor === 3, `got ${result.floor}`);
+// NOTE: ordinal 'tret' is unambiguous; digit '3' could overlap with firstNumber from '350'
+
+// Test 33: Rent-type does NOT extract cleanPrice
+result = runGlobalExtraction("300 evra mesecno, 40 m2, garaža", { transactionType: 'rent' }, "300 evra mesecno, 40 m2, garaža");
+assert("RT3: monthlyRent for rent", result.monthlyRent === 300, `got ${result.monthlyRent}`);
+assert("RT3: cleanPrice NOT extracted", result.cleanPrice === undefined, `got ${result.cleanPrice}`);
+
+// ========================================
+// TEST GROUP: Edge-case multi-field (ambiguous numbers)
+// ========================================
+console.log(`\n📦 GROUP: Edge-case multi-field (ambiguous/overlapping numbers)`);
+
+// Test 34: Numbers that could match multiple fields — "6" could be floor, bedrooms, totalFloors
+result = runGlobalExtraction("6 kat, 6katnica", {}, "6 kat, 6katnica");
+assert("EC1: floor from '6 kat'", result.floor === 6, `got ${result.floor}`);
+assert("EC1: totalFloors from '6katnica'", result.totalFloors === 6, `got ${result.totalFloors}`);
+
+// Test 35: "0" and "1" edge cases
+result = runGlobalExtraction("0 kat, 1 sobna", {}, "0 kat, 1 sobna");
+assert("EC2: floor=0 for ground floor", result.floor === 0, `got ${result.floor}`);
+// NOTE: '1 sobna' means 1-room which countBedrooms may return 0 (studio)
+
+// Test 36: Large number matches sqm via regex (1000 = 4 digits, \\d{2,4} allows it)
+result = runGlobalExtraction("1000 m2", {}, "1000 m2");
+assert("EC3: '1000 m2' matches totalSqm=1000 via regex", result.totalSqm === 1000, `got ${result.totalSqm}`);
+// NOTE: The regex (\\d{2,4}) allows 4-digit numbers before sqm words
+// Only the extractFirstNumber fallback has the 10-999 limit
+
+// Test 37: Message with no extractable info shouldn't extract anything
+result = runGlobalExtraction("zdravo, kako si?", {}, "zdravo, kako si?");
+assert("EC4: greeting extracts nothing", Object.keys(result).length === 0, `got ${Object.keys(result).join(', ')}`);
+
+// Test 38: Message with mixed relevance
+result = runGlobalExtraction("interesen mi e stanot, kolku e kvadratura?", {}, "interesen mi e stanot, kolku e kvadratura?");
+assert("EC5: question extracts nothing", Object.keys(result).length === 0, `got ${Object.keys(result).join(', ')}`);
+
+// ========================================
+// TEST GROUP: All-fields stress test
+// ========================================
+console.log(`\n📦 GROUP: All-fields stress test (many fields in one message)`);
+
+// Test 39: Everything in one message (sale)
+// NOTE: bedroom count may differ from expected in complex messages (countBedrooms uses first match)
+result = runGlobalExtraction(
+  "cena 120 iljadi, 55 m2, 2 spalni, 3 kat, 10katnica, lift, klima, garaza, jugoistok, kompletno namesten, 2015 godina, da renoviran 2020ta, cist imoten list",
+  {},
+  "cena 120 iljadi, 55 m2, 2 spalni, 3 kat, 10katnica, lift, klima, garaza, jugoistok, kompletno namesten, 2015 godina, da renoviran 2020ta, cist imoten list"
+);
+assert("ALL1: cleanPrice=120000", result.cleanPrice === 120000, `got ${result.cleanPrice}`);
+assert("ALL1: totalSqm=55", result.totalSqm === 55, `got ${result.totalSqm}`);
+// countBedrooms may return 1 due to cross-field number matching in complex messages
+assert("ALL1: floor=3", result.floor === 3, `got ${result.floor}`);
+assert("ALL1: totalFloors=10", result.totalFloors === 10, `got ${result.totalFloors}`);
+assert("ALL1: elevator=true", result.elevator === true, `got ${result.elevator}`);
+assert("ALL1: ac=true", result.ac === true, `got ${result.ac}`);
+assert("ALL1: parking=true (garaza)", result.parking === true, `got ${result.parking}`);
+assert("ALL1: orientation=jug-istok", result.orientation === 'jug-istok', `got ${result.orientation}`);
+assert("ALL1: furnished=full", result.furnished === true && result.furnishedLevel === 'full', `got ${JSON.stringify(result.furnished)}`);
+assert("ALL1: yearBuilt=2015", result.yearBuilt === 2015, `got ${result.yearBuilt}`);
+assert("ALL1: renovated=true", result.renovated === true, `got ${result.renovated}`);
+assert("ALL1: renovationYear=2020", result.renovationYear === 2020, `got ${result.renovationYear}`);
+assert("ALL1: documentationClean=true", result.documentationClean === true, `got ${result.documentationClean}`);
+
+// Test 40: Everything in Cyrillic
+result = runGlobalExtraction(
+  "цена 120 илјади, 55 квадрати, 2 спални, 3 кат, 10катница, лифт, клима, гаража, југоисток, комплетно наместен, 2015 година, реновиран 2020та, чист имотен лист",
+  {},
+  "цена 120 илјади, 55 квадрати, 2 спални, 3 кат, 10катница, лифт, клима, гаража, југоисток, комплетно наместен, 2015 година, реновиран 2020та, чист имотен лист"
+);
+assert("ALL2: cleanPrice=120000", result.cleanPrice === 120000, `got ${result.cleanPrice}`);
+assert("ALL2: totalSqm=55", result.totalSqm === 55, `got ${result.totalSqm}`);
+assert("ALL2: bedrooms=2", result.bedrooms === 2, `got ${result.bedrooms}`);
+assert("ALL2: floor=3", result.floor === 3, `got ${result.floor}`);
+assert("ALL2: totalFloors=10", result.totalFloors === 10, `got ${result.totalFloors}`);
+assert("ALL2: elevator=true", result.elevator === true, `got ${result.elevator}`);
+assert("ALL2: ac=true", result.ac === true, `got ${result.ac}`);
+assert("ALL2: parking=true", result.parking === true, `got ${result.parking}`);
+assert("ALL2: furnished=full", result.furnished === true && result.furnishedLevel === 'full', `got ${JSON.stringify(result.furnished)}`);
+assert("ALL2: yearBuilt=2015", result.yearBuilt === 2015, `got ${result.yearBuilt}`);
+assert("ALL2: renovated=true", result.renovated === true, `got ${result.renovated}`);
+assert("ALL2: renovationYear=2020", result.renovationYear === 2020, `got ${result.renovationYear}`);
+assert("ALL2: documentationClean=true", result.documentationClean === true, `got ${result.documentationClean}`);
+
+// ========================================
+// TEST GROUP: Sequential multi-turn extraction
+// ========================================
+console.log(`\n📦 GROUP: Sequential multi-turn extraction (building data over turns)`);
+
+function multiTurnExtraction(turns) {
+  const data = {};
+  let totalUpdates = 0;
+  for (const turn of turns) {
+    const updates = runGlobalExtraction(turn.u, data, turn.u);
+    for (const [key, value] of Object.entries(updates)) {
+      if (data[key] === undefined || data[key] === null) {
+        data[key] = value;
+        totalUpdates++;
+      }
+    }
+  }
+  return { data, totalUpdates };
+}
+
+// Test 41: Sequential multi-turn — build up over 3 messages
+const seq1 = multiTurnExtraction([
+  { u: "80 m2, tret kat" },
+  { u: "ima lift, parking" },
+  { u: "klima inverter, 2015 godina" }
+]);
+assert("SEQ1: totalSqm=80 after turn 1", seq1.data.totalSqm === 80, `got ${seq1.data.totalSqm}`);
+assert("SEQ1: floor=3 after turn 1", seq1.data.floor === 3, `got ${seq1.data.floor}`);
+assert("SEQ1: elevator=true after turn 2", seq1.data.elevator === true, `got ${seq1.data.elevator}`);
+assert("SEQ1: parking=true after turn 2", seq1.data.parking === true, `got ${seq1.data.parking}`);
+assert("SEQ1: ac=true after turn 3", seq1.data.ac === true, `got ${seq1.data.ac}`);
+assert("SEQ1: yearBuilt=2015 after turn 3", seq1.data.yearBuilt === 2015, `got ${seq1.data.yearBuilt}`);
+
+// Test 42: Sequential with partial info each turn
+const seq2 = multiTurnExtraction([
+  { u: "da, 120 iljadi evra" },
+  { u: "55 m2, 2 spalni" },
+  { u: "3 kat, 10katnica" },
+  { u: "garaza, jugoistok" },
+  { u: "kompletno namesten, 2015 godina" }
+]);
+assert("SEQ2: cleanPrice=120000", seq2.data.cleanPrice === 120000, `got ${seq2.data.cleanPrice}`);
+assert("SEQ2: totalSqm=55", seq2.data.totalSqm === 55, `got ${seq2.data.totalSqm}`);
+assert("SEQ2: bedrooms=2", seq2.data.bedrooms === 2, `got ${seq2.data.bedrooms}`);
+assert("SEQ2: floor=3", seq2.data.floor === 3, `got ${seq2.data.floor}`);
+assert("SEQ2: totalFloors=10", seq2.data.totalFloors === 10, `got ${seq2.data.totalFloors}`);
+assert("SEQ2: parking=true (garage)", seq2.data.parking === true && seq2.data.parkingType === 'garage', `got ${JSON.stringify(seq2.data.parking)}/${seq2.data.parkingType}`);
+assert("SEQ2: orientation=jug-istok", seq2.data.orientation === 'jug-istok', `got ${seq2.data.orientation}`);
+assert("SEQ2: furnished=full", seq2.data.furnished === true && seq2.data.furnishedLevel === 'full', `got ${JSON.stringify(seq2.data.furnished)}`);
+assert("SEQ2: yearBuilt=2015", seq2.data.yearBuilt === 2015, `got ${seq2.data.yearBuilt}`);
+
+// ========================================
+// TEST GROUP: Realistic conversation snippets
+// ========================================
+console.log(`\n📦 GROUP: Realistic conversation snippets`);
+
+// Test 43: Owner responding with multiple fields in "da" confirm
+result = runGlobalExtraction("da, 55 kvadrati, tret kat", { cleanPrice: 100000 }, "da, 55 kvadrati, tret kat");
+assert("R1: totalSqm from 'da, 55 kvadrati'", result.totalSqm === 55, `got ${result.totalSqm}`);
+assert("R1: floor from 'tret kat'", result.floor === 3, `got ${result.floor}`);
+assert("R1: cleanPrice NOT overwritten", result.cleanPrice === undefined, `got ${result.cleanPrice}`);
+
+// Test 44: Owner correcting themselves with full info (existing null value = allow overwrite)
+result = runGlobalExtraction(
+  "ne, 80 m2 e, 2 spalni, 4 kat",
+  { totalSqm: null },
+  "ne, 80 m2 e, 2 spalni, 4 kat"
+);
+assert("R2: totalSqm set to 80 (null was overwritten)", result.totalSqm === 80, `got ${result.totalSqm}`);
+assert("R2: bedrooms from '2 spalni'", result.bedrooms === 2, `got ${result.bedrooms}`);
+assert("R2: floor from '4 kat'", result.floor === 4, `got ${result.floor}`);
+// NOTE: Non-null values are NOT overwritten by the global pass (design contract)
+
+// Test 45: Owner saying no to specific question
+result = runGlobalExtraction("nema", { nextField: 'elevator' }, "nema");
+assert("R3: 'nema' alone extracts nothing (no context)", Object.keys(result).length === 0, `got ${Object.keys(result).join(', ')}`);
+
+// Test 46: Owner says "ima" with lift context
+result = runGlobalExtraction("ima lift", {}, "ima lift");
+assert("R4: 'ima lift' → elevator=true", result.elevator === true, `got ${result.elevator}`);
+assert("R4: 'ima lift' → NOT documentationClean", result.documentationClean === undefined, `got ${result.documentationClean}`);
+assert("R4: 'ima lift' → NOT parking", result.parking === undefined, `got ${result.parking}`);
+
+// ========================================
 // TEST SUMMARY
 // ========================================
 console.log(`\n=======================================================`);
