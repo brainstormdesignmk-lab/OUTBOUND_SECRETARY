@@ -267,8 +267,15 @@ export function countBedrooms(text) {
     }
   }
 
+  // Fallback: parse word number (e.g. 'dve spalni' → 2, 'tri' → 3)
+  // BUT skip if the word number is actually an ordinal floor reference (tret kat, vtor sprat)
   const wordNum = parseMacedonianNumber(u);
-  if (wordNum !== null && wordNum >= 0 && wordNum <= 10) return wordNum;
+  if (wordNum !== null && wordNum >= 0 && wordNum <= 10) {
+    // Skip if the only number words are actually ordinal floor references
+    const hasOrdinalContext = /(tret|трет|vtor|втор|prv|прв|cetvrt|четврт|petti|петти|sesti|шести|sedmi|седми|osmi|осми|devetti|деветти)\s*(kat|кат|sprat|спрат)/i.test(u);
+    if (hasOrdinalContext) return null;
+    return wordNum;
+  }
   const firstNum = extractFirstNumber(u);
   if (firstNum !== null && firstNum >= 0 && firstNum <= 20) {
     // Skip if message contains other-field context (sqm, floor, terrace, price)
@@ -448,13 +455,13 @@ export function parseYearBuilt(text) {
   const exactYearMatch = text.match(/\b(19\d{2}|20\d{2})\b/);
   if (exactYearMatch) return parseInt(exactYearMatch[1]);
 
-  // Skip 2-digit matches that are part of sqm/price context ('80 m2', '50 кв', '350 evra')
+  // Skip 2-digit matches that are part of sqm/price context ('80 m2', '50 кв', '350 evra', '98 iljadi')
   const twoDigit = text.match(/\b(\d{2})\b/);
   if (twoDigit) {
     const year = parseInt(twoDigit[1]);
-    // Skip if followed by sqm context (e.g., '80 m2', '80 квадрати')
+    // Skip if followed by sqm or price context
     const afterMatch = text.slice(twoDigit.index + twoDigit[0].length).trim();
-    if (/^(m2|м2|кв|kvadrati|квадрати|kvadrata|квадрата|sqm|evra|евра|eur)/i.test(afterMatch)) return null;
+    if (/^(m2|м2|кв|kvadrati|квадрати|kvadrata|квадрата|sqm|evra|евра|eur|iljadi|илјади|iljade|илјаде)/i.test(afterMatch)) return null;
     if (year >= 0 && year <= 30) return 2000 + year;
     if (year >= 70 && year <= 99) return 1900 + year;
   }
