@@ -210,9 +210,13 @@ function classifyIntent(userInput, conversation) {
   // Must be checked BEFORE REJECTED patterns to prevent false REJECTED classification.
   // ==========================================
   // Matches: "baram X iljadi", "sakam X iljadi", "cena X iljadi", "X iljadi za mene"
+  // Digit pattern: "baram 156 iljadi", "sakam 98000"
+  // Word-number pattern: "baram stopeeset iljadi", "sakam pedeset iljadi"
   const priceQuoteGuard =
     /(baram|сакам|sakam|цена|cena|price)\s*(\d{1,3}(\.\d{3})*\s*(iljadi|илјади)?)/i.test(u) ||
-    /(\d{1,3}\s*(iljadi|илјади).*za\s*(mene|мене))/i.test(u);
+    /(\d{1,3}\s*(iljadi|илјади).*za\s*(mene|мене))/i.test(u) ||
+    // Word-number pattern: {number_word}(\s+i\s+{number_word})? iljadi
+    /(baram|сакам|sakam|цена|cena|price)\s+([a-zа-я]+(\s+i\s+[a-zа-я]+)*)\s+iljadi/i.test(u);
   if (priceQuoteGuard) {
     return { intent: "INTERESTED", confidence: 0.8, reason: "net price quote" };
   }
@@ -321,7 +325,8 @@ function parseMacedonianNumber(text) {
     'vtor': 2, 'tret': 3, 'cetvrt': 4, 'petti': 5,
     'sesti': 6, 'sedmi': 7, 'osmi': 8, 'devetti': 9,
     // B3: Irregular tens — "seeset" = 60 (consonant mutation: sest → see)
-    'seeset': 60, 'шеесет': 60
+    'seeset': 60, 'шеесет': 60,
+    'peeset': 50, 'пеесет': 50
   };
 
   // Longest-first sort: 'dvanaeset' (12) must match before 'dva' (2) is found as substring
@@ -375,8 +380,12 @@ function parseNumberWords(text) {
   let found = false;
   let consumedLength = 0;
 
-  // Track "sto\/сто" prefix (100) — added to result later regardless of which pattern matched
-  const stoPrefix = /^(sto|сто)/i.test(u) ? 100 : 0;
+  // Track "sto\/сто" prefix (100) — added ONLY if the match didn't consume "sto" at position 0.
+  // This prevents false prefix when an irregular tens word starts with "sto" (e.g. "stopeeset" = 90).
+  let firstMatchIndex = null;
+  const getStoPrefix = () => {
+    return (firstMatchIndex !== null && firstMatchIndex !== 0 && /^(sto|сто)/i.test(u)) ? 100 : 0;
+  };
 
   // ========================================
   // COMPOUND NUMBERS — "petstodvaeset" (520)
@@ -390,6 +399,7 @@ function parseNumberWords(text) {
     const tens = rootMap[compoundMatch[3].toLowerCase()] || 0;
     result = (hundreds * 100) + (tens * 10);
     consumedLength = compoundMatch.index + compoundMatch[0].length;
+    firstMatchIndex = compoundMatch.index;
     found = true;
   }
 
@@ -407,6 +417,7 @@ function parseNumberWords(text) {
       if (match) {
         result = rootMap[match[1].toLowerCase()] * 100;
         consumedLength = match.index + match[0].length;
+        firstMatchIndex = match.index;
         found = true;
         break;
       }
@@ -425,13 +436,15 @@ function parseNumberWords(text) {
       'stopeeset': 90, 'стопеесет': 90,
       'deveeset': 90, 'девеесет': 90,
       'osumdeset': 80, 'осумдесет': 80,
-      'osemdeset': 80, 'осемдесет': 80
+      'osemdeset': 80, 'осемдесет': 80,
+      'peeset': 50, 'пеесет': 50
     };
     for (const [word, val] of Object.entries(irregularTens)) {
       const idx = u.indexOf(word);
       if (idx !== -1) {
         result = val;
         consumedLength = idx + word.length;
+        firstMatchIndex = idx;
         found = true;
         break;
       }
@@ -450,6 +463,7 @@ function parseNumberWords(text) {
         if (match) {
           result = rootMap[match[1].toLowerCase()] * 10;
           consumedLength = match.index + match[0].length;
+          firstMatchIndex = match.index;
           found = true;
           break;
         }
@@ -474,8 +488,8 @@ function parseNumberWords(text) {
     if (iBrojMatch) {
       result += rootMap[iBrojMatch[1].toLowerCase()] || 0;
     }
-    // Add "sto" prefix (100) if text started with "sto"/"сто"
-    result += stoPrefix;
+    // Add "sto" prefix (100) only if "sto" wasn't already consumed by the match at position 0
+    result += getStoPrefix();
     return result;
   }
 
