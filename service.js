@@ -1540,7 +1540,7 @@ if (/kako bi sorabotuvale|како би соработувале|како да �
     // still returns 'heating' for the follow-up reply.
     if (nextField === 'heating' || session.collectedData.heatingFollowUp) {
       // If we're in follow-up mode, process the specific type from the user
-      if (/gradsko|граѓско|dalinsko|toplovod|beg/i.test(u)) {
+      if (/gradsko|градско|граѓско|dalinsko|dalecno|далечно|toplovod|beg/i.test(u)) {
         session.collectedData.heating = "district";
         session.collectedData.heatingType = "district";
         session.collectedData.heatingFollowUp = false;

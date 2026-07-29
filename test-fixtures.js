@@ -1119,30 +1119,122 @@ assertEqual(extractTerraceNumber("5 m2"), 5, "B15: '5 m2' → 5");
 assertEqual(extractTerraceNumber("nema"), null, "B15: 'nema' → null");
 
 // ============================================================
-// TEST GROUP: B16 — Heating follow-up flag logic (conceptual verification)
+// TEST GROUP: B16 — Heating type detection patterns (COMPREHENSIVE)
 // ============================================================
-console.log(`\n📦 GROUP: B16 — Heating type detection patterns`);
+console.log(`\n📦 GROUP: B16 — Heating type detection patterns (comprehensive)`);
 
-// Verify that the regex patterns match the expected heating types
+// Mirrors the exact regex patterns from service.js heating handler
+// District: /gradsko|граѓско|dalinsko|toplovod|beg/i
+// Private central: /centralno|централно|central|sopstveno|сопствено|individualno|индивидуално|svoja|своја|kotel|kotlarnica|котларница|сопствена|sopstvena|moe|мое|nase|наше|licno|лично|zgradata|зградата|na zgradata|на зградата|sopstveno parno|сопствено парно|moe parno|мое парно|nase parno|наше парно|licno parno|лично парно|parno moe|парно мое|parno nase|парно наше|parno licno|парно лично|parno na zgradata|парно на зградата|sopstveno|сопствено|sopstveno parno|сопствено парно/i
+// Inverter: /klima|клима|inverter|инвертер|split|сплит|invertor|инвертор|klima inverter|клима инвертер|термопумпа|toplotna|топлотна|na klima|на клима|se gream|се греам/i
+// Electric: /struja|струја|electric|термо|термосистем|termo|radijatori|радијатори|kalorifer|калорифер/i
+// Solid_fuel/oil: /drva|дрва|peleti|пелети|pellet|пелет|nafta|нафта|loz|лож|огрев|ogrev|jаглен|jaglen|uglen|у́глен/i
+//   Sub-check: /drva|дрва|peleti|пелети|pellet|пелет|ogrev|огрев/i → wood_pellets, else → oil
 function testHeatingPattern(u) {
-  if (/gradsko|граѓско|dalinsko|toplovod|beg/i.test(u)) return "district";
-  if (/centralno|централно|central|sopstveno|сопствено|individualno|индивидуално|svoja|своја|kotel|kotlarnica|котларница|moe|мое|nase|наше|licno|лично|zgradata|зградата/i.test(u)) return "private_central";
-  if (/klima|клима|inverter|инвертер|split|сплит/i.test(u)) return "inverter";
-  if (/struja|струја|electric/i.test(u)) return "electric";
+  if (/gradsko|градско|граѓско|dalinsko|dalecno|далечно|toplovod|beg/i.test(u)) return "district";
+  if (/centralno|централно|central|sopstveno|сопствено|individualno|индивидуално|svoja|своја|kotel|kotlarnica|котларница|сопствена|sopstvena|moe|мое|nase|наше|licno|лично|zgradata|зградата|na zgradata|на зградата|sopstveno parno|сопствено парно|moe parno|мое парно|nase parno|наше парно|licno parno|лично парно|parno moe|парно мое|parno nase|парно наше|parno licno|парно лично|parno na zgradata|парно на зградата|sopstveno|сопствено|sopstveno parno|сопствено парно/i.test(u)) return "private_central";
+  if (/klima|клима|inverter|инвертер|split|сплит|invertor|инвертор|klima inverter|клима инвертер|термопумпа|toplotna|топлотна|na klima|на клима|se gream|се греам/i.test(u)) return "inverter";
+  if (/struja|струја|electric|термо|термосистем|termo|radijatori|радијатори|kalorifer|калорифер/i.test(u)) return "electric";
+  if (/drva|дрва|peleti|пелети|pellet|пелет|nafta|нафта|loz|лож|огрев|ogrev|jаглен|jaglen|uglen|у́глен/i.test(u)) {
+    if (/drva|дрва|peleti|пелети|pellet|пелет|ogrev|огрев/i.test(u)) return "wood_pellets";
+    return "oil";
+  }
   if (/parno|парно/i.test(u)) return "parno_bare";
   return null;
 }
 
+// ── DISTRICT tests ──
+console.log(`  ── District variants`);
 assertEqual(testHeatingPattern("gradsko"), "district", "B16: 'gradsko' → district");
+assertEqual(testHeatingPattern("dalinsko"), "district", "B16: 'dalinsko' → district");
+assertEqual(testHeatingPattern("dalecno"), "district", "B16: 'dalecno' (alternate) → district");
+assertEqual(testHeatingPattern("toplovod"), "district", "B16: 'toplovod' → district");
+assertEqual(testHeatingPattern("beg"), "district", "B16: 'beg' → district");
+assertEqual(testHeatingPattern("gradsko parno"), "district", "B16: 'gradsko parno' → district");
+
+// ── PRIVATE CENTRAL tests ──
+console.log(`  ── Private central variants`);
 assertEqual(testHeatingPattern("centralno"), "private_central", "B16: 'centralno' → private_central");
 assertEqual(testHeatingPattern("central"), "private_central", "B16: 'central' → private_central");
-assertEqual(testHeatingPattern("dalinsko"), "district", "B16: 'dalinsko' → district");
 assertEqual(testHeatingPattern("sopstveno"), "private_central", "B16: 'sopstveno' → private_central");
+assertEqual(testHeatingPattern("сопствено"), "private_central", "B16: 'сопствено' (Cyrillic) → private_central");
 assertEqual(testHeatingPattern("individualno"), "private_central", "B16: 'individualno' → private_central");
+assertEqual(testHeatingPattern("индивидуално"), "private_central", "B16: 'индивидуално' (Cyrillic) → private_central");
+assertEqual(testHeatingPattern("svoja"), "private_central", "B16: 'svoja' → private_central");
+assertEqual(testHeatingPattern("kotel"), "private_central", "B16: 'kotel' → private_central");
+assertEqual(testHeatingPattern("kotlarnica"), "private_central", "B16: 'kotlarnica' → private_central");
+assertEqual(testHeatingPattern("sopstvena"), "private_central", "B16: 'sopstvena' → private_central");
+assertEqual(testHeatingPattern("moe"), "private_central", "B16: 'moe' → private_central");
+assertEqual(testHeatingPattern("nase"), "private_central", "B16: 'nase' → private_central");
+assertEqual(testHeatingPattern("licno"), "private_central", "B16: 'licno' → private_central");
+assertEqual(testHeatingPattern("zgradata"), "private_central", "B16: 'zgradata' → private_central");
+assertEqual(testHeatingPattern("na zgradata"), "private_central", "B16: 'na zgradata' → private_central");
+
+// ── PRIVATE CENTRAL: compound phrases ──
+console.log(`  ── Private central: compound phrases`);
 assertEqual(testHeatingPattern("moe parno"), "private_central", "B16: 'moe parno' → private_central");
+assertEqual(testHeatingPattern("мое парно"), "private_central", "B16: 'мое парно' (Cyrillic) → private_central");
+assertEqual(testHeatingPattern("nase parno"), "private_central", "B16: 'nase parno' → private_central");
+assertEqual(testHeatingPattern("наше парно"), "private_central", "B16: 'наше парно' (Cyrillic) → private_central");
+assertEqual(testHeatingPattern("licno parno"), "private_central", "B16: 'licno parno' → private_central");
+assertEqual(testHeatingPattern("parno moe"), "private_central", "B16: 'parno moe' → private_central");
+assertEqual(testHeatingPattern("parno nase"), "private_central", "B16: 'parno nase' → private_central");
+assertEqual(testHeatingPattern("parno licno"), "private_central", "B16: 'parno licno' → private_central");
+assertEqual(testHeatingPattern("parno na zgradata"), "private_central", "B16: 'parno na zgradata' → private_central");
+assertEqual(testHeatingPattern("sopstveno parno"), "private_central", "B16: 'sopstveno parno' → private_central");
+assertEqual(testHeatingPattern("сопствено парно"), "private_central", "B16: 'сопствено парно' (Cyrillic) → private_central");
+
+// ── INVERTER tests ──
+console.log(`  ── Inverter variants`);
 assertEqual(testHeatingPattern("klima"), "inverter", "B16: 'klima' → inverter");
+assertEqual(testHeatingPattern("inverter"), "inverter", "B16: 'inverter' → inverter");
+assertEqual(testHeatingPattern("split"), "inverter", "B16: 'split' → inverter");
+assertEqual(testHeatingPattern("invertor"), "inverter", "B16: 'invertor' (alternate) → inverter");
+assertEqual(testHeatingPattern("klima inverter"), "inverter", "B16: 'klima inverter' → inverter");
+assertEqual(testHeatingPattern("термопумпа"), "inverter", "B16: 'термопумпа' → inverter");
+assertEqual(testHeatingPattern("toplotna"), "inverter", "B16: 'toplotna' → inverter");
+assertEqual(testHeatingPattern("na klima"), "inverter", "B16: 'na klima' → inverter");
+assertEqual(testHeatingPattern("se gream"), "inverter", "B16: 'se gream' → inverter");
+
+// ── ELECTRIC tests ──
+console.log(`  ── Electric variants`);
 assertEqual(testHeatingPattern("struja"), "electric", "B16: 'struja' → electric");
+assertEqual(testHeatingPattern("electric"), "electric", "B16: 'electric' → electric");
+assertEqual(testHeatingPattern("термо"), "electric", "B16: 'термо' → electric");
+assertEqual(testHeatingPattern("termo"), "electric", "B16: 'termo' → electric");
+assertEqual(testHeatingPattern("radijatori"), "electric", "B16: 'radijatori' → electric");
+assertEqual(testHeatingPattern("kalorifer"), "electric", "B16: 'kalorifer' → electric");
+
+// ── SOLID FUEL / WOOD PELLETS tests ──
+console.log(`  ── Solid fuel / wood pellets variants`);
+assertEqual(testHeatingPattern("drva"), "wood_pellets", "B16: 'drva' → wood_pellets");
+assertEqual(testHeatingPattern("na drva"), "wood_pellets", "B16: 'na drva' → wood_pellets");
+assertEqual(testHeatingPattern("peleti"), "wood_pellets", "B16: 'peleti' → wood_pellets");
+assertEqual(testHeatingPattern("pellet"), "wood_pellets", "B16: 'pellet' → wood_pellets");
+assertEqual(testHeatingPattern("ogrev"), "wood_pellets", "B16: 'ogrev' → wood_pellets");
+
+// ── OIL tests ──
+console.log(`  ── Oil variants`);
+assertEqual(testHeatingPattern("nafta"), "oil", "B16: 'nafta' → oil");
+assertEqual(testHeatingPattern("loz"), "oil", "B16: 'loz' → oil");
+assertEqual(testHeatingPattern("jaglen"), "oil", "B16: 'jaglen' → oil");
+assertEqual(testHeatingPattern("uglen"), "oil", "B16: 'uglen' → oil");
+
+// ── BARE PARNO (triggers follow-up) ──
+console.log(`  ── Bare parno (triggers follow-up)`);
 assertEqual(testHeatingPattern("parno"), "parno_bare", "B16: bare 'parno' → triggers follow-up");
+assertEqual(testHeatingPattern("парно"), "parno_bare", "B16: bare 'парно' (Cyrillic) → triggers follow-up");
+
+// ── DISTINCTNESS: ensure district and private_central don't overlap ──
+console.log(`  ── Distinctness checks`);
+// 'gradsko' should NOT match private_central
+assertEqual(testHeatingPattern("gradsko"), "district", "B16: 'gradsko' → district (not private_central)");
+// 'centralno' should NOT match district
+assertEqual(testHeatingPattern("centralno"), "private_central", "B16: 'centralno' → private_central (not district)");
+// Compound with both should resolve by order: district patterns checked first
+assertEqual(testHeatingPattern("gradsko centralno"), "district", "B16: 'gradsko centralno' → district (matches first)");
+// Even with centralno first, gradsko in string still matches district (first pattern wins)
+assertEqual(testHeatingPattern("centralno gradsko"), "district", "B16: 'centralno gradsko' → district (district checked first, gradsko found)");
 
 // ============================================================
 // TEST GROUP: B17 — Renovation year word-based relative years
