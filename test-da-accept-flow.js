@@ -1,9 +1,12 @@
 // ========================================
-// TEST: Owner says "da" → should ask price first, not terrace
+// TEST: Owner says strong acceptance signal → should ask price first, not terrace
 // ========================================
-// This simulates the EXACT broken scenario from the user's campaign:
-// Owner accepts with "da", and Ana should ask about price (cleanPrice)
-// NOT about terrace (terraceSqm).
+// This simulates the EXACT broken scenario from the user's campaign:\n// Owner accepts with a strong signal like "vazhi" (0.90), and Ana should ask
+// about price (cleanPrice) NOT about terrace (terraceSqm).
+//
+// With the new ACCEPTANCE_CONFIDENCE threshold (>= 0.85), standalone "da" (0.60)
+// stays in PERSUASION — only strong acceptance signals enter DATA_COLLECTION.
+// This test uses "vazhi" (0.90) which is the minimum strong signal.
 //
 // Before the fix (23aa808), isPositive("da") returned true which
 // triggered the terrace handler's follow-up question.
@@ -29,7 +32,7 @@ function assert(label, condition, detail) {
 }
 
 console.log('\n========================================');
-console.log('🧪 TEST: "da" accept → price first, not terrace');
+console.log('🧪 TEST: strong acceptance → price first, not terrace');
 console.log('========================================\n');
 
 async function runTest() {
@@ -49,12 +52,12 @@ async function runTest() {
     phone: '+38970123456'
   };
 
-  // Owner says "da" — simple acceptance
-  const result = await generateResponse(session, "da");
+  // Owner says "vazhi" — strong acceptance signal (0.90), enters DATA_COLLECTION
+  const result = await generateResponse(session, "vazhi");
   
-  console.log('\n  Response type:', result.type);
+  console.log('  Response type:', result.type);
   console.log('  Next field:', result.nextField);
-  console.log('  Response text:', result.text.substring(0, 80));
+  console.log('  Response text:', result.text ? result.text.substring(0, 80) : '(empty)');
   console.log('  Cooperation accepted:', session.collectedData.cooperationAccepted);
   console.log('  Has terrace set:', session.collectedData.hasTerrace);
   console.log('  Terrace sqm set:', session.collectedData.terraceSqm);
@@ -70,8 +73,8 @@ async function runTest() {
     `got ${result.nextField}`);
 
   assert('Response text asks about price',
-    /цена/i.test(result.text),
-    `text: ${result.text.substring(0, 60)}`);
+    /цена/i.test(result.text || ''),
+    `text: ${(result.text || '').substring(0, 60)}`);
 
   // Ensure terrace was NOT set (nobody mentioned it)
   assert('hasTerrace is NOT set',
@@ -178,7 +181,7 @@ async function runTest() {
     console.log('\n❌ TEST FAILED\n');
     process.exit(1);
   } else {
-    console.log('\n🟢 ALL CHECKS PASSED — "da" now correctly asks price first, not terrace\n');
+    console.log('\n🟢 ALL CHECKS PASSED — strong acceptance now correctly asks price first, not terrace\n');
   }
 }
 

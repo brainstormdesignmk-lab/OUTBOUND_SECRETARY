@@ -559,6 +559,22 @@ if (/kako bi sorabotuvale|како би соработувале|како да �
     }
 
     // ========================================
+    // COOPERATION ROLLBACK CHECK
+    // If already in DATA_COLLECTION but the owner challenges the
+    // cooperation with a statement like "не ти реков дека сакам соработка"
+    // (I didn't say I want cooperation), rollback cooperationAccepted=false
+    // and return to PERSUASION phase.
+    // ========================================
+    if (session.collectedData.cooperationAccepted === true &&
+        (/ne ti rekov|не ти реков|ne sum rekol|не сум рекол|ne rekov|не реков|ne sum kazal|не сум кажал|ne kazav|не кажав|jas ne sakam sorabotka|јас не сакам соработка|ne sakam sorabotka|не сакам соработка|ne sum siguren deka sakam|не сум сигурен дека сакам|ne znam dali sakam|не знам дали сакам|ne sum zela odluka|не сум зела одлука|ne sum zeol odluka|не сум зел одлука|razmisluvam za sorabotka|размислувам за соработка|ne sakam da sorabotuvame|не сакам да соработуваме|pogreshno me razbravte|погрешно ме разбравте|ne me sfatete|не ме сфатете|ne me razbravte|не ме разбравте|ne e tocno|не е точно|gresno razbiranje|грешно разбирање/i.test(u))) {
+      session.collectedData.cooperationAccepted = false;
+      // Reset rejection count so persuasion re-starts fresh
+      session.rejectionCount = 0;
+      console.log(`[COOPERATION: ROLLED BACK — user challenges cooperation]`);
+      // Fall through to persuasion flow
+    }
+
+    // ========================================
     // PHASE DETECTION
     // ========================================
     const alreadyInDataCollection = session.collectedData.cooperationAccepted === true;
@@ -569,7 +585,12 @@ if (/kako bi sorabotuvale|како би соработувале|како да �
       classification = classifyIntent(u, conv);
       console.log(`[INTENT: ${classification.intent}, CONFIDENCE: ${classification.confidence}]`);
 
-      // COOPERATION ACCEPTANCE GATE (defense-in-depth):
+      // COOPERATION ACCEPTANCE GATE (v2):
+      // Threshold raised from 0.7 to 0.85 for entering DATA_COLLECTION.
+      // This prevents low-confidence ACCEPTED classifications (standalone "da" = 0.60,
+      // solo "moze" = 0.65) from immediately entering data collection.
+      // Owners must give a strong, unambiguous acceptance signal.
+      //
       // Even if the classifier says ACCEPTED, check for conversation-continuation
       // words that the classifier might have missed. "prodolzi", "slusam", "objasni"
       // after an affirmative are conversation continuations, NOT cooperation.
@@ -577,18 +598,18 @@ if (/kako bi sorabotuvale|како би соработувале|како да �
       // this gate catches edge cases.
       // Uses the centralized CONV_CONTINUATION_WORDS pattern from classifier.js
       const isConvContinuation = convContWords.test(u);
-      if (classification.intent === "ACCEPTED" && classification.confidence > 0.7 && isConvContinuation) {
+      if (classification.intent === "ACCEPTED" && classification.confidence >= 0.85 && isConvContinuation) {
         console.log(`[COOPERATION: GATE BLOCKED — conversation continuation (${classification.reason})]`);
         phase = "PERSUASION";
         classification = { intent: "INTERESTED", confidence: 0.7 };
-      } else if (classification.intent === "ACCEPTED" && classification.confidence > 0.7) {
+      } else if (classification.intent === "ACCEPTED" && classification.confidence >= 0.85) {
         session.collectedData.cooperationAccepted = true;
         session.rejectionCount = 0;
         if (!session.collectedData.transactionType && session.adMemory?.transactionType) {
           session.collectedData.transactionType = session.adMemory.transactionType;
         }
         phase = "DATA_COLLECTION";
-        console.log(`[COOPERATION: ACCEPTED]`);
+        console.log(`[COOPERATION: ACCEPTED (conf=${classification.confidence})]`);
       } else if (classification.intent === "REJECTED" && classification.confidence > 0.7) {
         session.rejectionCount = (session.rejectionCount || 0) + 1;
         console.log(`[REJECTION COUNT: ${session.rejectionCount}]`);

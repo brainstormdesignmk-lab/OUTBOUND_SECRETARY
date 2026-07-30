@@ -12,6 +12,37 @@
 // ========================================
 export const CONV_CONTINUATION_WORDS = /(?:prodolz|продолж|slusam|слушам|slusham|objasn|објасн|kazh|каж|izvoli|изволи|pojasn|појасн|poveke|повеќе|samo\s*(prasaj|прашај)|slobodno|слободно)/i;
 
+// ==========================================
+// ACCEPTANCE DOUBT GUARD
+// When a message matches an ACCEPTED pattern but also contains
+// doubt signals (questions, agency/commission questions, concerns),
+// downgrade to INTERESTED. This prevents premature cooperation
+// acceptance from messages like:
+//   "може, ама која агенција сте?" → NOT accepted
+//   "да, ама како работите?" → NOT accepted
+//   "важи, ама која агенција сте?" → NOT accepted
+// ==========================================
+export function hasAcceptanceDoubt(u) {
+  const lower = u.toLowerCase().trim();
+  // Question mark
+  if (/\?/.test(lower)) return true;
+  // Agency questions: "koja agencija", "која сте вие", "kade vi e kancelarijata"
+  if (/(koja|која|kakva|каква).{0,20}(agencija|агенција)/i.test(lower)) return true;
+  if (/(kade|каде).{0,20}(kancelari|канцелари)/i.test(lower)) return true;
+  if (/koja ste|која сте|koj ste|кој сте/i.test(lower)) return true;
+  // Commission/responsibility questions
+  if (/(provizija|провизија|obvrski|обврски|obvrska|обврска|procent|процент|%).{0,20}(plakjam|плаќам|zimate|земате|kolku|колку)?/i.test(lower)) return true;
+  if (/(plakjam|плаќам|zimate|земате|kolku|колку).{0,20}(provizija|провизија)/i.test(lower)) return true;
+  if (/od koj dzeb|од кој џеб|od kade parite|од каде парите/i.test(lower)) return true;
+  // Cooperation question: "kakva sorabotka", "za kakva sorabotka"
+  if (/kakva sorabotka|каква соработка|za kakva|за каква/i.test(lower)) return true;
+  // How it works
+  if (/kako.{0,10}(raboti|работи|funkcionira|функционира)/i.test(lower)) return true;
+  // But/hesitation — NOT if probame is in the message ("ama probame" = acceptance despite doubt)
+  if (/\b(ama|ама|sepak|сепак|no|но)\b/i.test(lower) && !/probame|пробаме|da probame|да пробаме/i.test(lower)) return true;
+  return false;
+}
+
 // ========================================
 // Parse conversation context from the conversation string
 // Extracts last N messages, returning Ana's last message and user's last message
@@ -106,6 +137,46 @@ export function classifyIntent(userInput, conversation) {
   // ==========================================
   // 2. ACCEPTED — explicit yes/agreement
   // ==========================================
+
+  // FIRST: Check for doubt signals in ACCEPTED-like messages
+  // If the message matches an acceptance pattern but also has doubt
+  // signals (questions, concerns), downgrade to INTERESTED.
+  const hasDoubt = hasAcceptanceDoubt(u);
+
+  // "ајде да пробаме" — strongest acceptance (0.98)
+  // Uses .{0,15} proximity to require the words within 15 chars.
+  // This prevents matching unrelated "ajde" and "probame" far apart.
+  if (/ajde.{0,15}probame|ајде.{0,15}пробаме/i.test(u) && !(/(ne|не)/i.test(u)) && !hasDoubt) {
+    return { intent: "ACCEPTED", confidence: 0.98, reason: "ajde da probame" };
+  }
+
+  // "може да пробаме" — very strong acceptance (0.95)
+  if (/(moze|може)\s*da\s*(probame|пробаме)/i.test(u) && !hasDoubt) {
+    return { intent: "ACCEPTED", confidence: 0.95, reason: "moze da probame" };
+  }
+
+  // "да пробаме" — very strong acceptance (0.95)
+  // NOTE: Must use (?:probame|пробаме) non-capturing group to avoid
+  // pipe precedence issue where |пробаме matches "пробаме" anywhere.
+  if (/^(da|да)\s+.*(?:probame|пробаме)/i.test(u) && !hasDoubt) {
+    return { intent: "ACCEPTED", confidence: 0.95, reason: "da probame" };
+  }
+
+  // "важи" — strong acceptance (0.90)
+  if (/^(vazhi|važi|важи)$/i.test(u) && !hasDoubt) {
+    return { intent: "ACCEPTED", confidence: 0.90, reason: "vazhi" };
+  }
+
+  // "почнуваме" — strong acceptance (0.90)
+  if (/(pochnuvame|počnuvame|почнуваме)$/i.test(u) && !/(ne|не)/i.test(u) && !hasDoubt) {
+    return { intent: "ACCEPTED", confidence: 0.90, reason: "pochnuvame" };
+  }
+
+  // "договорено" — strong acceptance (0.95)
+  if (/dogovoreno|договорено/i.test(u) && !hasDoubt) {
+    return { intent: "ACCEPTED", confidence: 0.95, reason: "dogovoreno" };
+  }
+
   if (/^(da|да)$/i.test(u)) {
     // CONTEXT RULE C: Previous hesitation → downgrade standalone "da" to INTERESTED
     const hasPreviousHesitation = ctx.previousUserMessages.some(msg =>
@@ -114,8 +185,14 @@ export function classifyIntent(userInput, conversation) {
     if (hasPreviousHesitation) {
       return { intent: "INTERESTED", confidence: 0.6, reason: "standalone da with context: previous hesitation" };
     }
-    return { intent: "ACCEPTED", confidence: 0.95, reason: "standalone da" };
+    return { intent: "ACCEPTED", confidence: 0.60, reason: "standalone da — low confidence" };
   }
+
+  // "може" standalone — weak acceptance (0.65)
+  if (/^(moze|може)$/i.test(u) && !hasDoubt) {
+    return { intent: "ACCEPTED", confidence: 0.65, reason: "moze — low confidence cooperation" };
+  }
+
   // COMPREHENSIVE GUARD: affirmative start + objection/concern/question → INTERESTED (not ACCEPTED)
   if (/^(da|да|ajde|ајде|moze|може|dobro|добро)([,.\s]|$)/i.test(u) &&
       /(\?|a\s+(sto|што|kako|како|dali|дали|koj|кој|koga|кога|kolku|колку|zosto|зошто|kakov|каков|kakva|каква|kakvo|какво|kakvi|какви)|ama|ама|sepak|сепак|mislam|мислам|dali|дали|mozebi|можеби|druga|друга|vekje|веќе|ke vidime|ќе видиме|da vidime|да видиме|ne sum|не сум|ne znam|не знам|ke razmislam|ќе размислам|razmisluvam|размислувам|ne rabotel|не работел|nemam iskustvo|немам искуство|ne sum siguren|не сум сигурен|ke prasam|ќе прашам|ke se javam|ќе се јавам|da se javam|да се јавам|da prasam|да прашам|ne sum rabotil|не сум работел|ne rabotila|не работела|nemam raboteno|немам работено|imam\s+dogovor|имам\s+договор|sto\s+ke|што\s+ќе|kako\s+ke|како\s+ќе|se\s+mislam|се\s+мислам|treba\s+da|треба\s+da|prvo|прво|samo\s+|само\s+)/i.test(u)) {
@@ -133,19 +210,19 @@ export function classifyIntent(userInput, conversation) {
     return { intent: "INTERESTED", confidence: 0.7, reason: "da moze — conversation continuation, not cooperation" };
   }
   // NOTE: "moze"/"може" is intentionally excluded from the affirmative-start pattern.
-  // "moze" alone means "may" or "okay" — permission, not commitment.
-  // Including it causes false positives (e.g., "moze" → cooperation accepted).
-  if (/^(da|да|ajde|ајде|dobro|добро)([,.\s]|$)/i.test(u)) return { intent: "ACCEPTED", confidence: 0.9, reason: "affirmative start" };
-  if (/(ajde|ајде)/i.test(u) && !/(ne|не)/i.test(u)) return { intent: "ACCEPTED", confidence: 0.9, reason: "ajde" };
-  if (/(probame|пробаме)/i.test(u)) return { intent: "ACCEPTED", confidence: 0.9, reason: "probame" };
-  if (/(sorabotuvame|соработуваме|sorabotuvam|соработувам)/i.test(u)) return { intent: "ACCEPTED", confidence: 0.95, reason: "sorabotuvame" };
-  if (/vo\s*(red|ред)/i.test(u)) return { intent: "ACCEPTED", confidence: 0.9, reason: "vo red" };
-  if (/se\s*(soglasuvam|согласувам)/i.test(u)) return { intent: "ACCEPTED", confidence: 0.95, reason: "se soglasuvam" };
-  if (/(prifakjam|прифаќам)/i.test(u)) return { intent: "ACCEPTED", confidence: 0.95, reason: "prifakjam" };
-  if (/(zosto|зошто)\s*da\s*(ne|не)/i.test(u)) return { intent: "ACCEPTED", confidence: 0.9, reason: "zosto da ne" };
-  if (/(ako|ако)\s*(e|е)\s*(taka|така)/i.test(u) && /(moze|може)/i.test(u)) return { intent: "ACCEPTED", confidence: 0.85, reason: "ako e taka moze" };
-  if (/(ke|ќе)\s*(probam|пробам)/i.test(u)) return { intent: "ACCEPTED", confidence: 0.85, reason: "ke probam" };
-  if (/(dogovor|договор)/i.test(u)) return { intent: "ACCEPTED", confidence: 0.9, reason: "dogovor" };
+  // "moze" alone means "may" or "okay" — permission, not commitment (handled above as 0.65).
+  // Including it causes false positives (e.g., "moze" → cooperation accepted at 0.9).
+  if (/^(da|да|ajde|ајде|dobro|добро)([,.\s]|$)/i.test(u) && !hasDoubt) return { intent: "ACCEPTED", confidence: 0.9, reason: "affirmative start" };
+  if (/(ajde|ајде)/i.test(u) && !/(ne|не)/i.test(u) && !hasDoubt) return { intent: "ACCEPTED", confidence: 0.9, reason: "ajde" };
+  if (/(probame|пробаме)/i.test(u) && !hasDoubt) return { intent: "ACCEPTED", confidence: 0.9, reason: "probame" };
+  if (/(sorabotuvame|соработуваме|sorabotuvam|соработувам)/i.test(u) && !hasDoubt) return { intent: "ACCEPTED", confidence: 0.95, reason: "sorabotuvame" };
+  if (/vo\s*(red|ред)/i.test(u) && !hasDoubt) return { intent: "ACCEPTED", confidence: 0.9, reason: "vo red" };
+  if (/se\s*(soglasuvam|согласувам)/i.test(u) && !hasDoubt) return { intent: "ACCEPTED", confidence: 0.95, reason: "se soglasuvam" };
+  if (/(prifakjam|прифаќам)/i.test(u) && !hasDoubt) return { intent: "ACCEPTED", confidence: 0.95, reason: "prifakjam" };
+  if (/(zosto|зошто)\s*da\s*(ne|не)/i.test(u) && !hasDoubt) return { intent: "ACCEPTED", confidence: 0.9, reason: "zosto da ne" };
+  if (/(ako|ако)\s*(e|е)\s*(taka|така)/i.test(u) && /(moze|може)/i.test(u) && !hasDoubt) return { intent: "ACCEPTED", confidence: 0.85, reason: "ako e taka moze" };
+  if (/(ke|ќе)\s*(probam|пробам)/i.test(u) && !hasDoubt) return { intent: "ACCEPTED", confidence: 0.85, reason: "ke probam" };
+  if (/(dogovor|договор)/i.test(u) && !hasDoubt) return { intent: "ACCEPTED", confidence: 0.9, reason: "dogovor" };
 
   // ==========================================
   // 3. INTERESTED — questions, uncertainty, engagement
@@ -167,7 +244,7 @@ export function classifyIntent(userInput, conversation) {
   if (/(sepak|сепак)/i.test(u) && !/(ama|ама)/i.test(u)) return { intent: "INTERESTED", confidence: 0.6, reason: "sepak" };
   if (/(da|да)\s*(vidime|видиме)/i.test(u)) return { intent: "INTERESTED", confidence: 0.7, reason: "da vidime" };
   if (/(interesno|интересно)/i.test(u)) return { intent: "INTERESTED", confidence: 0.75, reason: "interesno" };
-  if (/(moze|може)\s*da\s*(probame|пробаме)/i.test(u)) return { intent: "INTERESTED", confidence: 0.7, reason: "moze da probame" };
+  // NOTE: moze da probame is handled earlier in the ACCEPTED section (0.95).
   if (/(ne|не)\s*(veruvam|верувам)/i.test(u)) return { intent: "INTERESTED", confidence: 0.6, reason: "ne veruvam" };
   if (/(nemam|немам)\s*(doverba|доверба)/i.test(u)) return { intent: "INTERESTED", confidence: 0.6, reason: "nemam doverba" };
 
