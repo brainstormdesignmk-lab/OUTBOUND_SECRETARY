@@ -337,7 +337,8 @@ export function countBedrooms(text) {
     const hasOrdinalContext = /(tret|трет|vtor|втор|prv|прв|cetvrt|четврт|petti|петти|sesti|шести|sedmi|седми|osmi|осми|devetti|деветти)\s*(kat|кат|sprat|спрат)/i.test(u);
     if (hasOrdinalContext) return null;
     // Skip if message contains terrace or question context (answering terrace/other follow-up)
-    if (/terasa|тераса|zosto|зошто|zasto|зашто/i.test(u)) return null;
+    // Uses |teras|терас to match ALL inflected forms (terasa, terasi, terase, etc.)
+    if (/terasa|тераса|teras|терас|zosto|зошто|zasto|зашто/i.test(u)) return null;
     // Skip if message contains year/decade context — "osumdesti" (1980s) should
     // NOT be interpreted as 8 bedrooms. "osum" is a substring of "osumdesti"
     // and parseMacedonianNumber would return 8, but the context is year/decade.
@@ -548,35 +549,51 @@ export function extractTerraceNumber(text) {
       return null;
     };
 
-    // Find ALL numbers in the text and pick the CLOSEST one to "terasa"
-    // by word-distance. This is better than the old backwards-first search
-    // because it handles cases like:
-    //   "vkupno ima 68 kvadrati i terasa so 4" → "cetiri" (4) at distance 2
-    //   is closer than "seesetiosum" (68) at distance 3.
-    let bestValue = null;
-    let bestDistance = Infinity;
+    // PRIORITY 1: Check for a number RIGHT AFTER the terrace word.
+    // e.g., "terasi 5", "terasa 5m2", "terase 4" — the clearest signal.
+    if (terasaWordIdx + 1 < words.length) {
+      const nextResult = extractWordNumber(words[terasaWordIdx + 1]);
+      if (nextResult !== null) return nextResult;
+    }
+
+    // PRIORITY 2: Find ALL numbers, prefer those with "kvadrati" context
+    // between the number and the terrace word. This handles:
+    //   "5 kvadrati se terasi" → 5 (number before terasi with sqm in between)
+    //   "68 kvadrati i terasa 4" → 4 (number after terasi, already caught by
+    //        Priority 1 but falls through to here for edge cases)
+    // Bare trailing numbers like "2" in "ima 2" after terasi are NOT preferred.
+    let bestWithContext = null;
+    let bestContextDistance = Infinity;
+    let bestBare = null;
+    let bestBareDistance = Infinity;
 
     for (let i = 0; i < words.length; i++) {
-      if (i === terasaWordIdx) continue; // skip the word "terasa" itself
+      if (i === terasaWordIdx) continue;
       const result = extractWordNumber(words[i]);
       if (result !== null) {
         const distance = Math.abs(i - terasaWordIdx);
-        if (distance < bestDistance) {
-          bestDistance = distance;
-          bestValue = result;
-        } else if (distance === bestDistance && i > terasaWordIdx) {
-          // Same distance: prefer the number AFTER terasa over before.
-          // Before-terasa numbers are more likely to be totalSqm ("68" before
-          // "terasa" in "68 kvadrati i terasa 4"), while after-terasa numbers
-          // are typically the terrace size ("4" after "terasa").
-          bestValue = result;
+        // Check if there's a "kvadrati" word between this number and terasa
+        const start = Math.min(i, terasaWordIdx);
+        const end = Math.max(i, terasaWordIdx);
+        const hasSqmBetween = words.slice(start, end).some(w =>
+          /kvadrati|квадрати|kvadrata|квадрата|m2|м2|kv|кв|sqm/i.test(w)
+        );
+        if (hasSqmBetween && distance < bestContextDistance) {
+          bestContextDistance = distance;
+          bestWithContext = result;
+        } else if (!hasSqmBetween && distance < bestBareDistance) {
+          bestBareDistance = distance;
+          bestBare = result;
         }
       }
     }
 
-    if (bestValue !== null) return bestValue;
+    // Prefer context-enhanced number over bare trailing number
+    if (bestWithContext !== null) return bestWithContext;
+    // Only accept bare numbers within 2 words of terasa (e.g., "terasa 4")
+    if (bestBare !== null && bestBareDistance <= 2) return bestBare;
 
-    // "terasa" found but NO number near it — return null instead of guessing
+    // No good number found near terrace — return null instead of guessing
     return null;
   }
 
@@ -632,12 +649,17 @@ export function parseYearBuilt(text) {
   if (/2000ti|2000 ти|двеилјадити/i.test(text)) return 2005;
   if (/2000ta|2000 та|двеилјадита/i.test(text)) return 2000;
 
-  if (/deveeset|девеесет|90|деведесет/i.test(text)) {
+  // Word boundary BOTH before AND after to prevent matching "deveeset"
+  // inside "deveesetitri" (93). The dual `\b` requires the decade word
+  // to be standalone — not part of a compound number.
+  if (/\bdeveeset\b|\bдевеесет\b|\b90\b|\bдеведесет\b/i.test(text)) {
     if (/nekoja|некоја|nekoi|некои|неколку|некое|nekoe/i.test(text)) return 1995;
     return 1990;
   }
 
-  if (/osemdeset|осумдесет|80/i.test(text)) {
+  // Same dual word-boundary fix for 80s: prevent matching "osemdeset" inside
+  // "osemdeseti" or other compound forms.
+  if (/\bosemdeset\b|\bосумдесет\b|\b80\b/i.test(text)) {
     if (/nekoja|некоја|nekoi|некои|неколку|некое|nekoe/i.test(text)) return 1985;
     return 1980;
   }
