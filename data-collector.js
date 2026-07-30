@@ -165,8 +165,11 @@ function extractFloor(u, data) {
   // Ordinal floors (прв, втор, трет, петти, etc.)
   const ordinal = parseOrdinalFloor(u);
   if (ordinal !== null) return { floor: ordinal };
-  // Digit floor — find number adjacent to floor context words
-  const floorMatch = u.match(/(\d{1,2})\s*(kat|кат|sprat|спрат|floor|ката|sprata|спрата)/i);
+  // Digit floor — find number adjacent to floor context words.
+  // Uses (?!nica) negative lookahead to prevent "kat" from matching
+  // "katnica" ("kat" + "nica") while still allowing "kat" standalone,
+  // "kata", "3kat" (no space, common in Viber shorthand), etc.
+  const floorMatch = u.match(/(\d{1,2})\s*(kat(?!nica)|кат(?!ница)|kata|ката|sprat|спрат|sprata|спрата|floor)/i);
   if (floorMatch) {
     const num = parseInt(floorMatch[1]);
     if (num >= 0 && num <= 50) return { floor: num };
@@ -175,7 +178,9 @@ function extractFloor(u, data) {
   // (e.g., "2 spalni" → number 2 is about bedrooms, not floor).
   // ALSO: require floor-context words for bare number fallback (no fallback guessing).
   // "10" without "kat", "sprat", etc. has 0% confidence → return null.
-  const hasFloorContext = /kat|кат|sprat|спрат|floor|sprata|спрата|kata|ката|eta|ета/i.test(u);
+  // Uses (?!nica) negative lookahead to prevent "kat" from matching
+  // "katnica" while still allowing "3kat" (no space, common in Viber).
+  const hasFloorContext = /kat(?!nica)|кат(?!ница)|sprat|спрат|floor|sprata|спрата|kata|ката|eta|ета/i.test(u);
   const firstNum = extractFirstNumber(u);
   if (firstNum !== null && firstNum >= 0 && firstNum <= 50 && hasFloorContext) {
     // Skip if the message contains context from another field
@@ -662,9 +667,52 @@ function runGlobalExtraction(u, currentData, preferredField) {
     // Unknown preferredField — also fall through to STEP 2
   }
 
+  // ========================================
+  // EARLY RETURN FOR DIRECT ANSWERS
+  // When preferredField was set AND STEP 1 extracted a value for it,
+  // check if the message contains volunteered-content indicators for
+  // OTHER fields (not in the current question's group). If the message
+  // is a direct answer (no commas, no "и"/"i", no strong keywords for
+  // other property features), skip STEP 2 entirely.
+  //
+  // This prevents unrelated extractors from grabbing the same number
+  // for different fields — e.g., "10 katnica" → totalFloors=10 from
+  // STEP 1, but extractFloor finds "kat" in "katnica" via its digit+kat
+  // regex and assigns floor=10. With this guard, "10 katnica" skips
+  // STEP 2 because no volunteered-content indicators are detected.
+  // ========================================
+  if (preferredField && FIELD_TO_EXTRACTOR[preferredField]) {
+    const groupFields = getGroupFields(preferredField);
+    let step1Found = false;
+    for (const field of groupFields) {
+      if (field in updates) {
+        step1Found = true;
+        break;
+      }
+    }
+    if (step1Found) {
+      // Check for indicators that the user is volunteering information
+      // for OTHER fields (not the current question):
+      //   - Commas/semicolons: "65 m2, 3 kat, ima lift"
+      //   - "и"/"i" (and) separator: "65 m2 i terasa od 3"
+      //   - Strong keywords for other property features: "lift" (elevator),
+      //     "terasa" (terrace), "klima" (AC), "parking", "spalni" (bedrooms),
+      //     "foto" (photos), etc.
+      //
+      // If NONE of these are present, the user is simply answering the
+      // current question — no need to volunteer scanning.
+      const hasVolunteerContent = /[,;]|\s+i\s+|\s+и\s+|lift|лифт|elevator|klima|клима|inverter|terasa|тераса|terrace|parking|паркинг|garaz|гараж|spaln|спалн|detsk|детск|gostinsk|гостинск|soba|соба|sobi|соби|foto|фото|slik|слик|viber|вајбер|renov|ренов|izgraden|граден|godina|година|advokat|адвокат|notar|нотар|danok|данок/i.test(u);
+      if (!hasVolunteerContent) {
+        console.log(`[EARLY RETURN: direct answer for ${preferredField} — no volunteered content detected]`);
+        return updates;
+      }
+    }
+  }
+
   // STEP 2: Bonus extraction pass — scan for ADDITIONAL property facts.
   // Reached after the group-restricted pass (if preferredField was set)
   // OR directly when preferredField was not set (full discovery mode).
+  // OR when preferredField was found BUT the message shows volunteer content.
   //
   // This pass runs ALL extractors BUT with safety guards:
   // - Bare numbers (no strong keywords) skip NUMBER_SNIFFING_EXTRACTORS
