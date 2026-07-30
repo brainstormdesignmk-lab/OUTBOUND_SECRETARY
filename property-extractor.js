@@ -610,7 +610,7 @@ export function parseYearBuilt(text) {
     if (year >= 70 && year <= 99) return 1900 + year;
   }
 
-  if (/80ti|80 ти|80-ти|80ти|осумдесетти|80-i|80i|осамдесетти/i.test(text)) return 1985;
+  if (/80ti|80 ти|80-ти|80ти|осумдесетти|80-i|80i|осамдесетти|osumdesti|osumdesetti/i.test(text)) return 1985;
   if (/80ta|80 та|80та|1980-ти|1980ти|осумдесетта|80-ta/i.test(text)) return 1980;
   if (/90ti|90 ти|90-ти|90ти|деведесетти|90-i|90i|деведесетти/i.test(text)) return 1995;
   if (/90ta|90 та|90та|1990-ти|1990ти|деведесетта|90-ta/i.test(text)) return 1990;
