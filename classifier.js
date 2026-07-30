@@ -132,10 +132,13 @@ export function classifyIntent(userInput, conversation) {
   if (/^(da|да)\s*[,.]?\s*moze(?:те|\s|$)/i.test(u)) {
     return { intent: "INTERESTED", confidence: 0.7, reason: "da moze — conversation continuation, not cooperation" };
   }
-  if (/^(da|да|ajde|ајде|moze|може|dobro|добро)([,.\s]|$)/i.test(u)) return { intent: "ACCEPTED", confidence: 0.9, reason: "affirmative start" };
+  // NOTE: "moze"/"може" is intentionally excluded from the affirmative-start pattern.
+  // "moze" alone means "may" or "okay" — permission, not commitment.
+  // Including it causes false positives (e.g., "moze" → cooperation accepted).
+  if (/^(da|да|ajde|ајде|dobro|добро)([,.\s]|$)/i.test(u)) return { intent: "ACCEPTED", confidence: 0.9, reason: "affirmative start" };
   if (/(ajde|ајде)/i.test(u) && !/(ne|не)/i.test(u)) return { intent: "ACCEPTED", confidence: 0.9, reason: "ajde" };
   if (/(probame|пробаме)/i.test(u)) return { intent: "ACCEPTED", confidence: 0.9, reason: "probame" };
-  if (/(sorabotuvame|соработуваме)/i.test(u)) return { intent: "ACCEPTED", confidence: 0.95, reason: "sorabotuvame" };
+  if (/(sorabotuvame|соработуваме|sorabotuvam|соработувам)/i.test(u)) return { intent: "ACCEPTED", confidence: 0.95, reason: "sorabotuvame" };
   if (/vo\s*(red|ред)/i.test(u)) return { intent: "ACCEPTED", confidence: 0.9, reason: "vo red" };
   if (/se\s*(soglasuvam|согласувам)/i.test(u)) return { intent: "ACCEPTED", confidence: 0.95, reason: "se soglasuvam" };
   if (/(prifakjam|прифаќам)/i.test(u)) return { intent: "ACCEPTED", confidence: 0.95, reason: "prifakjam" };
