@@ -78,7 +78,7 @@ function extractBedrooms(u, data) {
 // Runs BEFORE individual floor/totalFloors extraction to capture compound
 // answers in a single turn and skip the totalFloors question entirely.
 // ========================================
-function extractCompoundFloor(u) {
+function extractCompoundFloor(u, data) {
   // Pattern 1: "na 8 od 10" or "8 od 10" — digit "od" digit
   const digitOdMatch = u.match(/(?:na\s+)?(\d{1,2})\s+od\s+(\d{1,3})/i);
   if (digitOdMatch) {
@@ -397,6 +397,7 @@ const EXTRACTION_RULES = [
   extractMonthlyRent,
   extractTotalSqm,
   extractBedrooms,
+  extractCompoundFloor,  // Standalone — NOT in NUMBER_SNIFFING so it runs even for bare numbers
   extractFloor,
   extractTotalFloors,
   extractElevator,
