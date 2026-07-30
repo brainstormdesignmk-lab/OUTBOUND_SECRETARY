@@ -487,6 +487,16 @@ function assessConfidence(field, value, input) {
     return 'HIGH';
   }
 
+  // Compound floor patterns ("na 6 od 12", "osmi od deset", "8/10") are
+  // extracted by a highly-specific regex (extractCompoundFloor). Even though
+  // the message may lack "kat"/"sprat" keywords, the compound structure
+  // (digit/bare "od" digit/bare, ordinal "od" word, digit/bare "/" digit/bare)
+  // uniquely identifies it as a floor answer. No confirmation needed.
+  const hasCompoundFloor = /\d{1,2}\s+od\s+\d{1,3}|\w+\s+od\s+\w+|\d{1,2}\s*\/\s*\d{1,2}/i.test(input);
+  if (hasCompoundFloor && (field === 'floor' || field === 'totalFloors')) {
+    return 'HIGH';
+  }
+
   // Numeric-or-string field without uncertainty but also without strong
   // field-specific keywords — might be a volunteered bare number.
   // Example: "pedeset" without "kvadrati" → MEDIUM, not LOW.
