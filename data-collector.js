@@ -320,6 +320,23 @@ function extractRenovated(u, data) {
   if (renovYearBefore) {
     return { renovated: true, renovationYear: parseInt(renovYearBefore[1]) };
   }
+  // "pred X godini" / "пред X години" — year-from-age pattern.
+  // Runs BEFORE bare-keyword match to catch "renoviran pred 3 godini" → year=2023.
+  // If this matches with a renovation keyword present, extract both renovated and year.
+  // Requires "godini"/"години" context to prevent false positives like
+  // "parking pred zgrada" (parking in front of building).
+  if (/pred\s+\d+\s+godini|пред\s+\d+\s+години|pred\s+\d+\s+god|пред\s+\d+\s+год|pri\s+\d+\s+godini|при\s+\d+\s+години|pri\s+\d+\s+god|при\s+\d+\s+год/i.test(u)) {
+    const years = u.match(/\d+/);
+    if (years) {
+      const currentYear = new Date().getFullYear();
+      return { renovated: true, renovationYear: currentYear - parseInt(years[0]) };
+    }
+    const wordNum = parseMacedonianNumber(u);
+    if (wordNum !== null && wordNum >= 1 && wordNum <= 100) {
+      const currentYear = new Date().getFullYear();
+      return { renovated: true, renovationYear: currentYear - wordNum };
+    }
+  }
   // Renovation-specific words (no year) — just "renoviran" means yes, year unknown.
   // NOTE: "pre"/"пред" is intentionally excluded — it matches "pred zgrada" (in front
   // of the building) as a false positive. "novo"/"нов" is also excluded — "nova zgrada"
@@ -341,21 +358,6 @@ function extractRenovated(u, data) {
   }
   if (/2000ti|2000 ти|двеилјадити/i.test(u) && /renoviran|реновиран|obnoven|обновен/i.test(u)) {
     return { renovated: true, renovationYear: 2005 };
-  }
-  // "pred X godini" / "пред X години" — year-from-age pattern.
-  // Requires "godini"/"години" context to prevent false positives like
-  // "parking pred zgrada" (parking in front of building).
-  if (/pred\s+\d+\s+godini|пред\s+\d+\s+години|pred\s+\d+\s+god|пред\s+\d+\s+год|pri\s+\d+\s+godini|при\s+\d+\s+години|pri\s+\d+\s+god|при\s+\d+\s+год/i.test(u)) {
-    const years = u.match(/\d+/);
-    if (years) {
-      const currentYear = new Date().getFullYear();
-      return { renovated: true, renovationYear: currentYear - parseInt(years[0]) };
-    }
-    const wordNum = parseMacedonianNumber(u);
-    if (wordNum !== null && wordNum >= 1 && wordNum <= 100) {
-      const currentYear = new Date().getFullYear();
-      return { renovated: true, renovationYear: currentYear - wordNum };
-    }
   }
   return null;
 }
@@ -530,21 +532,47 @@ function extractTerrace(u, data) {
   if (data.terraceSqm !== undefined && data.terraceSqm !== null) return null;
   // Require terrace-specific context
   if (!/terasa|тераса|terrace/i.test(u)) return null;
-  // Match number after terrace word: "terasa od 3 m2" → cap 1 = "3"
+
+  // PRIORITY 1: Bare number RIGHT AFTER terrace word (no "m2/kvadrati" suffix needed).
+  // Handles "terasa 4", "terasa od 4", "terasa so 4" — VERY common in Viber messages
+  // where the user doesn't add units for the terrace size.
+  // The number nearest to "terasa" is almost certainly the terrace size, not the totalSqm.
+  // This runs BEFORE terraceBefore to prevent the regex from matching "68 kvadrati"
+  // (the totalSqm) when the terrace size is a bare number right after "terasa".
+  const terraceBare = u.match(/(?:terasa|тераса)(?:\s+(?:od|so|од|со))?\s+(\d{1,4})(?:\s|$)/i);
+  if (terraceBare) {
+    const num = parseInt(terraceBare[1]);
+    if (num >= 1 && num <= 500) return { hasTerrace: true, terraceSqm: num };
+  }
+  // Try word number after terrace: "terasa so cetiri" → 4, "terasa od tri" → 3
+  const terraceWordBare = u.match(/(?:terasa|тераса)(?:\s+(?:od|so|од|со))?\s+(\S+)\s*$/i);
+  if (terraceWordBare) {
+    const wordNum = parseMacedonianNumber(terraceWordBare[1]);
+    if (wordNum !== null && wordNum >= 1 && wordNum <= 500) {
+      return { hasTerrace: true, terraceSqm: wordNum };
+    }
+  }
+
+  // PRIORITY 2: Number AFTER terrace with units: "terasa od 3 m2", "terasa 4 m2"
   // Uses non-capturing group (?:terasa|тераса) to scope alternation properly
   const terraceMatch = u.match(/(?:terasa|тераса).{0,20}?(\d{1,4})\s*(kvadrata|kvadrati|m2|м2|kv|кв|sqm)/i);
   if (terraceMatch) {
     const num = parseInt(terraceMatch[1]);
     if (num >= 1 && num <= 500) return { hasTerrace: true, terraceSqm: num };
   }
-  // Also try number-before-terrace: "3 m2 terasa"
-  // Uses (?:terasa|тераса) to scope alternation and ensures the extracted
-  // number is the one NEAREST to "terasa", not the first number in the message.
+
+  // PRIORITY 3: Number BEFORE terrace: "3 m2 terasa"
+  // Uses (?:terasa|тераса) to scope alternation. Note: this can falsely match
+  // "68 kvadrati ... terasa" where 68 is the totalSqm, not the terrace size.
+  // Priority 1 (terraceBare) and Priority 2 (terraceMatch) handle the common
+  // cases where the terrace number is AFTER "terasa", so this fallback only
+  // fires for the "3 m2 terasa" word order.
   const terraceBefore = u.match(/(\d{1,4})\s*(kvadrata|kvadrati|m2|м2|kv|кв|sqm).{0,20}?(?:terasa|тераса)/i);
   if (terraceBefore) {
     const num = parseInt(terraceBefore[1]);
     if (num >= 1 && num <= 500) return { hasTerrace: true, terraceSqm: num };
   }
+
   return null; // No number near terrace — leave follow-up to service.js
 }
 
@@ -727,7 +755,7 @@ function runGlobalExtraction(u, currentData, preferredField) {
   //
   // Essential for catching volunteered info (terrace, orientation, parking)
   // that the user adds to their answer for the current question.
-  const hasStrongKeywords = /spaln|спалн|detsk|детск|gostinsk|гостинск|golem|голем|mala|мала|soba|соба|sobi|соби|kat|кат|sprat|спрат|katnica|катница|sprata|спрата|potkrovje|поткровје|prizemje|приземје|prv|прв|vtor|втор|tret|трет|cetvrt|четврт|m2|м2|kvadrati|квадрати|kv|кв|sqm|lift|лифт|elevator|klima|клима|inverter|инвертер|parking|паркинг|garaza|гаража|garage|гараж|terasa|тераса|terrace|namest|мебел|namestaj|мебел|opremen|опремен|izgraden|граден|godina|година|gradba|градба|renov|ренов|cist|чист|hipotek|хипотек|ostavinsk|оставинск|foto|фото|slik|слик|viber|вајбер|advokat|адвокат|notar|нотар|danok|данок|provizija|провизија|dogovor|договор|parno|парно|greene|греење|struja|струја|drva|дрва|pelet|пелет|nafta|нафта/i.test(u);
+  const hasStrongKeywords = /spaln|спалн|detsk|детск|gostinsk|гостинск|golem|голем|mala|мала|soba|соба|sobi|соби|bracn|брачн|brachn|pomal|помал|pogolem|поголем|kat|кат|sprat|спрат|katnica|катница|sprata|спрата|potkrovje|поткровје|prizemje|приземје|prv|прв|vtor|втор|tret|трет|cetvrt|четврт|m2|м2|kvadrati|квадрати|kv|кв|sqm|lift|лифт|elevator|klima|клима|inverter|инвертер|parking|паркинг|garaza|гаража|garage|гараж|terasa|тераса|terrace|namest|мебел|namestaj|мебел|opremen|опремен|izgraden|граден|godina|година|gradba|градба|renov|ренов|cist|чист|hipotek|хипотек|ostavinsk|оставинск|foto|фото|slik|слик|viber|вајбер|advokat|адвокат|notar|нотар|danok|данок|provizija|провизија|dogovor|договор|parno|парно|greene|греење|struja|струја|drva|дрва|pelet|пелет|nafta|нафта/i.test(u);
   const isBareNumber = !hasStrongKeywords &&
     // Short message (bare answer, not a multi-field sentence)
     u.length < 50 &&
@@ -772,7 +800,15 @@ function runGlobalExtraction(u, currentData, preferredField) {
       continue;
     }
     if (isBareNumber && rule.name === 'extractYearBuilt') {
-      continue;
+      // Allow year extraction even for bare numbers if the message has
+      // year-like patterns: 4-digit years (2015, 1985), decade refs (80ti),
+      // or year keywords (graden, godina). This handles "80ti" → yearBuilt
+      // and "2015ta e gradeno" which have clear year context but lack
+      // the sqm/floor/lift keywords that would make hasStrongKeywords=true.
+      const hasYearContext = /\b(?:19|20)\d{2}\b|\d{2}ti|\d{2}ти|\d{2}ta|\d{2}та|\d{4}ta|\d{4}та|imotna|имотан|godina|година|graden|граден|izgraden|изграден|star|стар/i.test(u);
+      if (!hasYearContext) {
+        continue;
+      }
     }
     // Skip if this field was already extracted by Step 1 (group pass)
     // Check rule's output name — for simple single-field extractors, we can

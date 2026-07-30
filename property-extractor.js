@@ -330,6 +330,7 @@ export function countBedrooms(text) {
   // Fallback: parse word number (e.g. 'dve spalni' → 2, 'tri' → 3)
   // BUT skip if the word number is actually an ordinal floor reference (tret kat, vtor sprat)
   // OR if the message is about a different field (terrace follow-up, question words)
+  // OR if the message has year/decade context ("osumdesti" → 1980s, not 8 bedrooms)
   const wordNum = parseMacedonianNumber(u);
   if (wordNum !== null && wordNum >= 0 && wordNum <= 10) {
     // Skip if the only number words are actually ordinal floor references
@@ -337,6 +338,10 @@ export function countBedrooms(text) {
     if (hasOrdinalContext) return null;
     // Skip if message contains terrace or question context (answering terrace/other follow-up)
     if (/terasa|тераса|zosto|зошто|zasto|зашто/i.test(u)) return null;
+    // Skip if message contains year/decade context — "osumdesti" (1980s) should
+    // NOT be interpreted as 8 bedrooms. "osum" is a substring of "osumdesti"
+    // and parseMacedonianNumber would return 8, but the context is year/decade.
+    if (/izgraden|граден|osumdesti|осумдесетти|osumdeset|осумдесет|godina|година|gradba|градба|graden|граден|pedesetti|педесетти|deveesetti|девеесетти|sedumdesetti|седумдесетти/i.test(u)) return null;
     return wordNum;
   }
   const firstNum = extractFirstNumber(u);
@@ -593,8 +598,16 @@ export function extractTerraceNumber(text) {
 // Parse year built
 // ========================================
 export function parseYearBuilt(text) {
+  // Try word-boundary year first: "2015 godina", "izgradena 2015", "2015 година"
+  // The \b ensures we match standalone year numbers, not part of a larger number.
   const exactYearMatch = text.match(/\b(19\d{2}|20\d{2})\b/);
   if (exactYearMatch) return parseInt(exactYearMatch[1]);
+  // Year with attached Macedonian suffix: "2015ta", "2015ти", "2015ti"
+  // The suffix is attached without a space, so \b doesn't find a word boundary.
+  // Runs AFTER the word-boundary check to prefer "2015 godina" over "2020ta"
+  // in messages like "2015 godina, renoviran 2020ta" where both are present.
+  const suffixYearMatch = text.match(/((?:19|20)\d{2})(?:ta|та|ти|ti|год|година)/i);
+  if (suffixYearMatch) return parseInt(suffixYearMatch[1]);
 
   // Skip 2-digit matches that are part of sqm/price context ('80 m2', '50 кв', '350 evra', '98 iljadi')
   // or floor/building-story context ('13 sprata', '10 katnica', '5 kat').
