@@ -90,6 +90,18 @@ result = runGlobalExtraction('3 m2 terasa', {});
 assert('3 m2 terasa → totalSqm=null or not set', () => !result.totalSqm || result.totalSqm === undefined);
 assert('3 m2 terasa → terraceSqm=3', result.terraceSqm === 3, `got ${result.terraceSqm}`);
 
+// Test "terasi" (inflected form — "se terasi" instead of "terasa")
+result = runGlobalExtraction('vkupno ima deveesetitri kvadrata a 5 kvadrati se terasi ima 2', {});
+assert('terasi: totalSqm=93', result.totalSqm === 93, `got ${result.totalSqm}`);
+assert('terasi: hasTerrace=true', result.hasTerrace === true, `got ${result.hasTerrace}`);
+assert('terasi: terraceSqm=5', result.terraceSqm === 5, `got ${result.terraceSqm}`);
+
+// Test "terase" (another inflected form)
+result = runGlobalExtraction('70 kvadrati so terase od 6 m2', {});
+assert('terase: totalSqm=70', result.totalSqm === 70, `got ${result.totalSqm}`);
+assert('terase: hasTerrace=true', result.hasTerrace === true, `got ${result.hasTerrace}`);
+assert('terase: terraceSqm=6', result.terraceSqm === 6, `got ${result.terraceSqm}`);
+
 // ========================================
 // TEST 4: Year built + renovation
 // ========================================

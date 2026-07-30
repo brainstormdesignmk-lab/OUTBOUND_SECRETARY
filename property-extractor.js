@@ -522,7 +522,7 @@ export function extractPrice(text) {
 // ========================================
 export function extractTerraceNumber(text) {
   const words = text.split(/\s+/);
-  const terasaWordIdx = words.findIndex(w => /terasa|тераса|terrace/i.test(w));
+  const terasaWordIdx = words.findIndex(w => /terasa|тераса|terasi|тераси|terase|терасе|terrace/i.test(w));
 
   if (terasaWordIdx !== -1) {
     // Helper to extract number from a single word.

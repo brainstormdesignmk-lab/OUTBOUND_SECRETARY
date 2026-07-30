@@ -451,7 +451,7 @@ const FIELD_CONFIDENCE_KEYWORDS = {
   'yearBuilt': /izgraden|граден|godina|година|gradba|градба|graden|граден|izgradba|изградба|zavrshen|завршен|star|стар/i,
   'monthlyRent': /kirija|кирија|mesecno|месечно/i,
   'orientation': /orientacija|ориентација|strana|страна|jug|север|istok|запад|zapad|sever|jugoistok|jugozapad|severoistok|severozapad|исток|југ|североисток|северозапад|југоисток|југозапад|pravec|правец/i,
-  'terraceSqm': /terasa|тераса|terrace|m2|м2|kvadrati|квадрати/i
+  'terraceSqm': /terasa|тераса|teras|терас|тераси|terrace|m2|м2|kvadrati|квадрати/i
 };
 
 // Binary fields that require explicit keyword match for HIGH confidence
@@ -531,21 +531,22 @@ function extractTerrace(u, data) {
   if (data.hasTerrace !== undefined && data.hasTerrace !== null) return null;
   if (data.terraceSqm !== undefined && data.terraceSqm !== null) return null;
   // Require terrace-specific context
-  if (!/terasa|тераса|terrace/i.test(u)) return null;
+  // Uses |teras|терас to match ALL inflected forms (terasa, terasi, terase, terasata, etc.)
+  if (!/terasa|тераса|terrace|teras|терас/i.test(u)) return null;
 
   // PRIORITY 1: Bare number RIGHT AFTER terrace word (no "m2/kvadrati" suffix needed).
-  // Handles "terasa 4", "terasa od 4", "terasa so 4" — VERY common in Viber messages
-  // where the user doesn't add units for the terrace size.
-  // The number nearest to "terasa" is almost certainly the terrace size, not the totalSqm.
+  // Handles "terasa 4", "terasa od 4", "terasa so 4", "terasi 5" — VERY common in Viber
+  // messages where the user doesn't add units for the terrace size.
+  // The number nearest to "terasa"/"terasi" is almost certainly the terrace size.
   // This runs BEFORE terraceBefore to prevent the regex from matching "68 kvadrati"
   // (the totalSqm) when the terrace size is a bare number right after "terasa".
-  const terraceBare = u.match(/(?:terasa|тераса)(?:\s+(?:od|so|од|со))?\s+(\d{1,4})(?:\s|$)/i);
+  const terraceBare = u.match(/(?:terasa|тераса|teras|терас)(?:\s+(?:od|so|од|со))?\s+(\d{1,4})(?:\s|$)/i);
   if (terraceBare) {
     const num = parseInt(terraceBare[1]);
     if (num >= 1 && num <= 500) return { hasTerrace: true, terraceSqm: num };
   }
   // Try word number after terrace: "terasa so cetiri" → 4, "terasa od tri" → 3
-  const terraceWordBare = u.match(/(?:terasa|тераса)(?:\s+(?:od|so|од|со))?\s+(\S+)\s*$/i);
+  const terraceWordBare = u.match(/(?:terasa|тераса|teras|терас)(?:\s+(?:od|so|од|со))?\s+(\S+)\s*$/i);
   if (terraceWordBare) {
     const wordNum = parseMacedonianNumber(terraceWordBare[1]);
     if (wordNum !== null && wordNum >= 1 && wordNum <= 500) {
@@ -555,7 +556,7 @@ function extractTerrace(u, data) {
 
   // PRIORITY 2: Number AFTER terrace with units: "terasa od 3 m2", "terasa 4 m2"
   // Uses non-capturing group (?:terasa|тераса) to scope alternation properly
-  const terraceMatch = u.match(/(?:terasa|тераса).{0,20}?(\d{1,4})\s*(kvadrata|kvadrati|m2|м2|kv|кв|sqm)/i);
+  const terraceMatch = u.match(/(?:terasa|тераса|teras|терас).{0,20}?(\d{1,4})\s*(kvadrata|kvadrati|m2|м2|kv|кв|sqm)/i);
   if (terraceMatch) {
     const num = parseInt(terraceMatch[1]);
     if (num >= 1 && num <= 500) return { hasTerrace: true, terraceSqm: num };
@@ -567,7 +568,7 @@ function extractTerrace(u, data) {
   // Priority 1 (terraceBare) and Priority 2 (terraceMatch) handle the common
   // cases where the terrace number is AFTER "terasa", so this fallback only
   // fires for the "3 m2 terasa" word order.
-  const terraceBefore = u.match(/(\d{1,4})\s*(kvadrata|kvadrati|m2|м2|kv|кв|sqm).{0,20}?(?:terasa|тераса)/i);
+  const terraceBefore = u.match(/(\d{1,4})\s*(kvadrata|kvadrati|m2|м2|kv|кв|sqm).{0,20}?(?:terasa|тераса|teras|терас)/i);
   if (terraceBefore) {
     const num = parseInt(terraceBefore[1]);
     if (num >= 1 && num <= 500) return { hasTerrace: true, terraceSqm: num };
@@ -734,7 +735,7 @@ function runGlobalExtraction(u, currentData, preferredField) {
       //   - Commas/semicolons: "65 m2, 3 kat, ima lift"
       //   - "и"/"i" (and) separator: "65 m2 i terasa od 3"
       //   - Strong keywords for other property features
-      const hasVolunteerContent = /[,;]|\s+i\s+|\s+и\s+|lift|лифт|elevator|klima|клима|inverter|terasa|тераса|terrace|parking|паркинг|garaz|гараж|spaln|спалн|detsk|детск|gostinsk|гостинск|soba|соба|sobi|соби|foto|фото|slik|слик|viber|вајбер|renov|ренов|izgraden|граден|godina|година|advokat|адвокат|notar|нотар|danok|данок/i.test(u);
+      const hasVolunteerContent = /[,;]|\s+i\s+|\s+и\s+|lift|лифт|elevator|klima|клима|inverter|terasa|тераса|terasi|тераси|terrace|parking|паркинг|garaz|гараж|spaln|спалн|detsk|детск|gostinsk|гостинск|soba|соба|sobi|соби|foto|фото|slik|слик|viber|вајбер|renov|ренов|izgraden|граден|godina|година|advokat|адвокат|notar|нотар|danok|данок/i.test(u);
       if (!hasVolunteerContent) {
         console.log(`[EARLY RETURN: direct answer for ${preferredField} — no volunteered content detected]`);
         return updates;
@@ -755,7 +756,7 @@ function runGlobalExtraction(u, currentData, preferredField) {
   //
   // Essential for catching volunteered info (terrace, orientation, parking)
   // that the user adds to their answer for the current question.
-  const hasStrongKeywords = /spaln|спалн|detsk|детск|gostinsk|гостинск|golem|голем|mala|мала|soba|соба|sobi|соби|bracn|брачн|brachn|pomal|помал|pogolem|поголем|kat|кат|sprat|спрат|katnica|катница|sprata|спрата|potkrovje|поткровје|prizemje|приземје|prv|прв|vtor|втор|tret|трет|cetvrt|четврт|m2|м2|kvadrati|квадрати|kv|кв|sqm|lift|лифт|elevator|klima|клима|inverter|инвертер|parking|паркинг|garaza|гаража|garage|гараж|terasa|тераса|terrace|namest|мебел|namestaj|мебел|opremen|опремен|izgraden|граден|godina|година|gradba|градба|renov|ренов|cist|чист|hipotek|хипотек|ostavinsk|оставинск|foto|фото|slik|слик|viber|вајбер|advokat|адвокат|notar|нотар|danok|данок|provizija|провизија|dogovor|договор|parno|парно|greene|греење|struja|струја|drva|дрва|pelet|пелет|nafta|нафта/i.test(u);
+  const hasStrongKeywords = /spaln|спалн|detsk|детск|gostinsk|гостинск|golem|голем|mala|мала|soba|соба|sobi|соби|bracn|брачн|brachn|pomal|помал|pogolem|поголем|kat|кат|sprat|спрат|katnica|катница|sprata|спрата|potkrovje|поткровје|prizemje|приземје|prv|прв|vtor|втор|tret|трет|cetvrt|четврт|m2|м2|kvadrati|квадрати|kv|кв|sqm|lift|лифт|elevator|klima|клима|inverter|инвертер|parking|паркинг|garaza|гаража|garage|гараж|terasa|тераса|terasi|тераси|terrace|namest|мебел|namestaj|мебел|opremen|опремен|izgraden|граден|godina|година|gradba|градба|renov|ренов|cist|чист|hipotek|хипотек|ostavinsk|оставинск|foto|фото|slik|слик|viber|вајбер|advokat|адвокат|notar|нотар|danok|данок|provizija|провизија|dogovor|договор|parno|парно|greene|греење|struja|струја|drva|дрва|pelet|пелет|nafta|нафта/i.test(u);
   const isBareNumber = !hasStrongKeywords &&
     // Short message (bare answer, not a multi-field sentence)
     u.length < 50 &&
