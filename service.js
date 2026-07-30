@@ -43,7 +43,7 @@ import {
 } from './objections.js';
 
 // Global extraction pass
-import { runGlobalExtraction, assessConfidence } from './data-collector.js';
+import { runGlobalExtraction, assessConfidence, scanHistoryForField } from './data-collector.js';
 
 // Persuasion phase (prompt builder + response post-processor)
 import { buildPersuasionContext, buildPersuasionPrompt, postProcessPersuasionResponse } from './persuasion.js';
@@ -904,6 +904,36 @@ if (/kako bi sorabotuvale|како би соработувале|како да �
     if (phase === "DATA_COLLECTION") {
       const known = { ...session.adMemory, ...session.collectedData };
       nextField = getNextMissingField(known);
+
+      // ========================================
+      // PRE-QUESTION HISTORY SCAN
+      // Before asking, search ALL previous user messages for the current
+      // nextField. If found with HIGH confidence, store it and re-check
+      // what's missing. This prevents asking the same question twice when
+      // the user already volunteered the information in an earlier message
+      // (e.g., "na osmi od deset" → floor=8 AND totalFloors=10 during
+      // persuasion, or volunteered details like "65 m2 so terasa od 3 m2").
+      // ========================================
+      if (nextField) {
+        const historyResult = scanHistoryForField(nextField, session.messages, session.collectedData);
+        if (historyResult && Object.keys(historyResult).length > 0) {
+          let stored = false;
+          for (const [key, value] of Object.entries(historyResult)) {
+            const existing = session.collectedData[key];
+            if (existing === undefined || existing === null) {
+              session.collectedData[key] = value;
+              stored = true;
+              console.log(`[HISTORY SCAN STORED: ${key} = ${JSON.stringify(value)}]`);
+            }
+          }
+          if (stored) {
+            // Re-check what's missing — nextField may have changed
+            const updatedKnown = { ...session.adMemory, ...session.collectedData };
+            nextField = getNextMissingField(updatedKnown);
+            console.log(`[HISTORY SCAN: nextField updated -> ${nextField || 'COMPLETE'}]`);
+          }
+        }
+      }
 
       if (!nextField) {
         const propertyId = getNextPropertyId();

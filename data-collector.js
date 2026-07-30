@@ -719,6 +719,64 @@ function runGlobalExtraction(u, currentData, preferredField) {
   return updates;
 }
 
+// ========================================
+// Pre-question history scan
+// Before asking a question, check if the answer already exists
+// in any previous user message. Scans ALL user messages in the
+// conversation history and runs the appropriate field extractor
+// on the combined text. If found with HIGH confidence, returns
+// the extracted values so the caller can store them and skip.
+//
+// This prevents repeated questions when the user already provided
+// the information in an earlier message (compound floor answers
+// during persuasion, volunteered details, etc.).
+// ========================================
+export function scanHistoryForField(field, messages, currentData) {
+  // Complex stateful fields handled by service.js — skip (can't be extracted from history)
+  const complexFields = new Set(['terraceSqm', 'heating', 'photos', 'ownerName', 'address']);
+  if (complexFields.has(field)) return null;
+
+  // Already in collectedData — skip
+  const existing = currentData[field];
+  if (existing !== undefined && existing !== null && existing !== '') return null;
+
+  // No messages to scan — skip
+  if (!messages || !Array.isArray(messages) || messages.length === 0) return null;
+
+  // Combine ALL user/owner messages into one text for a thorough scan.
+  // This captures information the user volunteered in any previous turn.
+  const userMessages = messages
+    .filter(m => m.role === 'user' || m.role === 'client' || m.role === 'owner')
+    .map(m => m.text)
+    .filter(Boolean)
+    .join(' ');
+
+  if (!userMessages) return null;
+
+  // Try extractors in the same field group (e.g., floor ↔ totalFloors).
+  // When scanning for totalFloors, also run extractFloor which has the
+  // compound floor extraction logic ("na osmi od deset" → both fields).
+  const groupFields = getGroupFields(field);
+  for (const gf of groupFields) {
+    const extractor = FIELD_TO_EXTRACTOR[gf];
+    if (!extractor) continue;
+    // Use empty currentData to bypass skip guards like "if (data.floor !== undefined) return null".
+    // Those guards would block compound extraction (e.g., extractCompoundFloor returning
+    // totalFloors from "na osmi od deset" when floor is already set from a previous turn).
+    // We already confirmed the target field is missing above — let extractors run freely.
+    const result = extractor(userMessages, {});
+    if (result && result[field] !== undefined) {
+      const confidence = assessConfidence(field, result[field], userMessages);
+      if (confidence === 'HIGH') {
+        console.log(`[HISTORY SCAN: found ${field} = ${JSON.stringify(result[field])} from combined user messages]`);
+        return result;
+      }
+    }
+  }
+
+  return null;
+}
+
 export {
   runGlobalExtraction,
   assessConfidence,
