@@ -236,6 +236,61 @@ function saveToCSV(data, phone, propertyId) {
 }
 
 // ========================================
+// RE-ASK DETECTION — Confirmatory & Apologetic Questions
+// When a field has been asked 2+ times without a clear answer,
+// switch from repeating the identical question to a softer
+// confirmatory/apologetic phrasing to avoid annoying the owner.
+// ========================================
+
+// Used when attempts >= 2 (first re-ask after initial question)
+const CONFIRMATORY_QUESTIONS = {
+  cleanPrice: (label) => `Само да потврдам, која би била последната чиста цена за ${label}?`,
+  monthlyRent: (label) => `Само да потврдам, колкава е месечната кирија за ${label}?`,
+  totalSqm: () => `Само да потврдам, колкава е вкупната квадратура?`,
+  terraceSqm: () => `Само да потврдам, дали има тераса?`,
+  bedrooms: (label) => `Само да потврдам, колку спални соби има ${label}?`,
+  floor: (label) => `Само да потврдам, на кој кат се наоѓа ${label}?`,
+  totalFloors: () => `Само да потврдам, колку спрата има зградата?`,
+  elevator: () => `Само да потврдам, дали зградата има лифт?`,
+  heating: () => `Само да потврдам, какво греење има?`,
+  ac: () => `Само да потврдам, дали има клима?`,
+  parking: () => `Само да потврдам, каков е паркингот?`,
+  orientation: () => `Само да потврдам, која е ориентацијата?`,
+  furnished: () => `Само да потврдам, дали е наместен?`,
+  yearBuilt: () => `Само да потврдам, која година е граден?`,
+  renovated: () => `Само да потврдам, дали е реновиран?`,
+  renovationYear: () => `Само да потврдам, која година е реновиран?`,
+  documentationClean: () => `Само да потврдам, дали имате чист имотен лист?`,
+  photos: () => `Само да потврдам, дали имате фотографии?`,
+  ownerName: () => `Само да потврдам, како да ве запишам?`,
+  address: () => `Само да потврдам, која е точната адреса?`
+};
+
+// Used when attempts >= 3 (two+ re-asks — apologetic tone)
+const APOLOGETIC_QUESTIONS = {
+  cleanPrice: (label) => `Извинете, дали може да ми кажете која е чистата цена за ${label}?`,
+  monthlyRent: (label) => `Извинете, дали може да ми кажете колкава е киријата за ${label}?`,
+  totalSqm: () => `Извинете, дали може да ми кажете колкава е квадратурата?`,
+  terraceSqm: () => `Извинете, дали може да ми кажете дали има тераса?`,
+  bedrooms: (label) => `Извинете, дали може да ми кажете колку соби има ${label}?`,
+  floor: (label) => `Извинете, дали може да ми кажете на кој кат е ${label}?`,
+  totalFloors: () => `Извинете, дали може да ми кажете колку спрата има?`,
+  elevator: () => `Извинете, дали зградата има лифт?`,
+  heating: () => `Извинете, дали може да ми кажете какво греење има?`,
+  ac: () => `Извинете, дали има клима?`,
+  parking: () => `Извинете, дали може да ми кажете каков е паркингот?`,
+  orientation: () => `Извинете, дали може да ми кажете која е ориентацијата?`,
+  furnished: () => `Извинете, дали е наместен?`,
+  yearBuilt: () => `Извинете, дали може да ми кажете која година е граден?`,
+  renovated: () => `Извинете, дали е реновиран?`,
+  renovationYear: () => `Извинете, дали може да ми кажете која година е реновиран?`,
+  documentationClean: () => `Извинете, дали имате чист имотен лист?`,
+  photos: () => `Извинете, дали имате фотографии?`,
+  ownerName: () => `Извинете, како да ве запишам?`,
+  address: () => `Извинете, која е точната адреса?`
+};
+
+// ========================================
 // GENERATE FIRST MESSAGE
 // ========================================
 
@@ -287,6 +342,9 @@ export async function generateResponse(session, userInput) {
     }
     if (!session.pendingConfirmation) {
       session.pendingConfirmation = null;
+    }
+    if (!session.questionAttempts) {
+      session.questionAttempts = {};
     }
 
     const u = userInput.toLowerCase().trim();
@@ -1045,10 +1103,36 @@ if (/kako bi sorabotuvale|како би соработувале|како да �
         finalQuestion = question.replace(/станот/g, propertyLabel);
       }
 
-      const response = prefix + finalQuestion;
+      // ========================================
+      // QUESTION ATTEMPT TRACKING
+      // Track how many times each field has been asked. When 2+ attempts
+      // fail to extract a value, switch to confirmatory phrasing instead
+      // of repeating the identical question. This prevents endless loops
+      // where the system asks "Колку спрата има зградата?" and the owner
+      // has already answered ("10") but extraction missed it.
+      // ========================================
+      session.questionAttempts[nextField] = (session.questionAttempts[nextField] || 0) + 1;
+      const attempts = session.questionAttempts[nextField];
 
-      console.log(`[NEXT FIELD: ${nextField}]`);
+      // Override question text on re-asks
+      if (attempts >= 3) {
+        const apolQuestion = APOLOGETIC_QUESTIONS[nextField];
+        if (apolQuestion) {
+          finalQuestion = apolQuestion(propertyLabel);
+          console.log(`[QUESTION ATTEMPT ${attempts}: ${nextField} — using apologetic phrasing]`);
+        }
+      } else if (attempts >= 2) {
+        const confQuestion = CONFIRMATORY_QUESTIONS[nextField];
+        if (confQuestion) {
+          finalQuestion = confQuestion(propertyLabel);
+          console.log(`[QUESTION ATTEMPT ${attempts}: ${nextField} — using confirmatory phrasing]`);
+        }
+      }
+
+      console.log(`[QUESTION ATTEMPT ${attempts}: ${nextField}]`);
       console.log(`[QUESTION: ${finalQuestion}]`);
+
+      const response = prefix + finalQuestion;
 
       return {
         text: response,
