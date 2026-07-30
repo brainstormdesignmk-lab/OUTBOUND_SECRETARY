@@ -593,6 +593,9 @@ const PRICE_SENSITIVE_EXTRACTORS = new Set([
 // Year-sniffing extractors that use parseYearBuilt's 2-digit fallback.
 // These should NOT run on bare numbers like "10" → 2010.
 // When isBareNumber is true, these extractors are skipped.
+// extractRenovationYear is NOT included because it requires
+// renovated=true as precondition — it can't fire on bare numbers
+// in fresh sessions anyway.
 const YEAR_SNIFFING_EXTRACTORS = new Set([
   'extractYearBuilt'
 ]);
@@ -668,20 +671,21 @@ function runGlobalExtraction(u, currentData, preferredField) {
   }
 
   // ========================================
-  // EARLY RETURN FOR DIRECT ANSWERS
-  // When preferredField was set AND STEP 1 extracted a value for it,
-  // check if the message contains volunteered-content indicators for
-  // OTHER fields (not in the current question's group). If the message
-  // is a direct answer (no commas, no "и"/"i", no strong keywords for
-  // other property features), skip STEP 2 entirely.
+  // FIELD LOCK MODE
+  // When preferredField is set, we're in data collection mode — asking
+  // a specific question. In this mode:
   //
-  // This prevents unrelated extractors from grabbing the same number
-  // for different fields — e.g., "10 katnica" → totalFloors=10 from
-  // STEP 1, but extractFloor finds "kat" in "katnica" via its digit+kat
-  // regex and assigns floor=10. With this guard, "10 katnica" skips
-  // STEP 2 because no volunteered-content indicators are detected.
+  // 1. EARLY RETURN FOR DIRECT ANSWERS: If STEP 1 found the current
+  //    field AND the message has no volunteered-content indicators
+  //    for other fields, skip STEP 2 entirely.
+  //
+  // 2. YEAR-SNIFFING LOCK: Even if STEP 1 didn't find the current
+  //    field, never run year-sniffing extractors on a message that
+  //    was meant for a different field. Year info will be caught
+  //    by the history scan when yearBuilt becomes the next field.
   // ========================================
-  if (preferredField && FIELD_TO_EXTRACTOR[preferredField]) {
+  const hasPreferredField = preferredField && FIELD_TO_EXTRACTOR[preferredField];
+  if (hasPreferredField) {
     const groupFields = getGroupFields(preferredField);
     let step1Found = false;
     for (const field of groupFields) {
@@ -695,12 +699,7 @@ function runGlobalExtraction(u, currentData, preferredField) {
       // for OTHER fields (not the current question):
       //   - Commas/semicolons: "65 m2, 3 kat, ima lift"
       //   - "и"/"i" (and) separator: "65 m2 i terasa od 3"
-      //   - Strong keywords for other property features: "lift" (elevator),
-      //     "terasa" (terrace), "klima" (AC), "parking", "spalni" (bedrooms),
-      //     "foto" (photos), etc.
-      //
-      // If NONE of these are present, the user is simply answering the
-      // current question — no need to volunteer scanning.
+      //   - Strong keywords for other property features
       const hasVolunteerContent = /[,;]|\s+i\s+|\s+и\s+|lift|лифт|elevator|klima|клима|inverter|terasa|тераса|terrace|parking|паркинг|garaz|гараж|spaln|спалн|detsk|детск|gostinsk|гостинск|soba|соба|sobi|соби|foto|фото|slik|слик|viber|вајбер|renov|ренов|izgraden|граден|godina|година|advokat|адвокат|notar|нотар|danok|данок/i.test(u);
       if (!hasVolunteerContent) {
         console.log(`[EARLY RETURN: direct answer for ${preferredField} — no volunteered content detected]`);
@@ -751,9 +750,22 @@ function runGlobalExtraction(u, currentData, preferredField) {
     if (isBareNumber && NUMBER_SNIFFING_EXTRACTORS.has(rule.name)) {
       continue;
     }
-    // If the message is a bare number, skip year-sniffing extractors that
-    // can accidentally convert "10" to yearBuilt=2010.
-    if (isBareNumber && YEAR_SNIFFING_EXTRACTORS.has(rule.name)) {
+    // FIELD LOCK: When preferredField is set (data collection mode),
+    // skip year-sniffing extractors UNCONDITIONALLY in STEP 2.
+    // extractRenovationYear is also guarded here (even though it's not
+    // in YEAR_SNIFFING_EXTRACTORS) because it calls parseYearBuilt().
+    // Year info volunteered during other questions will be caught
+    // by the history scan when yearBuilt becomes the next field.
+    // When preferredField is NOT set (global discovery during
+    // persuasion), only skip extractYearBuilt for bare numbers.
+    // extractRenovationYear is NOT guarded by isBareNumber because it
+    // requires renovated=true as precondition, so it can't fire on
+    // bare numbers in fresh sessions.
+    const yearSniffingNames = ['extractYearBuilt', 'extractRenovationYear'];
+    if (hasPreferredField && yearSniffingNames.includes(rule.name)) {
+      continue;
+    }
+    if (isBareNumber && rule.name === 'extractYearBuilt') {
       continue;
     }
     // Skip if this field was already extracted by Step 1 (group pass)
