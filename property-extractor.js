@@ -517,42 +517,56 @@ export function extractTerraceNumber(text) {
   const terasaWordIdx = words.findIndex(w => /terasa|тераса|terrace/i.test(w));
 
   if (terasaWordIdx !== -1) {
-    // Helper to extract leading digits from a word (handles "5m2", "15m2", "3kvadrata")
-    // Returns the digit value if 1-100, otherwise null.
+    // Helper to extract number from a single word.
+    // Handles: "5" (digit), "5m2" (leading digits), "tri" (Macedonian word)
     const extractWordNumber = (w) => {
+      // Strip trailing punctuation that might be attached (",", ".", "?", "!")
+      const clean = w.replace(/[.,!?;:]+$/, '');
+      if (clean.length === 0) return null;
       // Pure digit word: "5", "15"
-      if (/^\d{1,4}$/.test(w)) {
-        const n = parseInt(w);
-        return (n >= 1 && n <= 100) ? n : null;
+      if (/^\d{1,4}$/.test(clean)) {
+        const n = parseInt(clean);
+        return (n >= 1 && n <= 200) ? n : null;
       }
       // Leading digits + suffix: "5m2", "15m2", "3kvadrata"
-      const leadingDigits = w.match(/^(\d{1,4})/);
+      const leadingDigits = clean.match(/^(\d{1,4})/);
       if (leadingDigits) {
         const n = parseInt(leadingDigits[1]);
-        if (n >= 1 && n <= 100) return n;
+        if (n >= 1 && n <= 200) return n;
       }
-      // Macedonian number word: "tri", "pet"
-      const wordNum = parseMacedonianNumber(w);
-      if (wordNum !== null && wordNum >= 1 && wordNum <= 100) return wordNum;
+      // Macedonian number word: "tri", "pet", "seesetiosum"
+      const wordNum = parseMacedonianNumber(clean);
+      if (wordNum !== null && wordNum >= 1 && wordNum <= 200) return wordNum;
       return null;
     };
 
-    // Phase 1: Look BACKWARDS from the word before "terasa" for the NEAREST number
-    // Handles "peeset i sest i tri kvadrata terasa" → backwards from "kvadrata"
-    // finds "tri" (3) — the LAST number word before "terasa", which is correct.
-    // Also handles "5 m2 terasa" → backwards finds "5" (digit).
-    // Also handles "15m2 terasa" → backwards finds "15" (leading digits from "15m2").
-    for (let i = terasaWordIdx - 1; i >= 0; i--) {
+    // Find ALL numbers in the text and pick the CLOSEST one to "terasa"
+    // by word-distance. This is better than the old backwards-first search
+    // because it handles cases like:
+    //   "vkupno ima 68 kvadrati i terasa so 4" → "cetiri" (4) at distance 2
+    //   is closer than "seesetiosum" (68) at distance 3.
+    let bestValue = null;
+    let bestDistance = Infinity;
+
+    for (let i = 0; i < words.length; i++) {
+      if (i === terasaWordIdx) continue; // skip the word "terasa" itself
       const result = extractWordNumber(words[i]);
-      if (result !== null) return result;
+      if (result !== null) {
+        const distance = Math.abs(i - terasaWordIdx);
+        if (distance < bestDistance) {
+          bestDistance = distance;
+          bestValue = result;
+        } else if (distance === bestDistance && i > terasaWordIdx) {
+          // Same distance: prefer the number AFTER terasa over before.
+          // Before-terasa numbers are more likely to be totalSqm ("68" before
+          // "terasa" in "68 kvadrati i terasa 4"), while after-terasa numbers
+          // are typically the terrace size ("4" after "terasa").
+          bestValue = result;
+        }
+      }
     }
 
-    // Phase 2: Nothing before "terasa" — look FORWARD from the word after it
-    // Handles "terasa 5 m2", "terasa od 3 m2", "terasa 10m2", "terasa 15m2"
-    for (let i = terasaWordIdx + 1; i < words.length; i++) {
-      const result = extractWordNumber(words[i]);
-      if (result !== null) return result;
-    }
+    if (bestValue !== null) return bestValue;
 
     // "terasa" found but NO number near it — return null instead of guessing
     return null;
