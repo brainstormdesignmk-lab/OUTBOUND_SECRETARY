@@ -320,8 +320,11 @@ function extractRenovated(u, data) {
   if (renovYearBefore) {
     return { renovated: true, renovationYear: parseInt(renovYearBefore[1]) };
   }
-  // Renovation-specific words (no year) — just "renoviran" means yes, year unknown
-  if (/реновиран|renoviran|обновен|obnoven|novo|нов|sreden|среден|kompletno renoviran|комплетно реновиран|delumno renoviran|делумно реновиран|skoro|скоро|nedavno|недавно|pre|пред|osvezhivme|освеживме|go osvezivme|го освеживме/i.test(u)) {
+  // Renovation-specific words (no year) — just "renoviran" means yes, year unknown.
+  // NOTE: "pre"/"пред" is intentionally excluded — it matches "pred zgrada" (in front
+  // of the building) as a false positive. "novo"/"нов" is also excluded — "nova zgrada"
+  // (new building) is not a renovation. "skoro"/"скоро" is excluded (generic "soon").
+  if (/реновиран|renoviran|обновен|obnoven|sreden|среден|kompletno renoviran|комплетно реновиран|delumno renoviran|делумно реновиран|nedavno|недавно|osvezhivme|освеживме|go osvezivme|го освеживме/i.test(u)) {
     return { renovated: true, renovationYear: null };
   }
   // Fallback: any year in the message — but ONLY if renovation word is present
@@ -339,7 +342,10 @@ function extractRenovated(u, data) {
   if (/2000ti|2000 ти|двеилјадити/i.test(u) && /renoviran|реновиран|obnoven|обновен/i.test(u)) {
     return { renovated: true, renovationYear: 2005 };
   }
-  if (/pred|пред|pri|при/i.test(u)) {
+  // "pred X godini" / "пред X години" — year-from-age pattern.
+  // Requires "godini"/"години" context to prevent false positives like
+  // "parking pred zgrada" (parking in front of building).
+  if (/pred\s+\d+\s+godini|пред\s+\d+\s+години|pred\s+\d+\s+god|пред\s+\d+\s+год|pri\s+\d+\s+godini|при\s+\d+\s+години|pri\s+\d+\s+god|при\s+\d+\s+год/i.test(u)) {
     const years = u.match(/\d+/);
     if (years) {
       const currentYear = new Date().getFullYear();

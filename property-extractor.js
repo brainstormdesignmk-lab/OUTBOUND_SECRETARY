@@ -732,7 +732,12 @@ export function parseOrientation(text) {
     .replace(/istk|istk|isok/g, 'istok')
     .replace(/severz|severz|severj/g, 'sever')
     .replace(/jugoj/g, 'jug')
-    .replace(/jugo/g, 'jug');
+    .replace(/jugo/g, 'jug')
+    // Adjective forms: juzen (southern), severn (northern), etc.
+    .replace(/ju[zž]en|јужен|ju[zž]na|јужна|ju[zž]ni|јужни/gi, 'jug')
+    .replace(/severen|северен|severna|северна|severni|северни/gi, 'sever')
+    .replace(/isto[čc]en|источен|isto[čc]na|источна|isto[čc]ni|источни/gi, 'istok')
+    .replace(/zapaden|западен|zapadna|западна|zapadni|западни/gi, 'zapad');
 
   const orientations = [];
   if (/sever|север|north/i.test(normalized)) orientations.push('sever');
