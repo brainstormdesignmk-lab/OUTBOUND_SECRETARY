@@ -277,7 +277,10 @@ export function countBedrooms(text) {
   const roomWords = [
     'spalna', 'спална', 'spalni', 'спални',
     'detska', 'детска', 'detski', 'детски',
-    'gostinska', 'гостинска', 'gostinski', 'гостински'
+    'gostinska', 'гостинска', 'gostinski', 'гостински',
+    'bracna', 'брачна', 'brachna',
+    'pomala', 'помала', 'pomali', 'помали',
+    'pogolema', 'поголема', 'pogolemi', 'поголеми'
   ];
   let roomCount = 0;
   for (const word of roomWords) {
@@ -294,7 +297,7 @@ export function countBedrooms(text) {
   if (roomSegments.length >= 2) {
     let roomsFromList = 0;
     for (const seg of roomSegments) {
-      if (/(spaln|спалн|detsk|детск|gostinsk|гостинск|golem|голем|mala|мала|soba|соба|sobi|соби)/i.test(seg)) {
+      if (/(spaln|спалн|detsk|детск|gostinsk|гостинск|golem|голем|mala|мала|soba|соба|sobi|соби|bracn|брачн|brachn|pomal|помал|pogolem|поголем)/i.test(seg)) {
         const num = parseMacedonianNumber(seg);
         if (num !== null && num >= 1 && num <= 20) {
           roomsFromList += num;
