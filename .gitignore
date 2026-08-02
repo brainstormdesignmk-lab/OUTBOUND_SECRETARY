@@ -1,5 +1,9 @@
 # Dependencies
 node_modules/
+.env
+data/*.jsonl
+data/*.csv
+data/*.log
 
 # Environment
 .env
