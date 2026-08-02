@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { readFileSync, existsSync, mkdirSync, writeFileSync } from 'fs';
+import path from 'path';
 import { config } from './config.js';
 import { Campaign } from './campaign.js';
 import { parseLeadLine } from './lead-processor.js';
@@ -9,7 +10,9 @@ import { logger } from './logger.js';
 import { classifyIntent } from './classifier.js';
 
 const LEAD_TEMP_FILE = '/tmp/ana-today-leads.csv';
-const LEADS_DIR = '/home/metropolis2/real-estate-atoms/leads';
+// Leads dir derived from the (env-overridable) default leads file — no
+// hardcoded /home/metropolis2/... path from the old machine.
+const LEADS_DIR = path.dirname(config.LEADS_INPUT_PATH);
 
 async function main() {
   if (!existsSync(LEADS_DIR)) {

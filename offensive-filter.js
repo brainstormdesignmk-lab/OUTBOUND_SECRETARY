@@ -22,9 +22,12 @@
 
 import fs from 'fs';
 import { classifyOffensive } from './offensive-classifier.js';
+import { config } from './config.js';
 
-// Path to persistent blocklist file (same data directory as CSV)
-export const BLOCKLIST_PATH = '/home/metropolis2/real-estate-atoms/data/blocked-numbers.json';
+// Path to persistent blocklist file (same data directory as CSV).
+// From config — project-root-relative default, env-overridable — instead of
+// the old machine's hardcoded /home/metropolis2/... path (migration breakage).
+export const BLOCKLIST_PATH = config.BLOCKLIST_PATH;
 
 // ========================================
 // DETECT OFFENSIVE — thin wrapper over the classifier

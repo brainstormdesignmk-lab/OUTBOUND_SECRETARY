@@ -1,7 +1,7 @@
 import { createHarness } from './test-helpers.js';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-const harness = createHarness();
-const assert = harness.assert;
 // ========================================
 // test-config-env.js — Config via environment variables (Task 11)
 // ========================================
@@ -14,6 +14,18 @@ const assert = harness.assert;
 //
 // Run: node test-config-env.js
 // ========================================
+
+const harness = createHarness();
+const assert = harness.assert;
+
+// config.js derives file-path defaults from the project root (no hardcoded
+// /home/<user> paths after the Linux migration). This test file lives in the
+// same directory as config.js, so the expected defaults are the same computed
+// paths — assert against them rather than machine-specific strings.
+const PROJECT_DIR = path.dirname(fileURLToPath(import.meta.url));
+const EXPECTED_DEFAULT_CSV = path.join(PROJECT_DIR, 'data', 'collected-leads.csv');
+const EXPECTED_DEFAULT_PROPERTY_ROOT = path.join(PROJECT_DIR, 'data', 'properties');
+const EXPECTED_DEFAULT_BLOCKLIST = path.join(PROJECT_DIR, 'data', 'blocked-numbers.json');
 
 
 // All env vars the config reads — cleared before each test block so no
@@ -29,8 +41,8 @@ const CONFIG_ENV_VARS = [
   'ANA_ACTIVE_HOURS_START', 'ANA_ACTIVE_HOURS_END',
   'ANA_ACTIVE_HOURS_AFTERNOON_START', 'ANA_ACTIVE_HOURS_AFTERNOON_END',
   'ANA_NO_MESSAGE_DAY', 'ANA_READY_ON_FINISH', 'ANA_SERVICE_ERROR_WAIT_MS',
-  'CSV_OUTPUT_PATH', 'LEADS_INPUT_PATH', 'SESSIONS_PATH', 'METRICS_PATH',
-  'LOG_PATH', 'HEALTH_PORT'
+  'CSV_OUTPUT_PATH', 'LEADS_INPUT_PATH', 'PROPERTY_ROOT', 'BLOCKLIST_PATH',
+  'SESSIONS_PATH', 'METRICS_PATH', 'LOG_PATH', 'HEALTH_PORT'
 ];
 
 function clearConfigEnv() {
@@ -63,7 +75,9 @@ function importConfig(envPatch) {
   const { config } = await importConfig({});
   assert('default MODEL preserved', config.MODEL === 'llama-3.3-70b-versatile', `got ${config.MODEL}`);
   assert('default REPLY_TIMEOUT preserved', config.REPLY_TIMEOUT === 30 * 60 * 1000, `got ${config.REPLY_TIMEOUT}`);
-  assert('default CSV path preserved', config.CSV_OUTPUT_PATH === '/home/metropolis2/real-estate-atoms/data/collected-leads.csv', `got ${config.CSV_OUTPUT_PATH}`);
+  assert('default CSV path is project data/collected-leads.csv', config.CSV_OUTPUT_PATH === EXPECTED_DEFAULT_CSV, `got ${config.CSV_OUTPUT_PATH}`);
+  assert('default PROPERTY_ROOT is project data/properties', config.PROPERTY_ROOT === EXPECTED_DEFAULT_PROPERTY_ROOT, `got ${config.PROPERTY_ROOT}`);
+  assert('default BLOCKLIST_PATH is project data/blocked-numbers.json', config.BLOCKLIST_PATH === EXPECTED_DEFAULT_BLOCKLIST, `got ${config.BLOCKLIST_PATH}`);
   assert('LOG_PATH has a default', typeof config.LOG_PATH === 'string' && config.LOG_PATH.length > 0, `got ${config.LOG_PATH}`);
   assert('HEALTH_PORT has a default', typeof config.HEALTH_PORT === 'number' && config.HEALTH_PORT > 0, `got ${config.HEALTH_PORT}`);
   assert('SERVICE_ERROR_WAIT_MS default is 5 min', config.SERVICE_ERROR_WAIT_MS === 5 * 60 * 1000, `got ${config.SERVICE_ERROR_WAIT_MS}`);
@@ -125,7 +139,8 @@ function importConfig(envPatch) {
     'TYPING_CHAR_MIN', 'TYPING_CHAR_MAX', 'MESSAGE_PAUSE_MIN', 'MESSAGE_PAUSE_MAX',
     'MAX_MSGS_PER_HOUR', 'MAX_MSGS_PER_DAY_PER_CONTACT', 'MAX_MSGS_PER_DAY_TOTAL',
     'ACTIVE_HOURS_START', 'ACTIVE_HOURS_END', 'ACTIVE_HOURS_AFTERNOON_START', 'ACTIVE_HOURS_AFTERNOON_END',
-    'NO_MESSAGE_DAY', 'CSV_OUTPUT_PATH', 'LEADS_INPUT_PATH', 'SESSIONS_PATH', 'METRICS_PATH'
+    'NO_MESSAGE_DAY', 'CSV_OUTPUT_PATH', 'LEADS_INPUT_PATH', 'PROPERTY_ROOT',
+    'BLOCKLIST_PATH', 'SESSIONS_PATH', 'METRICS_PATH'
   ];
   const missing = requiredKeys.filter(k => !(k in config));
   assert('all original keys present', missing.length === 0, `missing: ${missing.join(', ')}`);

@@ -1,4 +1,0 @@
-{"t":"2026-08-01T21:20:49.634Z","level":"info","event":"leads_loaded","message":"Loaded 1 leads from ./data/sim-leads-happy.csv","count":1,"file":"./data/sim-leads-happy.csv"}
-{"t":"2026-08-01T21:20:49.643Z","level":"info","event":"lead_started","message":"Processing lead 1","phone":"+38970123456","index":0}
-{"t":"2026-08-01T21:20:49.824Z","level":"info","event":"reply_received","message":"Reply to first message","phone":"+38970123456","text":"SUPER, KAZI MI STO TI TREBA PA DA POCNEME"}
-{"t":"2026-08-01T21:20:50.993Z","level":"info","event":"lead_closed","message":"Lead closed successfully","phone":"+38970123456"}

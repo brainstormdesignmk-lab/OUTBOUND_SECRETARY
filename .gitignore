@@ -3,10 +3,17 @@ node_modules/
 .env
 data/*.jsonl
 data/*.csv
+data/*.json
 data/*.log
+# ...but keep the sim lead fixtures tracked — they are INPUTS to run-live-sim.js
+!data/sim-leads-*.csv
+# Runtime data generated at project-relative defaults (config.js)
+data/blocked-numbers.json
+data/properties/
 
 # Environment
 .env
+groq.env
 
 # Backup files (both in /backups/ root and scattered .backup / .bak files)
 backups/

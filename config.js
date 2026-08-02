@@ -11,9 +11,17 @@
 //   PLAIN names for deployment concerns (CSV_OUTPUT_PATH, LEADS_INPUT_PATH,
 //   SESSIONS_PATH, METRICS_PATH, LOG_PATH, HEALTH_PORT)
 //
-// All file paths default to the original production Linux paths; on local
-// dev they should be pointed at local files via env.
+// FILE-PATH DEFAULTS are derived from the project root (never a hardcoded
+// /home/<user> path), so the codebase runs on any machine after a migration.
+// Point them elsewhere via env when needed (e.g. PROPERTY_ROOT at an
+// external archive location in production).
 // ========================================
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+// === PATH HELPERS — project-relative defaults (portable across machines) ===
+const PROJECT_ROOT = path.dirname(fileURLToPath(import.meta.url));
+const DATA_DIR = path.join(PROJECT_ROOT, 'data');
 
 // === ENV HELPERS (all values validated + cast) ===
 function envStr(name, fallback) {
@@ -72,18 +80,29 @@ export const config = {
   NO_MESSAGE_DAY: envInt('ANA_NO_MESSAGE_DAY', 0),
 
   // === FILE PATHS (deployment concerns — plain env names) ===
-  CSV_OUTPUT_PATH: envStr('CSV_OUTPUT_PATH', "/home/metropolis2/real-estate-atoms/data/collected-leads.csv"),
-  LEADS_INPUT_PATH: envStr('LEADS_INPUT_PATH', "/home/metropolis2/real-estate-atoms/leads/today.csv"),
+  // Defaults are relative to the project root — no hardcoded /home/<user>
+  // paths (that was the Linux-migration breakage). Override via env to point
+  // anywhere (CI temp dirs, production archive volumes, etc.).
+  CSV_OUTPUT_PATH: envStr('CSV_OUTPUT_PATH', path.join(DATA_DIR, 'collected-leads.csv')),
+  LEADS_INPUT_PATH: envStr('LEADS_INPUT_PATH', path.join(PROJECT_ROOT, 'leads', 'today.csv')),
+
+  // Property archive root — per-property folders (photos/documents/history
+  // + property.json). Was hardcoded to Documents/NEKRETNINI_EVBR on the
+  // old machine; now defaults into the project data dir, env-overridable.
+  PROPERTY_ROOT: envStr('PROPERTY_ROOT', path.join(DATA_DIR, 'properties')),
+
+  // Persistent blocklist of terminated leads (3-strike protocol).
+  BLOCKLIST_PATH: envStr('BLOCKLIST_PATH', path.join(DATA_DIR, 'blocked-numbers.json')),
 
   // Session persistence — JSON file path for campaign recovery.
-  SESSIONS_PATH: envStr('SESSIONS_PATH', "./data/sessions.json"),
+  SESSIONS_PATH: envStr('SESSIONS_PATH', path.join(DATA_DIR, 'sessions.json')),
 
   // Metrics — optional JSONL trail for live counters (metrics.js).
-  METRICS_PATH: envStr('METRICS_PATH', "./data/metrics.jsonl"),
+  METRICS_PATH: envStr('METRICS_PATH', path.join(DATA_DIR, 'metrics.jsonl')),
 
   // Structured audit log — JSONL event trail (logger.js, Task 9).
   // Set empty to run console-only (no file writes).
-  LOG_PATH: envStr('LOG_PATH', "./data/audit.log.jsonl"),
+  LOG_PATH: envStr('LOG_PATH', path.join(DATA_DIR, 'audit.log.jsonl')),
 
   // Health-check HTTP server (health.js, Task 10) — 0/empty disables.
   HEALTH_PORT: envInt('HEALTH_PORT', 8081),

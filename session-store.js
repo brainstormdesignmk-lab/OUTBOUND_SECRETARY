@@ -27,13 +27,12 @@ import path from 'path';
 // ========================================
 // File paths
 // ========================================
-const SESSIONS_DIR = () => path.dirname(config.SESSIONS_PATH || './data/sessions');
-const JOURNAL_PATH = () => config.SESSIONS_PATH
-  ? config.SESSIONS_PATH.replace('.json', '.journal.jsonl')
-  : './data/sessions.journal.jsonl';
-const SNAPSHOT_PATH = () => config.SESSIONS_PATH
-  ? config.SESSIONS_PATH
-  : './data/sessions.snapshot.json';
+// config.SESSIONS_PATH is always defined (envStr falls back to a
+// project-root-relative default), so the old CWD-relative './data/...'
+// fallbacks are gone — no second source of truth.
+const SESSIONS_DIR = () => path.dirname(config.SESSIONS_PATH);
+const JOURNAL_PATH = () => config.SESSIONS_PATH.replace('.json', '.journal.jsonl');
+const SNAPSHOT_PATH = () => config.SESSIONS_PATH;
 
 // ========================================
 // Snapshot interval: save a compact snapshot every N journal writes
@@ -48,7 +47,7 @@ export class SessionStore {
    * @param {string} [sessionsPath] — Path to session snapshot file
    */
   constructor(sessionsPath) {
-    this.sessionsPath = sessionsPath || config.SESSIONS_PATH || './data/sessions.json';
+    this.sessionsPath = sessionsPath || config.SESSIONS_PATH;
     this.journalPath = this.sessionsPath.replace('.json', '.journal.jsonl');
     this.snapshotPath = this.sessionsPath;
     this.writeCount = 0;

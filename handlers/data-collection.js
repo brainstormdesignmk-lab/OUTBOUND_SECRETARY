@@ -604,15 +604,6 @@ export function runDataCollectionFlow({ u, userInput, session, adMemory, hasScra
                           known.propertyType === 'house' ? 'куќата' :
                           known.propertyType === 'land' ? 'плацот' : 'имотот';
 
-    // Get the question with the correct property type
-    const question = getQuestion(nextField, known.propertyType || 'apartment', hasScraperPhotos, session.collectedData.photosStatus);
-
-    // If the question is generic, replace with property-specific
-    let finalQuestion = question;
-    if (question && question.includes('станот')) {
-      finalQuestion = question.replace(/станот/g, propertyLabel);
-    }
-
     // ========================================
     // MAX 2 ATTEMPTS PRECHECK (BEFORE asking)
     // Check if the current nextField has already been asked 2+ times.
@@ -670,6 +661,19 @@ export function runDataCollectionFlow({ u, userInput, session, adMemory, hasScra
     if (nextField) {
       session.questionAttempts[nextField] = (session.questionAttempts[nextField] || 0) + 1;
       const attempts = session.questionAttempts[nextField];
+
+      // Compute the question text from the CURRENT nextField. The
+      // max-2-attempts skip loop above can advance nextField (e.g.
+      // cleanPrice → totalSqm), so the question must be derived AFTER
+      // that loop — otherwise the owner is asked the skipped field's
+      // question (stale question-text bug).
+      const question = getQuestion(nextField, known.propertyType || 'apartment', hasScraperPhotos, session.collectedData.photosStatus);
+
+      // If the question is generic, replace with property-specific
+      let finalQuestion = question;
+      if (question && question.includes('станот')) {
+        finalQuestion = question.replace(/станот/g, propertyLabel);
+      }
 
       // Override question text on re-asks
       if (attempts >= 2) {

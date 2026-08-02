@@ -20,12 +20,15 @@ import { createHarness } from './test-helpers.js';
 // ========================================
 import { generateResponse } from './service.js';
 import fs from 'fs';
+import { config } from './config.js';
 
 const harness = createHarness();
 const assert = harness.assert;
 
-const CSV_PATH = '/home/metropolis2/real-estate-atoms/data/collected-leads.csv';
-const PROPERTY_ROOT = '/home/metropolis2/Documents/NEKRETNINI_EVBR';
+// Paths come from config (project-root-relative, env-overridable) — NOT
+// hardcoded /home/metropolis2/... paths from the old machine (migration fix).
+const CSV_PATH = config.CSV_OUTPUT_PATH;
+const PROPERTY_ROOT = config.PROPERTY_ROOT;
 
 // Pre-migration headers (what saveToCSV wrote before the two new columns)
 const OLD_SALE_HEADER = 'phone,formattedPhone,propertyId,transactionType,price,sqm,hasTerrace,terraceSqm,bedrooms,floor,totalFloors,elevator,heating,heatingType,ac,parking,parkingType,orientation,orientationPrimary,orientationSecondary,furnished,furnishedLevel,yearBuilt,renovated,renovationYear,documentationClean,documentationIssues,photosPermission,photosSource,photosStatus,ownerName,address';

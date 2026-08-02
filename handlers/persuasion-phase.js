@@ -40,8 +40,12 @@ function mirrorPhase(session, phase, event = 'phase_detected') {
 // IMPORTANT: dotenv must load BEFORE the Groq client is instantiated.
 // This module is imported (and evaluated) by service.js at load time,
 // so a dotenv.config() inside service.js would run too late — the API
-// key from .env would be undefined here. Load it first.
-dotenv.config();
+// key from groq.env would be undefined here. Load it first.
+// NOTE: the key file is named groq.env (not .env) because the freebuff
+// CLI crashes on this machine whenever a .env* file exists in the CWD
+// (it calls statx(), missing on kernel < 4.11). dotenv.config() with an
+// explicit path sidesteps that entirely.
+dotenv.config({ path: 'groq.env' });
 
 // LAZY GROQ CLIENT — constructed on FIRST persuasion call, never at module
 // load. The Groq SDK constructor THROWS when GROQ_API_KEY is missing/empty,

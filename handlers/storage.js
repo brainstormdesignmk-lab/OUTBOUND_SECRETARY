@@ -8,15 +8,19 @@
 //   - CSV output with header migration
 // ========================================
 import fs from 'fs';
-import { join } from 'path';
+import { join, dirname } from 'path';
 import { getRentDefaults, calculateRentCommission } from '../lib/commission.js';
+import { config } from '../config.js';
 
 // ========================================
 // CONSTANTS
 // ========================================
-const PROPERTY_ROOT = '/home/metropolis2/Documents/NEKRETNINI_EVBR';
+// Paths come from config (project-root-relative defaults, env-overridable)
+// — previously hardcoded to the old machine's /home/metropolis2/... paths,
+// which broke after the Linux migration (EACCES/ENOENT).
+const PROPERTY_ROOT = config.PROPERTY_ROOT;
 const START_ID = 100;
-const CSV_PATH = '/home/metropolis2/real-estate-atoms/data/collected-leads.csv';
+const CSV_PATH = config.CSV_OUTPUT_PATH;
 
 // ========================================
 // HELPER: Get next property ID
@@ -84,7 +88,7 @@ function csvNum(value) {
 }
 
 export function saveToCSV(data, phone, propertyId) {
-  const dir = '/home/metropolis2/real-estate-atoms/data';
+  const dir = dirname(CSV_PATH);
   if (!fs.existsSync(dir)) {
     fs.mkdirSync(dir, { recursive: true });
   }
