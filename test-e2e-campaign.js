@@ -1,3 +1,4 @@
+import { createHarness } from './test-helpers.js';
 // ========================================
 // E2E CAMPAIGN SIMULATION — Full Data Collection Flow
 // ========================================
@@ -18,18 +19,10 @@
 // ========================================
 import { generateResponse } from './service.js';
 
-let passed = 0;
-let failed = 0;
+const harness = createHarness();
+const assert = harness.assert;
 
-function assert(label, condition, detail) {
-  if (condition) {
-    console.log(`  ✅ ${label}`);
-    passed++;
-  } else {
-    console.log(`  ❌ ${label}${detail ? ' — ' + detail : ''}`);
-    failed++;
-  }
-}
+
 
 // ========================================
 // HELPER: Create a fresh session for testing
@@ -52,8 +45,8 @@ function createSession(scenario = 'sale', { preAccept = false } = {}) {
     },
     messages: preAccept ? [
       { role: 'model', text: isRent
-        ? 'Здраво, јас сум Ана од Metropolis. Ве контактирам за огласот за станот што се издава. Дали е сѐ уште достапен и дали сте заинтересирани за соработка?'
-        : 'Здраво, јас сум Ана од Metropolis. Ве контактирам за огласот за станот што се продава. Дали е сѐ уште достапен и дали сте заинтересирани за соработка без провизија за вас?'
+        ? 'Здраво, јас сум Ана од Metropolis - Агенција за Недвижности. Ве контактирам за огласот за станот што се издава. Дали е се уште достапен и дали сте заинтересирани за соработка?'
+        : 'Здраво, јас сум Ана од Metropolis - Агенција за Недвижности. Ве контактирам за огласот за станот што се продава. Дали е се уште достапен и дали сте заинтересирани за соработка без провизија за вас?'
       }
     ] : [],
     phone: '+38970123456'
@@ -212,7 +205,7 @@ async function runScenario1() {
 
   // Turn 19: Address → CLOSED
   res = await sendMessage(session, "Jane Sandanski 45");
-  assert("S1-T19: type=CLOSED", res.type === "CLOSED", `got ${res.type}`);
+  assert("S1-T19: type=CLOSED", res.type === "CLOSE", `got ${res.type}`);
   assert("S1-T19: address=Jane Sandanski 45", session.collectedData.address === "Jane Sandanski 45", `got ${session.collectedData.address}`);
 
   // Verify all fields collected
@@ -328,12 +321,12 @@ async function runScenario2() {
       if (res.type !== "CLOSED" && res.nextField === 'address') {
         res = await sendMessage(session, "Jane Sandanski 45");
       }
-      if (res.type === "CLOSED") {
+      if (res.type === "CLOSE") {
         assert("S2-END: close message received", true, "");
         break;
       }
     }
-    if (res.type === "CLOSED") break;
+    if (res.type === "CLOSE") break;
 
     const answers = {
       'ac': "klima",
@@ -352,7 +345,7 @@ async function runScenario2() {
   }
 
   assert("S2-END: all fields collected",
-    steps < 15 && res.type === "CLOSED",
+    steps < 15 && res.type === "CLOSE",
     `steps=${steps}, type=${res.type}`);
 
   console.log(`   ✔ Scenario 2 complete: bulk extraction verified`);
@@ -441,7 +434,7 @@ async function runScenario3() {
     res = await sendMessage(session, remaining[i].input);
     const isLast = i === remaining.length - 1;
     if (isLast) {
-      assert("S3-END: close message", res.type === "CLOSED", `got ${res.type}`);
+      assert("S3-END: close message", res.type === "CLOSE", `got ${res.type}`);
     } else {
       assert(`S3-T${10 + i}: ${remaining[i].field} extracted`, session.collectedData[remaining[i].field] === remaining[i].val,
         `${remaining[i].field}: got ${JSON.stringify(session.collectedData[remaining[i].field])}`);
@@ -600,6 +593,109 @@ async function runScenario5() {
 }
 
 // ========================================
+// SCENARIO 6: ownerName chatty-tail truncation (regression test)
+// ========================================
+// Owner replies to "Како да ве запишам?" with chatty text appended after
+// the name (e.g. "GORAN I BI SAKALDA DA SE ZAPOZNAEME" = "Goran, and I would
+// like to get to know you"). Only the actual name must be stored.
+// ========================================
+console.log(`\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
+console.log(`📋 SCENARIO 6: ownerName chatty-tail truncation`);
+console.log(`━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
+
+async function runScenario6() {
+  // Each truncation case runs on a FRESH session. Once ownerName is stored,
+  // nextField moves to address — a second name message on the same session
+  // would be blindly captured by the address handler (nextField === 'address'),
+  // which broke the original sequential version of this test.
+  const nameSession = () => {
+    const session = createSession('sale');
+    // Pre-fill all fields except ownerName/address so nextField=ownerName
+    session.collectedData = {
+      cooperationAccepted: true,
+      transactionType: 'sale',
+      propertyType: 'apartment',
+      cleanPrice: 183000,
+      totalSqm: 58,
+      hasTerrace: true,
+      terraceSqm: 10,
+      bedrooms: 4,
+      floor: 6,
+      totalFloors: 10,
+      elevator: true,
+      heating: 'district',
+      heatingType: 'district',
+      ac: true,
+      parking: true,
+      orientation: 'jug-zapad',
+      furnished: true,
+      furnishedLevel: 'full',
+      yearBuilt: 1985,
+      renovated: false,
+      documentationClean: false,
+      documentationIssues: 'ostavinska',
+      photosStatus: 'VIBER_PENDING',
+      photos: true,
+      photosPermission: true,
+      photosSource: 'VIBER_PENDING'
+    };
+    return session;
+  };
+
+  let session;
+  let res;
+
+  // Case 1: Chatty tail after name → only "Goran" stored
+  session = nameSession();
+  res = await sendMessage(session, "GORAN I BI SAKALDA DA SE ZAPOZNAEME");
+  assert("S6-C1: type=QUESTION", res.type === "QUESTION", `got ${res.type}`);
+  assert("S6-C1: nextField=address", res.nextField === "address", `got ${res.nextField}`);
+  assert("S6-C1: ownerName=Goran (tail truncated)", session.collectedData.ownerName === "Goran", `got ${session.collectedData.ownerName}`);
+
+  // Case 2: Punctuation-truncated name — "Zoran Atanasov. Ke se javam utre"
+  session = nameSession();
+  res = await sendMessage(session, "ZORAN ATANASOV. KE SE JAVAM UTRE");
+  assert("S6-C2: type=QUESTION", res.type === "QUESTION", `got ${res.type}`);
+  assert("S6-C2: nextField=address", res.nextField === "address", `got ${res.nextField}`);
+  assert("S6-C2: ownerName=Zoran Atanasov (period cut)", session.collectedData.ownerName === "Zoran Atanasov", `got ${session.collectedData.ownerName}`);
+
+  // Case 3: Plain name — no chatty tail, stored as-is
+  session = nameSession();
+  res = await sendMessage(session, "MARINA STOJANOVA");
+  assert("S6-C3: type=QUESTION", res.type === "QUESTION", `got ${res.type}`);
+  assert("S6-C3: nextField=address", res.nextField === "address", `got ${res.nextField}`);
+  assert("S6-C3: ownerName=Marina Stojanova", session.collectedData.ownerName === "Marina Stojanova", `got ${session.collectedData.ownerName}`);
+
+  // Case 4: Surname containing "mislam" must NOT be truncated (letter-boundary guard)
+  session = nameSession();
+  res = await sendMessage(session, "STOJAN MISLAMOV");
+  assert("S6-C4: type=QUESTION", res.type === "QUESTION", `got ${res.type}`);
+  assert("S6-C4: nextField=address", res.nextField === "address", `got ${res.nextField}`);
+  assert("S6-C4: ownerName=Stojan Mislamov (surname preserved)", session.collectedData.ownerName === "Stojan Mislamov", `got ${session.collectedData.ownerName}`);
+
+  // Case 5: "Mislamovski" surname also preserved
+  session = nameSession();
+  res = await sendMessage(session, "ZORAN MISLAMOVSKI");
+  assert("S6-C5: nextField=address", res.nextField === "address", `got ${res.nextField}`);
+  assert("S6-C5: ownerName=Zoran Mislamovski (surname preserved)", session.collectedData.ownerName === "Zoran Mislamovski", `got ${session.collectedData.ownerName}`);
+
+  // Case 6: Comma + conversational tail → name only, trailing comma stripped
+  session = nameSession();
+  res = await sendMessage(session, "GORAN, MISLAM DEKA SI DOBRA");
+  assert("S6-C6: nextField=address", res.nextField === "address", `got ${res.nextField}`);
+  assert("S6-C6: ownerName=Goran (comma + tail stripped)", session.collectedData.ownerName === "Goran", `got ${session.collectedData.ownerName}`);
+
+  // Final: address → CLOSE (continues the Case 6 session)
+  // NOTE: the address handler stores the raw trimmed input (no title-casing),
+  // so the message is sent title-cased to match the stored value exactly.
+  res = await sendMessage(session, "Jane Sandanski 45");
+  assert("S6-FINAL: type=CLOSE", res.type === "CLOSE", `got ${res.type}`);
+  assert("S6-FINAL: address=Jane Sandanski 45", session.collectedData.address === "Jane Sandanski 45", `got ${session.collectedData.address}`);
+
+  console.log(`   ✔ Scenario 6 complete: ownerName truncation verified`);
+}
+
+// ========================================
 // RUN ALL SCENARIOS
 // ========================================
 (async () => {
@@ -613,16 +709,17 @@ async function runScenario5() {
     await runScenario3();
     await runScenario4();
     await runScenario5();
+    await runScenario6();
 
     // SUMMARY
     console.log(`\n=======================================================`);
     console.log(`📊 E2E CAMPAIGN TEST SUMMARY:`);
-    console.log(`   ✅ Passed: ${passed}`);
-    console.log(`   ❌ Failed: ${failed}`);
-    console.log(`   📋 Total:  ${passed + failed}`);
+    console.log(`   ✅ Passed: ${harness.passed}`);
+    console.log(`   ❌ Failed: ${harness.failed}`);
+    console.log(`   📋 Total:  ${harness.passed + harness.failed}`);
     console.log(`=======================================================`);
 
-    if (failed > 0) {
+    if (harness.failed > 0) {
       process.exit(1);
     } else {
       console.log(`\n🟢 ALL E2E CAMPAIGN TESTS PASSED`);

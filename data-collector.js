@@ -3,8 +3,8 @@
 // ========================================
 // Extracts ALL simple fields from EVERY user message,
 // regardless of current nextField.
-// Complex stateful handlers (heating follow-up, terrace
-// follow-up, photos) remain in service.js.
+// Complex stateful handlers (terrace follow-up, photos)
+// remain in service.js. Heating is handled by extractHeating.
 // ========================================
 import {
   parseMacedonianNumber,
@@ -52,17 +52,9 @@ function extractTotalSqm(u, data) {
     const parsed = parseNumberWords(sqmWordMatch[1]);
     if (parsed !== null && parsed >= 10 && parsed <= 999) return { totalSqm: parsed };
   }
-  // Fallback: first reasonable number — but skip if near price context (evra/iljadi)
-  const firstNum = extractFirstNumber(u);
-  if (firstNum !== null && firstNum >= 10 && firstNum <= 999) {
-    // Check if this number is actually a price (near evra/iljadi context)
-    const uClean = u.toLowerCase();
-    if (/iljadi|илјади|evra|евра|eur|evro|евро|kirija|кирија|cena|цена/i.test(uClean)) {
-      // Number near price context — only extract if explicitly with sqm word
-      return null;
-    }
-    return { totalSqm: firstNum };
-  }
+  // NO bare-number fallback. If the message doesn't contain an explicit sqm
+  // keyword (m2, kvadrati, etc.), don't guess. Ana must NEVER invent data.
+  // The workflow will ask the totalSqm question properly in DATA_COLLECTION.
   return null;
 }
 
@@ -163,13 +155,68 @@ function extractFloor(u, data) {
     return { floor: totalFloors + 1 };
   }
   // Ordinal floors (прв, втор, трет, петти, etc.)
-  const ordinal = parseOrdinalFloor(u);
+  // TIME-COUNT GUARD (reported quirk): ordinals counting occurrences or days
+  // — "po tret pat" (for the third time), "vtor den" (second day) — are NOT
+  // floor answers. Strip ordinal+time-word phrases BEFORE ordinal parsing so
+  // "PO TRET PAT TI KAZUVAM" no longer yields floor=3, while
+  // "PO TRET PAT ... NA VTORI" still yields floor=2 (the real floor word
+  // survives the strip and parseOrdinalFloor still finds "vtor").
+  // The [а-яa-z]* suffix eats inflections ("вториот ден"), (?:\s|$) prevents
+  // matching word parts ("denes" contains "den" but is not a time phrase),
+  // and "kat"/"sprat" are NOT time words so "tret kat" still extracts 3.
+  const uNoTimeCount = u.replace(
+    /(?:prv|прв|vtor|втор|tret|трет|cetvrt|четврт|petti|петти|peti|пети|sesti|шести|sedmi|седми|osmi|осми|devetti|деветти)[а-яa-z]*\s*(?:pat|пат|den|ден)(?:\s|$)/gi,
+    ' '
+  );
+  const ordinal = parseOrdinalFloor(uNoTimeCount);
   if (ordinal !== null) return { floor: ordinal };
   // Digit floor — find number adjacent to floor context words.
   // Uses (?!nica) negative lookahead to prevent "kat" from matching
   // "katnica" ("kat" + "nica") while still allowing "kat" standalone,
   // "kata", "3kat" (no space, common in Viber shorthand), etc.
-  const floorMatch = u.match(/(\d{1,2})\s*(kat(?!nica)|кат(?!ница)|kata|ката|sprat|спрат|sprata|спрата|floor)/i);
+  // TOTAL-FLOORS CONTEXT GUARD: Prevent "zgradata ima 13 sprata" from setting floor=13.
+  // When the message clearly states the building's total floor count, skip floor
+  // extraction — these are for extractTotalFloors.
+  //
+  // Key patterns:
+  //   "zgradata ima 13 sprata" → totalFloors=13 (NOT floor=13)
+  //   "zgradata ima 10 kata" → totalFloors=10 (NOT floor=10)
+  //   "ima 10 kata" → totalFloors=10 (NOT floor=10)
+  //
+  // NEVER blocked (correct floor extraction):
+  //   "na 3 sprat" → floor=3 (preceded by "na", not total-floors context)
+  //   "tret sprat" → floor=3 (ordinal, not total-floors context)
+  //
+  // NOTE: We include "sprata" in the guard (NOT in extraction paths) because
+  // "sprata" is the PLURAL form meaning total floors. But we use
+  // "sprat(?!a)(?!а)" in extraction paths (see below) to prevent the singular
+  // "sprat" from matching the plural "sprata" as a substring.
+  if (/(?:zgradata|зградата|zgradava|зградава|ima|има|e|е|se|се|vkupno|вкупно)\s+\d{1,2}\s+(?:kat(?!nica)|кат(?!ница)|kata|ката|sprata|спрата)/i.test(u)) {
+    console.log(`[FLOOR: skip — total-floors (digits) context in "${u}"]`);
+    return null;
+  }
+  // WORD-NUMBER VARIANT: Catch total-floors context with Macedonian word
+  // numbers instead of digits. E.g., "zgradata ima trinaest kata",
+  // "ima deset kata", "zgradata ima pet kata".
+  // Uses parseMacedonianNumber to verify the word IS a number (prevents
+  // false positives from non-number words like "nova" or "visoka").
+  const wordNumberGuard = u.match(/(?:zgradata|зградата|zgradava|зградава|ima|има|e|е|se|се|vkupno|вкупно)\s+(\S+)\s+(?:kata|ката|sprata|спрата|spratovi|спратови)/i);
+  if (wordNumberGuard) {
+    const parsed = parseMacedonianNumber(wordNumberGuard[1]);
+    if (parsed !== null && parsed >= 1 && parsed <= 50) {
+      console.log(`[FLOOR: skip — total-floors (word-number) context in "${u}"]`);
+      return null;
+    }
+  }
+  // Digit floor — find number adjacent to floor context words.
+  // Uses (?!nica) negative lookahead to prevent "kat" from matching
+  // "katnica" ("kat" + "nica") while still allowing "kat" standalone,
+  // "kata", "3kat" (no space, common in Viber shorthand), etc.
+  // NOTE: "sprat|спрат" uses (?!a)(?!а) negative lookahead to prevent
+  // matching "sprata"/"спрата" (plural = total floors). The 'a'/'а'
+  // suffix makes it plural in Macedonian — the singular "sprat" means
+  // "which floor", the plural "sprata" means "total floors".
+  const floorMatch = u.match(/(\d{1,2})\s*(kat(?!nica)|кат(?!ница)|kata|ката|sprat(?!a)(?!а)|спрат(?!а)(?!a)|floor)/i);
   if (floorMatch) {
     const num = parseInt(floorMatch[1]);
     if (num >= 0 && num <= 50) return { floor: num };
@@ -180,18 +227,47 @@ function extractFloor(u, data) {
   // "10" without "kat", "sprat", etc. has 0% confidence → return null.
   // Uses (?!nica) negative lookahead to prevent "kat" from matching
   // "katnica" while still allowing "3kat" (no space, common in Viber).
-  const hasFloorContext = /kat(?!nica)|кат(?!ница)|sprat|спрат|floor|sprata|спрата|kata|ката|eta|ета/i.test(u);
+  // PROXIMITY-BASED FLOOR CONTEXT: require the floor keyword to be within
+  // ~3 words of the candidate number. This prevents false positives where
+  // "kat" appears elsewhere in the message but the number is about sqm or price.
+  // Example: "50m2 na kat 3" — the "kat" is close to "3", not "50".
+  // Uses extractFirstNumber then checks if a floor keyword is within word proximity.
   const firstNum = extractFirstNumber(u);
-  if (firstNum !== null && firstNum >= 0 && firstNum <= 50 && hasFloorContext) {
-    // Skip if the message contains context from another field
-    if (/m2|м2|кв|kvadrati|квадрати|kv|sqm|spalni|спални|terasa|тераса/i.test(u)) return null;
-    return { floor: firstNum };
+  if (firstNum !== null && firstNum >= 0 && firstNum <= 50) {
+    const words = u.split(/\s+/);
+    const numIndex = words.findIndex(w => w.match(/\d+/));
+    if (numIndex !== -1) {
+      // Check within 3 words before AND after the number for floor keywords
+      const start = Math.max(0, numIndex - 3);
+      const end = Math.min(words.length, numIndex + 4);
+      const nearWords = words.slice(start, end);
+      const hasNearFloorContext = nearWords.some(w =>
+        /kat(?!nica)|кат(?!ница)|sprat(?!a)(?!а)|спрат(?!а)(?!a)|floor|kata|ката|eta|ета/i.test(w)
+      );
+      if (hasNearFloorContext) {
+        // Skip if the message contains context from another field
+        if (/m2|м2|кв|kvadrati|квадрати|kv|sqm|spalni|спални|terasa|тераса/i.test(u)) return null;
+        return { floor: firstNum };
+      }
+    }
   }
+  // Also check parsed word numbers with proximity-based floor context.
+  // Uses the same proximity logic as the digit path above to prevent false
+  // positives where a floor keyword appears elsewhere in the message.
   const wordNum = parseMacedonianNumber(u);
-  if (wordNum !== null && wordNum >= 0 && wordNum <= 50 && hasFloorContext) {
-    // Skip if message contains terrace or question context (could be answering terrace/other follow-up)
-    if (/terasa|тераса|zosto|зошто|zasto|зашто/i.test(u)) return null;
-    return { floor: wordNum };
+  if (wordNum !== null && wordNum >= 0 && wordNum <= 50) {
+    const words = u.split(/\s+/);
+    // For word numbers, find ANY word in the message that is a floor keyword.
+    // Then check if the parsed word number is near that floor keyword.
+    // This catches "deseti sprat" (word number + floor keyword adjacent).
+    const floorWordIdx = words.findIndex(w =>
+      /kat(?!nica)|кат(?!ница)|sprat(?!a)(?!а)|спрат(?!а)(?!a)|floor|kata|ката|eta|ета/i.test(w)
+    );
+    if (floorWordIdx !== -1) {
+      // Skip if message contains terrace or question context (could be answering terrace/other follow-up)
+      if (/terasa|тераса|zosto|зошто|zasto|зашто/i.test(u)) return null;
+      return { floor: wordNum };
+    }
   }
   return null;
 }
@@ -251,6 +327,62 @@ function extractAC(u, data) {
   return null;
 }
 
+// ========================================
+// Simple heating extraction (keyword-based, not complex follow-up)
+// Detects heating type from explicit keywords in the message.
+// Only fires when the full heating TYPE is mentioned ("parno gradsko",
+// "centralno", "toplovod", "drva", "gas", etc.), NOT bare "parno" alone
+// (which is left for the follow-up handler in service.js).
+// ========================================
+function extractHeating(u, data) {
+  if (data.heating !== undefined && data.heating !== null) return null;
+
+  // District/central: parno gradsko, gradsko parno, centralno, toplovod, gradsko
+  if (/parno\s+gradsko|gradsko\s+parno|централно|centralno|топловод|toplovod|градско|gradsko/i.test(u)) {
+    return { heating: "district", heatingType: "district" };
+  }
+
+  // Private/own: parno sopstveno, sopstveno parno, sopstveno
+  if (/parno\s+sopstveno|sopstveno\s+parno|сопствено\s+парно|парно\s+сопствено|sopstveno(?!\s+gradsko)|сопствено(?!\s+градско)/i.test(u)) {
+    return { heating: "private", heatingType: "private" };
+  }
+
+  // Electric: struja, electricno
+  if (/struja|струја|електрично|electricno/i.test(u)) {
+    return { heating: "electric", heatingType: "electric" };
+  }
+
+  // Wood: drva
+  if (/drva|дрва/i.test(u) && !/pred|пред|pri|при/i.test(u)) {
+    return { heating: "wood", heatingType: "wood" };
+  }
+
+  // Pellets: pelet, peleti
+  if (/pelet|пелет|peleti|пелети/i.test(u)) {
+    return { heating: "pellets", heatingType: "pellets" };
+  }
+
+  // Oil: nafta
+  if (/nafta|нафта/i.test(u)) {
+    return { heating: "oil", heatingType: "oil" };
+  }
+
+  // Gas: gas, priroden gas
+  if (/gas|гас|priroden gas|природен гас/i.test(u)) {
+    return { heating: "gas", heatingType: "gas" };
+  }
+
+  // Inverter as heating: ONLY if no higher-priority heating keyword matched.
+  // Inverter AC is primarily a cooling device; only extract as heating when
+  // the message has no parno/centralno/struja/drva/etc. keywords.
+  if (/inverter|инвертер|split|сплит/i.test(u) &&
+      !/parno|парно|struja|струја|drva|дрва|pelet|пелет|nafta|нафта|gas|гас|toplovod|топловод|centralno|централно|gradsko|градско|sopstveno|сопствено/i.test(u)) {
+    return { heating: "inverter", heatingType: "inverter" };
+  }
+
+  return null;
+}
+
 function extractParking(u, data) {
   if (data.parking !== undefined && data.parking !== null) return null;
   if (/nema parking|нема паркинг|nema garaza|нема гаража|bez parking|без паркинг|без гаража|bez garaza/i.test(u)) {
@@ -260,10 +392,60 @@ function extractParking(u, data) {
     let parkingType = "public";
     if (/garaza|гаража|garage|гараж|podzemna|подземна|podzemno|подземно|na -1|на -1|na -2|на -2|na -|на -|podzemno parking|подземно паркинг|podzemna garaza|подземна гаража|garaza na -|гаража на -/i.test(u)) {
       parkingType = "garage";
-    } else if (/privat|приват|sopstveno|сопствено|pred zgrada|пред зграда/i.test(u)) {
+    } else if (/privat|приват|sopstveno|сопствено|pred zgrada|пред зграда|so nego|со него|so stanot|со станот|so apartmanot|со апартманот|so imotot|со имотот|kon stanot|кон станот/i.test(u)) {
       parkingType = "private";
     }
-    return { parking: true, parkingType };
+
+    // Parking/garage sold separately detection — for ANY parking type, not
+    // just garage. When the owner says the parking/garage is sold separately
+    // from the apartment ("posebno", "oddelno", "dodatni", "plus", "extra"),
+    // the parking has its own price ON TOP of the apartment price.
+    // Extract parkingSeparate=true and parkingPrice (e.g., "za dodatni sest
+    // iljadi" → 6000). Common Viber patterns:
+    //   "parking mestoto se prodava posebno za dodatni sest iljadi" → 6000
+    //   "garaza na -2 ama ja prodavam posebno. za plus 5000"
+    //   "garaza ima ama oddelno se prodava za 10000 evra"
+    //   "garaza extra 8000"
+    //   "garaza plus 5000"
+    let parkingSeparate = null;
+    let parkingPrice = null;
+    if (/posebno|посебно|oddelno|одделно|oddeln|одделн|oddelen|одделен|dopolnitelno|дополнително|dodatni|дополнителни|dodatno|дополнително|plus|плус|extra|екстра/i.test(u)) {
+      parkingSeparate = true;
+      // Upgrade type: a separately-sold parking spot is a private spot,
+      // not public street parking (the default when no garage keywords).
+      if (parkingType === 'public') parkingType = 'private';
+      // Extract price from explicit "plus/extra/posebno/za + number" pattern.
+      // NO aggressive fallback (no bare \d{4,6}) — prevents grabbing cleanPrice from same message.
+      const priceMatch = u.match(/(?:plus|плус|extra|екстра|posebno|посебно|oddelen|одделен|oddeln|одделн|oddelno|одделно|dodatni|дополнителни|dodatno|дополнително|za|за)\s+(\d{2,6})/i);
+      if (priceMatch) {
+        parkingPrice = parseInt(priceMatch[1]);
+      } else {
+        // Word/digit number before iljadi/evra: "za dodatni sest iljadi" → 6000.
+        // Take the LAST word token before the currency keyword and parse it
+        // ("dodatni sest" → "sest" → 6 → ×1000 = 6000).
+        const wordPriceMatch = u.match(/(?:plus|плус|extra|екстра|posebno|посебно|oddelen|одделен|oddeln|одделн|oddelno|одделно|dodatni|дополнителни|dodatno|дополнително|za|за)\s+(\S+(?:\s+\S+){0,2})\s+(?:iljadi|илјади|evra|евра|eur|евро)/i);
+        if (wordPriceMatch) {
+          const tokens = wordPriceMatch[1].trim().split(/\s+/);
+          const lastToken = tokens[tokens.length - 1];
+          // Try direct digit parsing first ("10000 evra")
+          const digitMatch = lastToken.match(/(\d{2,7})/);
+          if (digitMatch) {
+            parkingPrice = parseInt(digitMatch[1]);
+          } else {
+            // Parse Macedonian word number ("sest" in "dodatni sest iljadi")
+            const parsed = parseMacedonianNumber(lastToken);
+            if (parsed !== null && parsed >= 1 && parsed <= 999) {
+              parkingPrice = /iljadi|илјади/i.test(wordPriceMatch[0]) ? parsed * 1000 : parsed;
+            }
+          }
+        }
+      }
+    }
+
+    const result = { parking: true, parkingType };
+    if (parkingSeparate !== null) result.parkingSeparate = parkingSeparate;
+    if (parkingPrice !== null) result.parkingPrice = parkingPrice;
+    return result;
   }
   return null;
 }
@@ -289,11 +471,19 @@ function extractFurnished(u, data) {
   // Only specific furniture phrases are matched: "prazen/правен" (empty), "bez namestaj/без мебел"
   // (no furniture), "nenamesten/ненаместен" (unfurnished), "prazno/празно" (empty),
   // "gola sostojba/гола состојба" (bare condition), "ne e namesten/не е наместен" (not furnished).
-  if (/prazen|правен|bez namestaj|без мебел|nenamesten|ненаместен|prazno|празно|gola sostojba|гола состојба|ne e namesten|не е наместен/i.test(u)) {
+  if (/prazen|правен|bez namestaj|без мебел|nenamesten|ненаместен|prazno|празно|gola sostojba|гола состојба|ne e namesten|не е наместен|sam ke si nosam|сам ќе си носам|se nosam|се носам|nisto ne ostanuva|ништо не останува|se e moe|се е мое/i.test(u)) {
     return { furnished: false, furnishedLevel: "empty" };
   }
-  if (/komplet|ful|full|kompletno|celosno|целосно|m paket|м пакет|top namesten|топ наместен|namesten|наместен|opremen|опремен|namestaj|мебел|kompletno namesten|комплетно наместен|se prodava namesten|се продава наместен|so namestaj|со мебел|namesten|наместен/i.test(u)) {
+  if (/komplet|ful|full|kompletno|celosno|целосно|m paket|м пакет|top namesten|топ наместен|namesten|наместен|opremen|опремен|kompletno namesten|комплетно наместен|se prodava namesten|се продава наместен/i.test(u)) {
     return { furnished: true, furnishedLevel: "full" };
+  }
+  // Partial furnished: owner keeps some furniture or leaves some items.
+  // Common phrases: "kujnata ke ostane" (kitchen stays), "del od mebel" (part of furniture),
+  // "nesto ostanuva" (something remains), "drugo si nosam" (I'll take the rest),
+  // "ke go ispraznam" (I'll empty it — means partial in context, owner keeps built-in).
+  // These indicate the unit is partially furnished — some items stay, some don't.
+  if (/kujnata\s+ke|кујната\s+ќе|kujna\s+ke|кујна\s+ќе|del\s+od|дел\s+од|nesto\s+ostanuva|нешто\s+останува|ostanuva|останува|ke\s+ostane|ќе\s+остане|ostanat|останат|drugo\s+si\s+nosam|друго\s+си\s+носам|ke\s+go\s+(ispraznam|izpraznam)|ќе\s+го\s+испразнам|ke\s+ispraznam|ќе\s+испразнам|polunamesten|полунаместен|delumno\s+namesten|делумно\s+наместен|polovina|половина|50%|ima\s+kujna|има\s+кујна|ima\s+plakari|има\s+плакари|ima\s+namestaj|има\s+мебел|namesten\s+del|наместен\s+дел|osnovna\s+kujna|основна\s+кујна/i.test(u)) {
+    return { furnished: true, furnishedLevel: "partial" };
   }
   return null;
 }
@@ -310,13 +500,26 @@ function extractRenovated(u, data) {
   if (/ne e renoviran|не е реновиран|nema renoviran|нема реновирано|ne e renovirano|не е реновирано|nema renovirano|нема реновирано|ne renoviran|не реновиран/i.test(u)) {
     return { renovated: false, renovationYear: null };
   }
+  // TIGHT NEGATION GUARD: Check if ANY renovation keyword is directly negated by
+  // a preceding "ne" or "не" (with optional pronoun like "go", "se" in between).
+  // This catches patterns like "ne go renoviravme voopste" (we did NOT renovate it at all)
+  // that contain renovation keywords as substrings but are explicitly negated.
+  // Without this guard, bare substring matching of "renoviravme" would false-positive
+  // to renovated=true. The check is TIGHT — only allows ne + [optional pronoun] + verb,
+  // with NO clause separators (dali, znam, mozam, etc.) in between.
+  // This intentionally does NOT catch "ne znam dali e renoviran" (uncertain, not negated).
+  if (/(?:^|\s)(?:ne|не)\s+(?:(?:go|se|me|ti|ga|gi|sme|ste|e|ja|bea|sum|si|го|се|ме|ти|га|ги|сме|сте|е|ја|беа|сум|си)\s+){0,2}(?:renoviran[аоие]?|реновиран[аоие]?|renoviravme|реновиравме|renoviraa|реновираа|renovirav|реновирав|renovira|реновира|renoviral|renovirale|renovirali|реновирал|реновирале|реновирали|obnoven[аоие]?|обновен[аоие]?|osvezen[аоие]?|освежен[аоие]?)/i.test(u)) {
+    return { renovated: false, renovationYear: null };
+  }
   // Check if year is embedded — prefer year near renovation keywords
+  // Also matches past-tense verb forms: renoviravme (we renovated), renoviral (he renovated)
   // First, try to find year specifically near renovation words
-  const renovYearNear = u.match(/(?:renoviran|реновиран|obnoven|обновен|osvezen|освежен).{0,20}((?:19|20)\d{2})/i);
+  const renovYearRegex = /renoviran|реновиран|renoviravme|реновиравме|go renoviravme|го реновиравме|renoviraa|реновираа|renovirav|реновирав|renovira|реновира|renoviral|реновирал|obnoven|обновен|osvezen|освежен/i;
+  const renovYearNear = u.match(new RegExp('(?:' + renovYearRegex.source + ').{0,20}((?:19|20)\\d{2})', 'i'));
   if (renovYearNear) {
     return { renovated: true, renovationYear: parseInt(renovYearNear[1]) };
   }
-  const renovYearBefore = u.match(/((?:19|20)\d{2}).{0,20}(?:renoviran|реновиран|obnoven|обновен|osvezen|освежен)/i);
+  const renovYearBefore = u.match(/((?:19|20)\d{2}).{0,20}(?:renoviran|реновиран|renoviravme|реновиравме|go renoviravme|го реновиравме|renoviraa|реновираа|renovirav|реновирав|renovira|реновира|renoviral|реновирал|obnoven|обновен|osvezen|освежен)/i);
   if (renovYearBefore) {
     return { renovated: true, renovationYear: parseInt(renovYearBefore[1]) };
   }
@@ -325,7 +528,7 @@ function extractRenovated(u, data) {
   // If this matches with a renovation keyword present, extract both renovated and year.
   // Requires "godini"/"години" context to prevent false positives like
   // "parking pred zgrada" (parking in front of building).
-  if (/pred\s+\d+\s+godini|пред\s+\d+\s+години|pred\s+\d+\s+god|пред\s+\d+\s+год|pri\s+\d+\s+godini|при\s+\d+\s+години|pri\s+\d+\s+god|при\s+\d+\s+год/i.test(u)) {
+  if (/pred\s+\d+\s+godini|пред\s+\d+\s+години|pred\s+\d+\s+god|пред\s+\d+\s+год|pri\s+\d+\s+godini|при\s+\d+\s+години|pri\s+\d+\s+god|при\s+\d+\s+год|pred\s+\d+\s+godina|пред\s+\d+\s+година/i.test(u)) {
     const years = u.match(/\d+/);
     if (years) {
       const currentYear = new Date().getFullYear();
@@ -337,11 +540,30 @@ function extractRenovated(u, data) {
       return { renovated: true, renovationYear: currentYear - wordNum };
     }
   }
+  // "pred godina" (without digit) — "about a year ago" = 1 year.
+  // Must have a renovation keyword in the message to prevent false positives
+  // like "pred godina na prodavnicata" (before the store a year ago).
+  // NOTE: Use (?:\s|$) instead of \b after the word because \b doesn't
+  // work with Cyrillic characters (\w only covers ASCII).
+  if (/pred\s+godina(?:\s|$)|пред\s+година(?:\s|$)/i.test(u) && /renoviran|реновиран|renoviravme|реновиравме|go renoviravme|го реновиравме|renoviraa|реновираа|renovirav|реновирав|renovira|реновира|renoviral|реновирал|obnoven|обновен|osvezen|освежен|sreden|среден|nedavno|недавно|osvezhivme|освеживме/i.test(u)) {
+    const currentYear = new Date().getFullYear();
+    return { renovated: true, renovationYear: currentYear - 1 };
+  }
+  // "pred [word number] godini" — word-based years ("pred dve godini" = 2 years ago,
+  // "pred tri godini" = 3 years ago). Requires a renovation keyword present.
+  const godiniWordMatch = u.match(/pred\s+([а-яА-Яa-zA-Z]+)\s+godini(?!\S)|пред\s+([а-яА-Яa-zA-Z]+)\s+години(?!\S)/i);
+  if (godiniWordMatch && /renoviran|реновиран|renoviravme|реновиравме|go renoviravme|го реновиравме|renoviraa|реновираа|renovirav|реновирав|renovira|реновира|renoviral|реновирал|obnoven|обновен|osvezen|освежен|sreden|среден|nedavno|недавно|osvezhivme|освеживме|sredno renoviran|средно реновиран|celosno renoviran|целосно реновиран/i.test(u)) {
+    const wordNum = parseMacedonianNumber(godiniWordMatch[1] || godiniWordMatch[2]);
+    if (wordNum !== null && wordNum >= 1 && wordNum <= 100) {
+      const currentYear = new Date().getFullYear();
+      return { renovated: true, renovationYear: currentYear - wordNum };
+    }
+  }
   // Renovation-specific words (no year) — just "renoviran" means yes, year unknown.
   // NOTE: "pre"/"пред" is intentionally excluded — it matches "pred zgrada" (in front
   // of the building) as a false positive. "novo"/"нов" is also excluded — "nova zgrada"
   // (new building) is not a renovation. "skoro"/"скоро" is excluded (generic "soon").
-  if (/реновиран|renoviran|обновен|obnoven|sreden|среден|kompletno renoviran|комплетно реновиран|delumno renoviran|делумно реновиран|nedavno|недавно|osvezhivme|освеживме|go osvezivme|го освеживме/i.test(u)) {
+  if (/реновиран|renoviran|renoviravme|реновиравме|go renoviravme|го реновиравме|renoviraa|реновираа|renovirav|реновирав|renovira|реновира|renoviral|реновирал|обновен|obnoven|sreden|среден|kompletno renoviran|комплетно реновиран|delumno renoviran|делумно реновиран|nedavno|недавно|osvezhivme|освеживме|go osvezivme|го освеживме|izrenoviran|изреновиран|renoviran e|реновиран е|renoviran od|реновиран од|renoviran i|реновиран и|renoviran pred|реновиран пред|sredno renoviran|средно реновиран|celosno renoviran|целосно реновиран/i.test(u)) {
     return { renovated: true, renovationYear: null };
   }
   // Fallback: any year in the message — but ONLY if renovation word is present
@@ -385,17 +607,35 @@ function extractRenovationYear(u, data) {
 
 function extractDocumentationClean(u, data) {
   if (data.documentationClean !== undefined && data.documentationClean !== null) return null;
-  if (/hipoteka|хипотека|ostavinska|оставинска|razvod|развод|sudski|судски|problem|проблем|ne e cist|не е чист|ne e cista|не е чиста|komplikacii|компликации|teret|терет|zabrana|забрана|zalozen|заложен|ne e cist imoten list|не е чист имотен лист|ima hipoteka|има хипотека|ima problem|има проблем/i.test(u)) {
+
+  // IMPORTANT: Run POSITIVE check FIRST — "nema hipoteka" (no mortgage) is a POSITIVE
+  // documentation signal (clean docs), not a negative issue. If the negative check
+  // (which matches bare "hipoteka") ran first, it would incorrectly return false.
+  //
+  // Never infer documentation status from bare words like "cist" (matches "cist vozduh",
+  // "cista cena", etc.) or "na moe ime" (generic ownership). Only compound phrases
+  // that unambiguously refer to property documentation are accepted.
+  //
+  // POSITIVE documentation signal — clean docs, no issues
+  // IMPORTANT: Explicitly exclude patterns with "ne e" / "не е" (not) before
+  // keywords like "cist imoten" — otherwise "ne e cist imoten list" (not clean
+  // property deed) would false-match as positive. The negative lookbehind
+  // (?<!ne e |не е ) ensures these are caught by the negative check below.
+  if (/(?<!ne e |не е )(?:cist imoten list|чист имотен лист|cist imoten|чист имотен|cisto na moe ime|чисто на мое име)|cisti dokumenti|чисти документи|cista dokumentacija|чиста документација|nema hipoteka|нема хипотека|nema ostavinska|нема оставинска|nema teret|нема терет|nema zabrana|нема забрана|legalizira[nno]|легализира[нно]|legalen|легален|katastar|катастар|vlasnicki list|власнички лист|katastarski plan|катастарски план|uredna dokumentacija|уредна документација/i.test(u)) {
+    return { documentationClean: true, documentationIssues: null };
+  }
+
+  // NEGATIVE documentation signal — has issues
+  // Uses negative lookbehind to prevent "nema X" / "bez X" / "без X" from
+  // matching as negatives. "nema hipoteka" means "no mortgage" (positive),
+  // but bare "hipoteka" means "there's a mortgage" (negative).
+  if (/(?<!nema |нема |bez |без )hipoteka|(?<!nema |нема |bez |без )хипотека|(?<!nema |нема |bez |без )ostavinska|(?<!nema |нема |bez |без )оставинска|razvod|развод|sudski|судски|problem|проблем|ne e cist|не е чист|ne e cista|не е чиста|komplikacii|компликации|(?<!nema |нема |bez |без )teret|(?<!nema |нема |bez |без )терет|(?<!nema |нема |bez |без )zabrana|(?<!nema |нема |bez |без )забрана|zalozen|заложен|imam hipoteka|имам хипотека|ima hipoteka|има хипотека|ima problem|има проблем|ima teret|има терет|ima zabrana|има забрана|ne e cist imoten list|не е чист имотен лист|ne e legalizirano|не е легализирано|spor|спор|ne e sredeno|не е средено/i.test(u)) {
     let docsIssue = "other";
     if (/hipoteka|хипотека/i.test(u)) docsIssue = "hipoteka";
     else if (/ostavinska|оставинска/i.test(u)) docsIssue = "ostavinska";
     else if (/razvod|развод/i.test(u)) docsIssue = "razvod";
     else if (/teret|терет|zabrana|забрана|zalozen|заложен/i.test(u)) docsIssue = "teret";
     return { documentationClean: false, documentationIssues: docsIssue };
-  }
-  // Require documentation-specific context — don't match bare "da" / "ima"
-  if (/cist imoten|чист имотен|cist|чист|nema hipoteka|нема хипотека|nema ostavinska|нема оставинска|nema teret|нема терет|nema zabrana|нема забрана|cisto na moe ime|чисто на мое име|na moe ime|на мое име|cist imoten list|чист имотен лист/i.test(u)) {
-    return { documentationClean: true, documentationIssues: null };
   }
   return null;
 }
@@ -415,6 +655,7 @@ const EXTRACTION_RULES = [
   extractTotalFloors,
   extractElevator,
   extractAC,
+  extractHeating,
   extractParking,
   extractOrientation,
   extractFurnished,
@@ -463,7 +704,8 @@ const BINARY_CONFIDENCE_FIELDS = new Set([
 // These are always side-effects of their parent field extraction and should inherit HIGH.
 const DERIVED_SUBKEYS = new Set([
   'furnishedLevel', 'parkingType', 'orientationPrimary', 'orientationSecondary',
-  'documentationIssues', 'heatingType', 'heating'
+  'documentationIssues', 'heatingType', 'heating',
+  'parkingSeparate', 'parkingPrice'
 ]);
 
 function assessConfidence(field, value, input) {
@@ -491,6 +733,16 @@ function assessConfidence(field, value, input) {
   // keyword context like "godina" or "izgraden".
   if ((field === 'yearBuilt' || field === 'renovationYear') &&
       typeof value === 'number' && value >= 1900 && value <= 2030) {
+    return 'HIGH';
+  }
+
+  // ORDINAL FLOOR WORDS ("vtori", "na vtori", "tret sprat", "osmi") are
+  // explicit floor answers even WITHOUT "kat"/"sprat" keywords — the owner
+  // is directly answering "Na koj kat?" with a bare ordinal ("vtori").
+  // A bare ordinal can only be a floor value, so this is HIGH — no re-ask.
+  // Fixes reported bug: "TI KAZAV NA VTORI" was REJECTED as context
+  // mismatch and the floor question looped forever (→ owner insulted Ana).
+  if (field === 'floor' && parseOrdinalFloor(input) !== null) {
     return 'HIGH';
   }
 
@@ -592,6 +844,7 @@ const FIELD_TO_EXTRACTOR = {
   totalFloors: extractTotalFloors,
   elevator: extractElevator,
   ac: extractAC,
+  heating: extractHeating,
   parking: extractParking,
   orientation: extractOrientation,
   furnished: extractFurnished,
@@ -668,6 +921,12 @@ const NUMBER_SNIFFING_EXTRACTORS = new Set([
 // Does NOT overwrite existing non-null values in currentData.
 // ========================================
 function runGlobalExtraction(u, currentData, preferredField) {
+  // Normalize to lowercase ONCE for the whole pass. Viber owners type in
+  // ALL-CAPS ("VTORI KAT", "TRISTAPEESET"), and parseOrdinalFloor /
+  // parseMacedonianNumber use case-sensitive includes() — without this they
+  // silently miss every ordinal floor and word number in real messages.
+  // All extractors and guards are case-insensitive (/i or internal lowercase).
+  u = u.toLowerCase();
   const updates = {};
 
   // STEP 1: Field-targeted extraction.
@@ -711,14 +970,23 @@ function runGlobalExtraction(u, currentData, preferredField) {
   // a specific question. In this mode:
   //
   // 1. EARLY RETURN FOR DIRECT ANSWERS: If STEP 1 found the current
-  //    field AND the message has no volunteered-content indicators
-  //    for other fields, skip STEP 2 entirely.
+  //    field AND the message is a truly bare answer with NO property
+  //    keywords (just "55", "da", "ne znam"), skip STEP 2 entirely.
+  //    Uses the comprehensive hasStrongKeywords regex — if ANY property
+  //    keyword is present, the message MIGHT have volunteered info
+  //    for other fields, so STEP 2 runs.
   //
   // 2. YEAR-SNIFFING LOCK: Even if STEP 1 didn't find the current
   //    field, never run year-sniffing extractors on a message that
   //    was meant for a different field. Year info will be caught
   //    by the history scan when yearBuilt becomes the next field.
   // ========================================
+
+  // Comprehensive keyword check — shared by early-return guard and
+  // STEP 2 bare-number detection. This MUST be computed before the
+  // early return check to ensure accurate volunteer-content detection.
+  const hasStrongKeywords = /spaln|спалн|detsk|детск|gostinsk|гостинск|golem|голем|mala|мала|soba|соба|sobi|соби|bracn|брачн|brachn|pomal|помал|pogolem|поголем|kat|кат|sprat|спрат|katnica|катница|sprata|спрата|potkrovje|поткровје|prizemje|приземје|prv|прв|vtor|втор|tret|трет|cetvrt|четврт|m2|м2|kvadrati|квадрати|kv|кв|sqm|lift|лифт|elevator|klima|клима|inverter|инвертер|parking|паркинг|garaza|гаража|garage|гараж|terasa|тераса|terasi|тераси|terrace|namest|мебел|namestaj|мебел|opremen|опремен|izgraden|граден|godina|година|gradba|градба|renov|ренов|cist|чист|hipotek|хипотек|ostavinsk|оставинск|foto|фото|slik|слик|viber|вајбер|advokat|адвокат|notar|нотар|danok|данок|provizija|провизија|dogovor|договор|parno|парно|greene|греење|struja|струја|drva|дрва|pelet|пелет|nafta|нафта|centralno|централно|toplovod|топловод|gas|гас|kujna|кујна|plakari|плакари|podzemna|подземна|odelno|одделно|oddelen|одделен|posebno|посебно|elektricno|електрично|gradsko|градско|sopstveno|сопствено/i.test(u);
+
   const hasPreferredField = preferredField && FIELD_TO_EXTRACTOR[preferredField];
   if (hasPreferredField) {
     const groupFields = getGroupFields(preferredField);
@@ -730,23 +998,37 @@ function runGlobalExtraction(u, currentData, preferredField) {
       }
     }
     if (step1Found) {
-      // Check for indicators that the user is volunteering information
-      // for OTHER fields (not the current question):
-      //   - Commas/semicolons: "65 m2, 3 kat, ima lift"
-      //   - "и"/"i" (and) separator: "65 m2 i terasa od 3"
-      //   - Strong keywords for other property features
-      const hasVolunteerContent = /[,;]|\s+i\s+|\s+и\s+|lift|лифт|elevator|klima|клима|inverter|terasa|тераса|terasi|тераси|terrace|parking|паркинг|garaz|гараж|spaln|спалн|detsk|детск|gostinsk|гостинск|soba|соба|sobi|соби|foto|фото|slik|слик|viber|вајбер|renov|ренов|izgraden|граден|godina|година|advokat|адвокат|notar|нотар|danok|данок/i.test(u);
-      if (!hasVolunteerContent) {
-        console.log(`[EARLY RETURN: direct answer for ${preferredField} — no volunteered content detected]`);
+      // EARLY RETURN: Only skip STEP 2 when the message is a truly bare
+      // answer with NO property keywords. Uses the comprehensive
+      // hasStrongKeywords regex instead of the old hasVolunteerContent
+      // which was missing floor/building keywords (sprat, kat, kata, etc.).
+      // Now messages like "na sesti sprat a zgradata ima deset kata" will
+      // NOT early-return — "sprat" and "kata" are in hasStrongKeywords,
+      // so STEP 2 runs and extracts BOTH floor AND totalFloors.
+      //
+      // Check for multi-field indicators even when hasStrongKeywords is false:
+      // commas/semicolons ("65, 3 kat"), "i"/"и" separators ("65 i terasa"),
+      // or just a long message that likely contains volunteered info.
+      const isBareAnswer = !hasStrongKeywords &&
+        // Short message (bare answer, not a multi-field sentence)
+        u.length < 50 &&
+        // No commas/semicolons (separators that indicate multi-field content)
+        !/[,;]/.test(u) &&
+        // No specific field units
+        !/m2|м2|кв|%|€|£|\$/i.test(u);
+      if (isBareAnswer) {
+        console.log(`[EARLY RETURN: direct answer for ${preferredField} — bare answer, no volunteered content]`);
         return updates;
       }
+      console.log(`[BONUS PASS: ${preferredField} found + hasStrongKeywords=${hasStrongKeywords} — checking for volunteered content]`);
     }
   }
 
   // STEP 2: Bonus extraction pass — scan for ADDITIONAL property facts.
   // Reached after the group-restricted pass (if preferredField was set)
   // OR directly when preferredField was not set (full discovery mode).
-  // OR when preferredField was found BUT the message shows volunteer content.
+  // OR when preferredField was found BUT the message has strong keywords
+  // (indicating volunteered info for other fields).
   //
   // This pass runs ALL extractors BUT with safety guards:
   // - Bare numbers (no strong keywords) skip NUMBER_SNIFFING_EXTRACTORS
@@ -756,7 +1038,6 @@ function runGlobalExtraction(u, currentData, preferredField) {
   //
   // Essential for catching volunteered info (terrace, orientation, parking)
   // that the user adds to their answer for the current question.
-  const hasStrongKeywords = /spaln|спалн|detsk|детск|gostinsk|гостинск|golem|голем|mala|мала|soba|соба|sobi|соби|bracn|брачн|brachn|pomal|помал|pogolem|поголем|kat|кат|sprat|спрат|katnica|катница|sprata|спрата|potkrovje|поткровје|prizemje|приземје|prv|прв|vtor|втор|tret|трет|cetvrt|четврт|m2|м2|kvadrati|квадрати|kv|кв|sqm|lift|лифт|elevator|klima|клима|inverter|инвертер|parking|паркинг|garaza|гаража|garage|гараж|terasa|тераса|terasi|тераси|terrace|namest|мебел|namestaj|мебел|opremen|опремен|izgraden|граден|godina|година|gradba|градба|renov|ренов|cist|чист|hipotek|хипотек|ostavinsk|оставинск|foto|фото|slik|слик|viber|вајбер|advokat|адвокат|notar|нотар|danok|данок|provizija|провизија|dogovor|договор|parno|парно|greene|греење|struja|струја|drva|дрва|pelet|пелет|nafta|нафта/i.test(u);
   const isBareNumber = !hasStrongKeywords &&
     // Short message (bare answer, not a multi-field sentence)
     u.length < 50 &&
@@ -776,8 +1057,17 @@ function runGlobalExtraction(u, currentData, preferredField) {
     // If a price (cleanPrice or monthlyRent) was already extracted from THIS
     // message, skip number-sniffing extractors that can accidentally pick up
     // price words like "stopeeset" → floor=50 or "tri" → bedrooms=3.
+    // REFINEMENT (reported bug): explicit field context bypasses the skip —
+    // "98 iljadi evra, vtori kat" MUST register floor=2 because ordinal /
+    // digit+kat / room-word / katnica patterns can never be confused with
+    // price numbers. Only the substring number-sniffing fallbacks (which
+    // fire when NO explicit context exists) are the real contamination risk.
     if (priceExtracted && PRICE_SENSITIVE_EXTRACTORS.has(rule.name)) {
-      continue;
+      const hasExplicitFieldContext =
+        (rule.name === 'extractFloor' && /(?:prvi|први|prv|прв|vtori|втори|vtor|втор|treti|трети|tret|трет|cetvrti|четврти|cetvrt|четврт|petti|петти|sesti|шести|sedmi|седми|osmi|осми|devetti|деветти|prizemje|приземје|potkrovje|поткровје)(?:\s*(?:kat|кат|sprat|спрат))?|\d{1,2}\s*(?:kat|кат|sprat(?!a)|спрат(?!а))/i.test(u)) ||
+        (rule.name === 'extractTotalFloors' && /(?:katnica|катница|sprata|спрата|kata|ката|spratovi|спратови|katovi|катови|kati|кати)/i.test(u)) ||
+        (rule.name === 'extractBedrooms' && /(?:spaln|спалн|detsk|детск|gostinsk|гостинск|soba|соба|sobi|соби|bracn|брачн|golem|голем|mala|мала)/i.test(u));
+      if (!hasExplicitFieldContext) continue;
     }
     // If the message has NO strong field-specific keywords (just bare number words
     // like "pet mislam"), skip number-sniffing extractors to prevent a bare number
@@ -798,7 +1088,20 @@ function runGlobalExtraction(u, currentData, preferredField) {
     // bare numbers in fresh sessions.
     const yearSniffingNames = ['extractYearBuilt', 'extractRenovationYear'];
     if (hasPreferredField && yearSniffingNames.includes(rule.name)) {
-      continue;
+      // FIELD-LOCK REFINEMENT (reported bug): skip year-sniffing UNLESS the
+      // message carries explicit year context. "NOVA ZGRADA OD 2024" or
+      // "izgradena 2015 godina" volunteered while answering the price question
+      // MUST be captured now — the history-scan fallback is not guaranteed.
+      // A year adjacent to a renovation keyword is the RENOVATION year and is
+      // deliberately excluded (extractRenovationYear owns it, not yearBuilt).
+      const yearMatch = u.match(/\b(?:19|20)\d{2}\b|(?:19|20)\d{2}(?:ta|та|ти|ti)/i);
+      const yearIsRenovation = yearMatch
+        ? /(?:renoviran|реновиран|renoviravme|реновиравме|renoviraa|реновираа|renoviral|реновирал|obnoven|обновен|osvezen|освежен)/i.test(
+            u.slice(Math.max(0, yearMatch.index - 25), yearMatch.index + yearMatch[0].length + 25))
+        : false;
+      const hasYearContext = (yearMatch && !yearIsRenovation) ||
+        /(?:godina|година|graden|граден|izgraden|изграден|gradena|градена|izgradena|изградена|nova\s*zgrada|нова\s*зграда|zgrada\s*od|зграда\s*од|zgradena|зградена)/i.test(u);
+      if (!hasYearContext) continue;
     }
     if (isBareNumber && rule.name === 'extractYearBuilt') {
       // Allow year extraction even for bare numbers if the message has
@@ -847,7 +1150,7 @@ function runGlobalExtraction(u, currentData, preferredField) {
 // ========================================
 export function scanHistoryForField(field, messages, currentData) {
   // Complex stateful fields handled by service.js — skip (can't be extracted from history)
-  const complexFields = new Set(['terraceSqm', 'heating', 'photos', 'ownerName', 'address']);
+  const complexFields = new Set(['terraceSqm', 'photos', 'ownerName', 'address']);
   if (complexFields.has(field)) return null;
 
   // Already in collectedData — skip
@@ -889,6 +1192,15 @@ export function scanHistoryForField(field, messages, currentData) {
   }
 
   return null;
+}
+
+// ========================================
+// Confidence score conversion
+// Converts 'HIGH' | 'MEDIUM' | 'LOW' to numeric 0-1 scores.
+// Used by service.js to store persistent field confidence.
+// ========================================
+export function confidenceToNumeric(level) {
+  return level === 'HIGH' ? 0.95 : level === 'MEDIUM' ? 0.60 : 0.10;
 }
 
 export {

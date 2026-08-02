@@ -1,7 +1,116 @@
 // ========================================
 // OBJECTION RESPONSES — Hardcoded library
 // ========================================
+const LEGAL_COST_RESPONSES_SALE = [
+  'Адвокатот и Нотарот се обврска на Купувачот. Данокот исто така го плаќа Купувачот во Град Скопје. Вие ја добивате вашата чиста цена.',
+  'Сите давачки за Адвокат, Нотар и Данок се на товар на Купувачот. Вашата обврска е само да го продадете имотот.',
+  'Купувачот ги регулира сите трошоци за Адвокат, Нотар и Данок. Вие ја добивате договорената цена без никакви давачки.'
+];
+
+const LEGAL_COST_RESPONSES_RENT = [
+  'Кај издавање, Адвокатот и Нотарот обично се делат по половина, но тоа е по договор меѓу двете страни.',
+  'За Адвокат и Нотар — тоа е по договор меѓу Вас и закупецот. Најчесто секоја страна плаќа половина.',
+  'Трошоците за Адвокат и Нотар кај издавање се договараат меѓу Вас и закупецот. Стандардно е секој да плати по половина.'
+];
+
+function getRandomLegalCostResponse(isRent) {
+  const responses = isRent ? LEGAL_COST_RESPONSES_RENT : LEGAL_COST_RESPONSES_SALE;
+  return responses[Math.floor(Math.random() * responses.length)];
+}
+
+// ========================================
+// AGENT VISIT RESPONSES — "Will Ana personally come to the viewing?"
+// Owner asks whether ANA PERSONALLY will come to the property, bring
+// clients, show the apartment, or be present at the viewing. Ana must
+// reply that it is NOT her personal obligation — a colleague agent will
+// handle the case. All 3 variants rotate randomly (same as legal costs).
+// ========================================
+const AGENT_VISIT_RESPONSES = [
+  'Тоа не е моја обврска во Агенцијата. Некој од колегите Агенти ќе се погрижи за вашиот случај.',
+  'Посетите не се моја обврска. Колега Агент ќе го организира прикажувањето на станот и ќе ве контактира.',
+  'Прикажувањето на имотот го вршат моите колеги Агенти. Тие ќе ве контактираат за да закажат посета.'
+];
+
+function getRandomAgentVisitResponse() {
+  return AGENT_VISIT_RESPONSES[Math.floor(Math.random() * AGENT_VISIT_RESPONSES.length)];
+}
+
+// ========================================
+// AGE DEFLECTION RESPONSES — "Kolku godini imas Ana?"
+// Owner asks Ana's personal age ("how old are you", "when were you born").
+// Ana NEVER answers with her age — she deflects professionally to her
+// experience (the exact answer the user liked from the production log).
+// All variants rotate randomly (same as legal costs / agent visit).
+// ========================================
+const AGE_DEFLECTION_RESPONSES_SALE = [
+  'Имам доволно години искуство во агенцијата за да знам како да го продадем вашиот стан брзо и ефикасно. Дали да продолжиме?',
+  'Во агенцијата сум доволно долго за да знам како да го продадам вашиот стан по најдобра цена. Да се фокусираме на тоа. Дали да продолжиме?',
+  'Мојата возраст не е важна — важно е искуството. Имам доволно години зад себе за да ви помогнам со продажбата. Дали да продолжиме?'
+];
+
+const AGE_DEFLECTION_RESPONSES_RENT = [
+  'Имам доволно години искуство во агенцијата за да знам како да го издадем вашиот стан брзо и ефикасно. Дали да продолжиме?',
+  'Во агенцијата сум доволно долго за да знам како да го издадам вашиот стан по најдобра цена. Да се фокусираме на тоа. Дали да продолжиме?',
+  'Мојата возраст не е важна — важно е искуството. Имам доволно години зад себе за да ви помогнам со издавањето. Дали да продолжиме?'
+];
+
+function getRandomAgeDeflectionResponse(isRent) {
+  const responses = isRent ? AGE_DEFLECTION_RESPONSES_RENT : AGE_DEFLECTION_RESPONSES_SALE;
+  return responses[Math.floor(Math.random() * responses.length)];
+}
+
+// ========================================
+// COMMISSION EXPLANATION RESPONSES — "Kako zarabotuvate bez provizija?" /
+// "Kako funkcionira bez provizija?" — how does the no-commission model work?
+// The answer is the difference between the owner's clean price and the final
+// sale price. This is the HARDCODED answer the user wants for THIS question
+// (NOT the generic workflow answer). All variants rotate randomly.
+// ========================================
+const COMMISSION_NO_PROVISION_RESPONSES_SALE = [
+  'Разликата меѓу вашата чиста цена и постигнатата купопродажна цена е провизија за агенцијата. Дали ви е појасно?',
+  'Ние заработуваме од разликата меѓу вашата чиста цена и цената постигната при продажбата. Вие ја добивате вашата цена, а разликата е провизија за агенцијата. Дали ви е појасно?',
+  'Нашата заработувачка е разликата меѓу вашата барана чиста цена и постигнатата продажна цена. За вас нема никакви давачки. Дали ви е јасно?'
+];
+
+const COMMISSION_NO_PROVISION_RESPONSES_RENT = [
+  'За издавање, провизијата за агенцијата е 50% од месечната кирија од сопственикот (100% ако киријата е над 1000 евра) и 50% од закупецот. На ден на потпишување, закупецот плаќа прва кирија + депозит + провизија. Минимум 12 месеци.',
+  'За издавање, вашата обврска е 50% од една месечна кирија (100% ако киријата е над 1000 евра), а закупецот плаќа уште 50%. Плаќањето се врши на ден на потпишување на договорот.',
+  'Кај издавање, провизијата се дели: вие 50% од месечната кирија (100% над 1000 евра) и закупецот 50%, на ден на потпишување. Минимален период 12 месеци.'
+];
+
+function getRandomCommissionNoProvisionResponse(isRent) {
+  const responses = isRent ? COMMISSION_NO_PROVISION_RESPONSES_RENT : COMMISSION_NO_PROVISION_RESPONSES_SALE;
+  return responses[Math.floor(Math.random() * responses.length)];
+}
+
+// ========================================
+// AGENCY WORKFLOW RESPONSES — "Kako ke gi upravuvate mojot imot?" /
+// "Kako ke mi pomognete vo prodazbata?" — how does the agency manage the
+// property / how will Ana help sell it. The user-approved answer (with the
+// small change: "без провизија за вас"). All variants rotate randomly.
+// ========================================
+const AGENCY_WORKFLOW_RESPONSES_SALE = [
+  'Секоја недвижнина се внесува во системот на агенцијата со податоци за неа, се организираат посети и продажба без провизија за вас. Како ви звучи ова?',
+  'Вашиот стан се внесува во системот на агенцијата, се организираат посети со заинтересирани купувачи и се води целата продажба — без провизија за вас. Како ви звучи ова?',
+  'Агенцијата се грижи за целиот процес: внесување на имотот, промоција, посети и завршување на продажбата — а вие не плаќате провизија. Како ви звучи ова?'
+];
+
+const AGENCY_WORKFLOW_RESPONSES_RENT = [
+  'Секоја недвижнина се внесува во системот на агенцијата со податоци за неа, се организираат посети и издавање. Како ви звучи ова?',
+  'Вашиот стан се внесува во системот на агенцијата, се организираат посети со заинтересирани закупци и се води целото издавање. Како ви звучи ова?',
+  'Агенцијата се грижи за целиот процес: внесување на имотот, промоција, посети и склучување на договорот за издавање. Како ви звучи ова?'
+];
+
+function getRandomAgencyWorkflowResponse(isRent) {
+  const responses = isRent ? AGENCY_WORKFLOW_RESPONSES_RENT : AGENCY_WORKFLOW_RESPONSES_SALE;
+  return responses[Math.floor(Math.random() * responses.length)];
+}
+
 const OBJECTION_RESPONSES = {
+  'legal_costs': {
+    pattern: /advokat|адвокат|notar|нотар|danok|данок/i,
+    response: LEGAL_COST_RESPONSES_SALE[0] // default sale V1
+  },
   'commission': {
     pattern: /како без провизија|без провизија|koi vi se uslovite|какви се условите|kako rabotite|како работите|kako funkcionira|како функционира|sto znaci bez provizija|што значи без провизија|kako bez provizija|kako toa|како тоа|kako e toa|како е тоа|sto e ova|што е ова|kakva sorabotka|каква соработка|kakva e taa sorabotka|каква е таа соработка|kako mislis bez provizija|како мислиш без провизија|kakva e taa sorabotka bez provizija|каква е таа соработка без провизија|kako toa bez provizija|како тоа без провизија|kako funkcionira toa|како функционира тоа|sto znaci toa|што значи тоа/i,
     response: 'Разликата меѓу вашата чиста цена и постигнатата купопродажна цена е провизија за агенцијата. Дали ви е појасно?'
@@ -50,13 +159,18 @@ function matchObjection(text, isRent) {
       let response = obj.response;
       // Use rent-appropriate response when isRent
       if (isRent) {
-        if (key === 'commission' || key === 'who_pays') {
+        if (key === 'legal_costs') {
+          response = getRandomLegalCostResponse(true);
+        } else if (key === 'commission' || key === 'who_pays') {
           response = 'За издавање, провизијата за агенцијата е 50% од месечната кирија од сопственикот (100% ако киријата е над 1000 евра) и 50% од закупецот. На ден на потпишување, закупецот плаќа прва кирија + депозит + провизија. Минимум 12 месеци. Дали ви е појасно?';
         } else if (key === 'faster_sale') {
           response = 'Агенцијата има голема база на потенцијални клиенти кои се спремни да изнајмат, ако нешто им се допадне. Дали би пробале агенциски третман за вашата недвижност?';
         } else if (key === 'example') {
           response = 'На пример, за кирија од 500 евра, вие добивате 1000 евра од закупецот (прва кирија + депозит). Вие плаќате 250 евра провизија (50%), а закупецот плаќа уште 250 евра. Дали ви помогна примерот?';
         }
+      } else if (key === 'legal_costs') {
+        // For sale, pick a random version
+        response = getRandomLegalCostResponse(false);
       }
       return { key, response };
     }
@@ -89,16 +203,45 @@ function isAskingAboutPhone(text) {
 
 // ========================================
 // HELPER: Check if asking how the process works
+// (how the agency manages the property / how will Ana help sell it)
 // ========================================
 function isAskingHowItWorks(text) {
-  return /како би одело|kako bi odelo|како функционира|kako funkcionira|како тече|kako tece|како изгледа|kako izgleda|како работи|kako raboti|како би одела|kako bi o dela|kako bi izgledalo|како би изгледало|kako se odviva|како се одвива|kako e procesot|како е процесот|kako funkcionira procesot|како функционира процесот|kako tece procesot|како тече процесот|kako raboti ova|како работи ова|kako funkcionira ova|како функционира ова|kako bi odelo ova|како би одело ова|kako bi odela sorabotkata|како би одела соработката|kako tece sorabotkata|како тече соработката|kako funkcionira sorabotkata|како функционира соработката/i.test(text);
+  return /како би одело|kako bi odelo|како функционира|kako funkcionira|како тече|kako tece|како изгледа|kako izgleda|како работи|kako raboti|како би одела|kako bi o dela|kako bi izgledalo|како би изгледало|kako se odviva|како се одвива|kako e procesot|како е процесот|kako funkcionira procesot|како функционира процесот|kako tece procesot|како тече процесот|kako raboti ova|како работи ова|kako funkcionira ova|како функционира ова|kako bi odelo ova|како би одело ова|kako bi odela sorabotkata|како би одела соработката|kako tece sorabotkata|како тече соработката|kako funkcionira sorabotkata|како функционира соработката|kako ke mi pomognete|како ќе ми помогнете|kako kje mi pomognete|како ќе ми помогнете во продажбата|kako ke mi pomognete vo prodazbata|kako ke go prodadete|како ќе го продадете|kako ke go izdadete|како ќе го издадете|kako ke mi pomognete da go prodadam|како ќе ми помогнете да го продадам|sto ke napravite za mene|што ќе направите за мене/i.test(text);
+}
+
+// ========================================
+// HELPER: Check if asking about the NO-COMMISSION model — "kako zarabotuvate
+// bez provizija?", "kako funkcionira bez provizija?", "od sto zarabotuvate?"
+// This must be checked BEFORE isAskingHowItWorks so the owner gets the
+// commission-difference explanation, NOT the generic workflow answer.
+// ========================================
+function isAskingHowCommissionWorks(text) {
+  return /kako (?:zarabotuvate|funkcionira|raboti|rabotite|vi se naplakja|vie zarabotuvate).{0,40}(?:provizija|провизија)|како (?:заработувате|функционира|работи|работите|ви се наплаќа|вие заработувате).{0,40}(?:провизија|provizija)|od sto (?:zarabotuvate|vie zarabotuvate)|од што (?:заработувате|вие заработувате)|kako se naplakjate|како се наплаќате/i.test(text);
+}
+
+// ========================================
+// HELPER: Check if asking whether ANA herself will come to the viewing/showing
+// ========================================
+// Owner asks whether Ana personally will come to the property, bring clients,
+// show the apartment, or be present at the viewing — e.g. production messages:
+//   "DALI TI KE DOAGJAS SO MUSTERII NA POSETA ?"
+//   "TI KE GI NOSIS KLIENTITE KAJ MENE VO STAN ?"
+// Ana must reply that it is not her personal obligation — a colleague agent
+// will handle the case.
+function isAskingAboutAgentVisit(text) {
+  // NOTE: deliberately NO bare "dali ti ke" / "дали ти ќе" alternative — that
+  // would match ANY "will you..." question (e.g. "дали ти ќе ми помогнеш?").
+  // The verb must always be constrained to visit/showing verbs. The optional
+  // "dali " prefix is folded into the (?:^|\s) boundary via (?:dali\s+)?. The
+  // "ke ... li" interrogative forms are the most common Macedonian phrasing.
+  return /(?:^|\s)(?:dali\s+)?ti\s+ke\s+(?:doagjas|dojdes|gi\s+nosis|gi\s+vodis|ja\s+pokazes|me\s+vodi|bides\s+prisutna)|(?:^|\s)(?:дали\s+)?ти\s+ќе\s+(?:доаѓаш|дојдеш|ги\s+носиш|ги\s+водиш|ја\s+покажеш|ме\s+води|бидеш\s+присутна)|ke\s+doagjas\s+(?:li\s+)?na\s+poseta|ќе\s+доаѓаш\s+(?:ли\s+)?на\s+посета|ke\s+dojdes\s+(?:li\s+)?na\s+poseta|ќе\s+дојдеш\s+(?:ли\s+)?на\s+посета|ke\s+dojdes\s+(?:li\s+)?da\s+ja\s+pokazes|ќе\s+дојдеш\s+(?:ли\s+)?да\s+ја\s+покажеш|ke\s+bides\s+li\s+prisutna|(?:ќе|ке)\s+бидеш\s+ли\s+присутна/i.test(text);
 }
 
 // ========================================
 // HELPER: Check if asking about clients
 // ========================================
 function isAskingAboutClients(text) {
-  return /imat klient|imate klient|имате клиент|klient spremen|клиент спремен|zainteresiran kupuvac|заинтересиран купувач|klienti zainteresirani|клиенти заинтересирани|imate klienti|имате клиенти|klient zainteresiran|клиент заинтересиран|imate gotov klient|имате готов клиент|imate kupuvac|имате купувач|kupuvac spremen|купувач спремен|najdovte klient|најдовте клиент|najdovte kupuvac|најдовте купувач|imavте li klienti|имавте ли клиенти|dali imate klient|дали имате клиент|dali imate kupuvac|дали имате купувач|ima li zainteresirani|има ли заинтересирани|imaте gotov|имате готов/i.test(text);
+  return /imat klient|imate klient|имате клиент|klient spremen|клиент спремен|zainteresiran kupuvac|заинтересиран купувач|klienti zainteresirani|клиенти заинтересирани|imate klienti|имате клиенти|klient zainteresiran|клиент заинтересиран|imate gotov klient|имате готов клиент|imate kupuvac|имате купувач|kupuvac spremen|купувач спремен|najdovte klient|најдовте клиент|najdovte kupuvac|најдовте купувач|imavте li klienti|имавте ли клиенти|dali imate klient|дали имате клиент|dali imate kupuvac|дали имате купувач|ima li zainteresirani|има ли заинтересирани|imaте gotov|имате готов|imate vekje klienti|имате веќе клиенти|imate vekje kupci|имате веќе купувачи|imate vekje zainteresirani|имате веќе заинтересирани|imate kupci|имате купувачи|dali imate kupci|дали имате купувачи|imame kupci|имаме купувачи|zainteresirani kupci|заинтересирани купувачи/i.test(text);
 }
 
 // ========================================
@@ -113,6 +256,19 @@ function isAskingWhereToSendPhotos(text) {
 // ========================================
 function isAskingAboutLegalCosts(text) {
   return /advokat|адвокат|notar|нотар|danok|данок/i.test(text);
+}
+
+// ========================================
+// HELPER: Check if asking about ANA's personal age
+// "kolku godini imas (ana)?", "kolku si stara?", "koja godina si rodena?",
+// "koga si rodena?" — Ana deflects professionally instead of answering.
+// NEGATIVE GUARDS: experience/tenure questions ("kolku godini imas iskustvo",
+// "kolku godini imas vo agencijata") and property-age questions
+// ("kolku godini e zgradata") must NOT be treated as personal-age questions.
+// ========================================
+function isAskingAboutAge(text) {
+  return /kolku godini imas|колку години имаш|kolku godini ima ana|колку години има ана|kolku godini e ana|колку години е ана|kolku si stara|колку си стара|kolku godini si|колку години си|koja godina si rodena|која година си родена|koga si rodena|кога си родена/i.test(text)
+    && !/(?:iskustvo|искуство|rabotno|работно|vo agencij|во агенци|zgradata|зградата|stanot|станот|kukjata|куќата|плацот|platot)/i.test(text);
 }
 
 // ========================================
@@ -141,6 +297,20 @@ export {
   isAskingForExplanation,
   isAskingAboutPhone,
   isAskingHowItWorks,
+  isAskingAboutAgentVisit,
+  AGENT_VISIT_RESPONSES,
+  getRandomAgentVisitResponse,
+  isAskingAboutAge,
+  AGE_DEFLECTION_RESPONSES_SALE,
+  AGE_DEFLECTION_RESPONSES_RENT,
+  getRandomAgeDeflectionResponse,
+  COMMISSION_NO_PROVISION_RESPONSES_SALE,
+  COMMISSION_NO_PROVISION_RESPONSES_RENT,
+  getRandomCommissionNoProvisionResponse,
+  AGENCY_WORKFLOW_RESPONSES_SALE,
+  AGENCY_WORKFLOW_RESPONSES_RENT,
+  getRandomAgencyWorkflowResponse,
+  isAskingHowCommissionWorks,
   isAskingAboutClients,
   isAskingWhereToSendPhotos,
   isAskingAboutLegalCosts,

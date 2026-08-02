@@ -10,7 +10,59 @@
 // These words after an affirmative mean "yes continue talking"
 // NOT "yes I accept cooperation".
 // ========================================
-export const CONV_CONTINUATION_WORDS = /(?:prodolz|продолж|slusam|слушам|slusham|objasn|објасн|kazh|каж|izvoli|изволи|pojasn|појасн|poveke|повеќе|samo\s*(prasaj|прашај)|slobodno|слободно)/i;
+export const CONV_CONTINUATION_WORDS = /(?:prodolz|продолж|razgovar|разговар|slusam|слушам|slusham|objasn|објасн|kazh|каж|izvoli|изволи|pojasn|појасн|poveke|повеќе|samo\s*(prasaj|прашај)|slobodno|слободно)/i;
+
+// ========================================
+// STRONG ACCEPTANCE WORDS
+// Shared by the zvuci acknowledgment guard and CONTEXT RULE D3.
+// When a message contains BOTH rhetorical acknowledgment language
+// ("dobro zvuci") AND strong acceptance language, the strong acceptance
+// must win — these exclusions let those messages fall through to the
+// explicit ACCEPTED rules instead of being downgraded to INTERESTED.
+// NOTE: deliberately does NOT include "sorabotuv" — a message like
+// "dobro zvuci. vekje sorabotuvam so druga agencija" (I already cooperate
+// with another agency) is NOT acceptance and must stay INTERESTED.
+// NOTE: including "važi" means "dobro zvuci, važi" after a rhetorical closer
+// reaches the catch-all → ACCEPTED 0.9 (consistent with the approved rule
+// that важи = strong acceptance 0.90). Intentional trade-off.
+// ========================================
+export const STRONG_ACCEPTANCE_WORDS = /(probame|пробаме|sorabotk|соработк|soglasuv|согласув|prifakj|прифаќ|dogovor|договор|vazi|važi|важи|ajde|ајде|sakam|сакам|pochnuvame|почнуваме|pocneme|почнеме|zapocneme|започнеме|zapochneme|probaj|пробај|probajte|пробајте|vo red|во ред)/i;
+
+// ==========================================
+// HESITATION GUARD WORDS
+// Pure hedging words that downgrade "da ... probame" from committed acceptance
+// to INTERESTED: "da mozebi ke probame" (yes, maybe we'll try) and
+// "da razmislam pa ke probame" (let me think, then we'll try) are NOT
+// commitments. Uses the "razmisl" root so razmislam/razmisluvam are covered.
+// NOTE: deliberately EXCLUDES ama/sepak — "ama probame" (but let's try) is an
+// intentional acceptance despite doubt (see hasAcceptanceDoubt exemption).
+// SEMANTIC JUDGMENT: the word anywhere in a probame-family sentence means
+// hedged, even mid-sentence hedges like "da probame, mozebi ke uspee"
+// (let's try, maybe it'll work) — an owner who hedges is not committing.
+// Erring toward INTERESTED is deliberate; the sales flow re-asks instead of
+// over-committing to cooperation.
+// ==========================================
+export const HESITATION_GUARD_WORDS = /(mozebi|можеби|razmisl|размисл|ke vidime|ќе видиме|da vidime|да видиме)/i;
+
+// ==========================================
+// STANDALONE NEGATION GUARD
+// Matches "ne"/"не" only as a standalone word, NOT as a substring of
+// another word. JS \b does not work for Cyrillic (non-\w) chars, and a bare
+// /(ne|не)/ test is WRONG for words like "pocneme" (po-cne-me), "започнеме",
+// "zapochneme", "zapocneme" — they all contain "ne"/"не" as a substring and
+// would self-block their own acceptance rules. Used by the acceptance rules
+// whose trigger words contain "ne"/"не" (aorist "pocneme" family, go-ahead).
+//
+// Uses \P{L} (any non-letter) with the u flag instead of a hand-rolled
+// [^a-zа-яё] class, because the а-я range (U+0430-044F) EXCLUDES the
+// Macedonian-specific letters ј, љ, њ, ќ, ѓ, ѕ, џ (all U+0450+) and Latin
+// š/ž/č/đ/ć — so "нејасно" (не+ј) and especially "nešto" (не+š, a very
+// common Latin transcription of нешто) would otherwise be wrongly treated
+// as containing a standalone "ne". \P{L} covers every script correctly.
+// ==========================================
+export function hasStandaloneNegation(u) {
+  return /(?:^|\P{L})(?:ne|не)(?:$|\P{L})/iu.test(u);
+}
 
 // ==========================================
 // ACCEPTANCE DOUBT GUARD
@@ -59,13 +111,13 @@ export function parseConversationContext(conversation) {
   let lastUserMessage = '';
 
   for (let i = lines.length - 1; i >= 0; i--) {
-    const line = lines[i];
-    if (line.startsWith('Ана:')) {
+    const trimmedLine = lines[i].trim();
+    if (trimmedLine.startsWith('Ана:')) {
       if (!lastAnaMessage) {
-        lastAnaMessage = line.replace(/^Ана:\s*/i, '').toLowerCase();
+        lastAnaMessage = trimmedLine.replace(/^Ана:\s*/i, '').toLowerCase();
       }
-    } else if (line.startsWith('Сопственик:')) {
-      const text = line.replace(/^Сопственик:\s*/i, '').toLowerCase();
+    } else if (trimmedLine.startsWith('Сопственик:')) {
+      const text = trimmedLine.replace(/^Сопственик:\s*/i, '').toLowerCase();
       if (!lastUserMessage) {
         lastUserMessage = text;
       }
@@ -99,6 +151,53 @@ export function classifyIntent(userInput, conversation) {
   // ==========================================
   const anaExplainingCommission = /провизија|разлика|чиста цена|купопродажна|барана цена|без провизија|нашата провизија|вашата цена/i.test(ctx.lastAnaMessage);
   const isShortEngaged = u.length < 30 && !/(ne|не)\s*(sakam|me|sum|mi)|ostavi me|izvini/i.test(u);
+
+  // ==========================================
+  // CONTEXT RULE A2: Cooperation question context
+  // If Ana just explicitly asked a yes/no cooperation-commitment question
+  // (e.g., "Дали да почнеме со соработка?", "Дали сте расположени да соработуваме?"),
+  // and the owner's reply is short/positive, interpret it as acceptance.
+  // This handles cases like: Ana asks "Дали да почнеме?" → owner says "moze ana" → ACCEPTED
+  //
+  // IMPORTANT: This deliberately does NOT match rhetorical/meta closers like:
+  //   "Што мислите?" (what do you think?)
+  //   "Како ви звучи ова?" (how does this sound?)
+  //   "Дали ви е појасно?" (is it clearer?)
+  //   "Дали сакате да дознаете?" (do you want to know?)
+  //   "Дали сте заинтересирани?" (are you interested? — too generic)
+  //   "Дали да продолжиме?" (shall we continue — conversation continuation, not cooperation)
+  // A short positive reply ("moze"/"da") to those is just agreeing with the explanation,
+  // NOT committing to cooperate. Only the two explicit cooperation-commitment templates
+  // should trigger auto-acceptance on a short positive reply.
+  // ==========================================
+  const anaAskingCooperation = /(?:да\s+почнеме.{0,30}?соработ|расположени\s+да\s+соработув)/i.test(ctx.lastAnaMessage);
+  const isShortPositive = u.length < 50 && !/(ne|не)/i.test(u) && !/\?/.test(u) && !/(ama|ама|sepak|сепак|no|но)\b/i.test(u);
+
+  // ==========================================
+  // CONTEXT RULE A3: Rhetorical closer context
+  // If Ana's last message ended with a rhetorical/meta closer
+  // ("Како ви звучи ова?" / "Што мислите?" / "Дали ви е појасно?" / "Дали ви се разјасни?"),
+  // a short positive reply is only acknowledging the explanation — it is NOT
+  // committing to cooperate. The owner is saying "sounds fine" about the pitch,
+  // not "yes, let's work together." Stay in PERSUASION (INTERESTED).
+  // ==========================================
+  const anaAskedRhetoricalCloser =
+    /како ви звучи|kako vi zvuci|што мислите|sto mislite|дали ви е појасно|dali vi e pojasno|дали ви се разјасни|dali vi se razjasni|дали ви е јасно|dali vi e jasno|како звучи|kako zvuci/i.test(ctx.lastAnaMessage);
+
+  // "звучи" acknowledgment guard — "dobro mi zvuci" (sounds good to me),
+  // "dobro zvuci" (sounds good) — the owner is commenting on the offer's
+  // appeal, NOT agreeing to cooperate. Must run BEFORE the catch-all
+  // "affirmative start" rule which would otherwise return ACCEPTED 0.9.
+  // Also handles "zvuci dobro" (reverse word order).
+  // NOTE: uses hasAcceptanceDoubt(u) directly (not hasDoubt) because this
+  // guard runs before the hasDoubt const is declared in the ACCEPTED section.
+  // NOTE: strong-acceptance language is excluded (shared STRONG_ACCEPTANCE_WORDS
+  // constant, same list as D3) so "dobro zvuci, ajde da probame" still yields
+  // ACCEPTED, not INTERESTED.
+  if (/(zvuci|звучи)/i.test(u) && /(dobro|добро|super|супер|odlicno|одлично)/i.test(u) && !/(ne|не)/i.test(u) && !hasAcceptanceDoubt(u) &&
+      !STRONG_ACCEPTANCE_WORDS.test(u)) {
+    return { intent: "INTERESTED", confidence: 0.7, reason: "rhetorical acknowledgment — zvuci (sounds good), not cooperation" };
+  }
 
   // ==========================================
   // 0. PRICE QUOTE GUARD — "jas baram 156 iljadi", "sakam 98000", "cena 120 iljadi"
@@ -135,6 +234,25 @@ export function classifyIntent(userInput, conversation) {
   if (/(ne|не)\s*(moze|може)\s*da/i.test(u)) return { intent: "REJECTED", confidence: 0.8, reason: "ne moze da" };
 
   // ==========================================
+  // NEGATED COOPERATION STATEMENT — rollback phrases
+  // "ne sum rekol deka sakam sorabotka" (I didn't say I want to cooperate),
+  // "ne ti rekov deka sakam sorabotka", "ne kazav deka sakam sorabotka",
+  // "ne sum siguren deka sakam sorabotka" (I'm not sure I want to) —
+  // the owner denies previously stated cooperation intent. MUST fire BEFORE
+  // the ACCEPTED "sakam sorabotka" rule, which would otherwise match
+  // "sakam sorabotka" inside this negated sentence and re-accept immediately
+  // after a cooperation rollback (runEarlyResponses just reset
+  // cooperationAccepted=false — the classifier must not undo that).
+  // Requires BOTH a negation phrase AND cooperation language.
+  // NOTE: keep this negation alternation in sync with the rollback regex in
+  // handlers/early-responses.js — both must cover the same phrases.
+  // ==========================================
+  if (/(ne|не)\s+(?:ti\s+|ти\s+|sum\s+|сум\s+)*(?:rekov|реков|rekol|рекол|kazal|кажал|kazav|кажав|siguren|сигурен)/i.test(u) &&
+      /(sakam|сакам|sorabotk|соработк|dogovor|договор)/i.test(u)) {
+    return { intent: "REJECTED", confidence: 0.9, reason: "negated cooperation statement — rollback" };
+  }
+
+  // ==========================================
   // 2. ACCEPTED — explicit yes/agreement
   // ==========================================
 
@@ -143,22 +261,87 @@ export function classifyIntent(userInput, conversation) {
   // signals (questions, concerns), downgrade to INTERESTED.
   const hasDoubt = hasAcceptanceDoubt(u);
 
+  // ==========================================
+  // CONTEXT RULE D3: Rhetorical closer guard
+  // If Ana's last message used a rhetorical/meta closer ("Како ви звучи ова?",
+  // "Што мислите?", "Дали ви е појасно?", "Дали ви се разјасни?"), a short
+  // positive reply is only acknowledging the explanation — it is NOT committing
+  // to cooperate. The owner is saying "sounds fine", not "yes, let's work together".
+  // This prevents false acceptances like:
+  //   Ana: "Како ви звучи ова?" → Owner: "moze" → must stay PERSUASION
+  // Strong explicit acceptances (probame/sorabotka/dogovor/vazi/ajde) still pass
+  // through unchanged. anaAskingCooperation cases are never downgraded.
+  // ==========================================
+  if (anaAskedRhetoricalCloser && !anaAskingCooperation && isShortPositive && !hasDoubt &&
+      !STRONG_ACCEPTANCE_WORDS.test(u)) {
+    return { intent: "INTERESTED", confidence: 0.7, reason: "rhetorical closer — acknowledgment, not cooperation" };
+  }
+
+  // ==========================================
+  // PRIOR-AGREEMENT ACKNOWLEDGMENT — "I already said that"
+  // The owner confirms they ALREADY expressed agreement, pointing back at
+  // their earlier statement instead of re-stating it:
+  //   "PA TOA GO REKOV I JAS" (well, that's what I said too)
+  //   "тоа го реков и јас" / "истото го реков" / "jas istoto go rekov"
+  //   "веќе реков" (I already said) / "реков дека сакам" (I said I want)
+  // In the persuasion flow this means "yes, I already told you I agree" —
+  // it IS acceptance, not a new statement. Runs in the ACCEPTED section
+  // BEFORE the catch-alls.
+  // MUST NOT match negations/refusals:
+  //   "не ти реков дека сакам соработка" → caught earlier (rollback rule)
+  //   "реков дека не сакам" → caught earlier ("ne sakam" REJECTED)
+  //   "jas rekov deka nemam vreme/iskustvo" → time/experience guard below
+  //   "тоа го реков дека немам тераса" → deka+negation guard below
+  //   PRIOR-REJECTION GUARD: bare forms like "тоа го реков" (without "и јас")
+  //   could point back at an EARLIER refusal ("не сум заинтересиран" → then
+  //   "тоа го реков" = "that's what I said [no]") — check previous user
+  //   messages for rejection language, same idea as the standalone-да rule's
+  //   hasPreviousHesitation.
+  // ==========================================
+  const hasPriorRejection = ctx.previousUserMessages.some(msg =>
+    /(?:ne|не)\s*(?:sum|сум|sakam|сакам|mi|ми|me|ме)\s*(?:zainteresiran|заинтересиран|treba|треба|interesira|интересира)|ostavi|остави|izvini|извини|ne mi treba|не ми треба/i.test(msg)
+  );
+  if (/(rekov|реков|kazav|кажав)/i.test(u) &&
+      /(?:toa\s*go|тоа\s*го|istoto|истото|isto\s*toa|исто\s*тоа|i\s*jas|и\s*јас|veke|vekje|веќе|веке|jas\s*istoto|јас\s*истото|(?:deka|дека)\s*(?:sakam|сакам))/i.test(u) &&
+      !hasStandaloneNegation(u) && !hasDoubt && !hasPriorRejection &&
+      !/(?:nemam|немам|nema|нема)\s+(?:vreme|време|iskustvo|искуство|namera|намера|potreba|потреба)/i.test(u) &&
+      !/(?:rekov|реков|kazav|кажав)\s+(?:deka|дека)\s+(?:ne|не|nemam|немам|nema|нема)/i.test(u) &&
+      !/(?:da|да|ke|ќе)\s*(?:se|се)\s*(?:javam|јавам)/i.test(u)) {
+    return { intent: "ACCEPTED", confidence: 0.85, reason: "prior agreement acknowledgment — owner already said so" };
+  }
+
   // "ајде да пробаме" — strongest acceptance (0.98)
   // Uses .{0,15} proximity to require the words within 15 chars.
   // This prevents matching unrelated "ajde" and "probame" far apart.
-  if (/ajde.{0,15}probame|ајде.{0,15}пробаме/i.test(u) && !(/(ne|не)/i.test(u)) && !hasDoubt) {
+  // HESITATION GUARD: "ajde mozebi ke probame" (come on, maybe we'll try) is
+  // hedged, not committed — downgrade (falls through to INTERESTED).
+  if (/ajde.{0,15}probame|ајде.{0,15}пробаме/i.test(u) && !(/(ne|не)/i.test(u)) && !hasDoubt && !HESITATION_GUARD_WORDS.test(u)) {
     return { intent: "ACCEPTED", confidence: 0.98, reason: "ajde da probame" };
   }
 
   // "може да пробаме" — very strong acceptance (0.95)
-  if (/(moze|може)\s*da\s*(probame|пробаме)/i.test(u) && !hasDoubt) {
+  // HESITATION GUARD: "mozebi, moze da probame" / "moze da probame, ke vidime"
+  // are hedged (maybe/we'll see) — same disease as the da-probame family.
+  // NOTE: no negation guard needed here — "ne moze da probame" is already
+  // caught by the earlier "ne moze da" REJECTED rule (0.80).
+  if (/(moze|може)\s*da\s*(probame|пробаме)/i.test(u) && !hasDoubt && !HESITATION_GUARD_WORDS.test(u)) {
     return { intent: "ACCEPTED", confidence: 0.95, reason: "moze da probame" };
   }
 
   // "да пробаме" — very strong acceptance (0.95)
   // NOTE: Must use (?:probame|пробаме) non-capturing group to avoid
   // pipe precedence issue where |пробаме matches "пробаме" anywhere.
-  if (/^(da|да)\s+.*(?:probame|пробаме)/i.test(u) && !hasDoubt) {
+  // NEGATION GUARD (reviewer finding): the greedy .* swallows "ne" too —
+  // "da ne probame" (let's NOT try) must not be accepted. Uses
+  // hasStandaloneNegation (same as the pocneme rule), NOT a bare /(ne|не)/
+  // test — a bare test would also match words that merely START with "ne"
+  // without being negations, e.g. "da probame nešto novo" (let's try
+  // something new) or "da probame nego" (let's try it), wrongly downgrading
+  // genuine acceptances. hasStandaloneNegation only fires on a standalone
+  // "ne"/"не" word.
+  // HESITATION GUARD: "da mozebi ke probame" / "da razmislam pa ke probame"
+  // are hedged (maybe/let me think) — downgrade to INTERESTED.
+  if (/^(da|да)\s+.*(?:probame|пробаме)/i.test(u) && !hasDoubt && !hasStandaloneNegation(u) && !HESITATION_GUARD_WORDS.test(u)) {
     return { intent: "ACCEPTED", confidence: 0.95, reason: "da probame" };
   }
 
@@ -168,17 +351,76 @@ export function classifyIntent(userInput, conversation) {
   }
 
   // "почнуваме" — strong acceptance (0.90)
-  if (/(pochnuvame|počnuvame|почнуваме)$/i.test(u) && !/(ne|не)/i.test(u) && !hasDoubt) {
+  // NEGATION GUARD: uses hasStandaloneNegation (NOT a bare /(ne|не)/ test) —
+  // a bare test would wrongly block genuine acceptances that merely contain
+  // a ne-PREFIX word ("nema problem, pochnuvame" = "it's no problem, let's
+  // start" — "nema" is a word, not a standalone negation).
+  // HESITATION GUARD: "mozebi pochnuvame" (maybe we start) is hedged, not
+  // committed (audit finding — same disease as the probame family).
+  if (/(pochnuvame|počnuvame|почнуваме)$/i.test(u) && !hasStandaloneNegation(u) && !hasDoubt && !HESITATION_GUARD_WORDS.test(u)) {
     return { intent: "ACCEPTED", confidence: 0.90, reason: "pochnuvame" };
   }
 
+  // ==========================================
+  // "да почнеме" / "почнеме" / "да започнеме" — "let's start" (aorist) — strong acceptance
+  // THE PRODUCTION BUG (reported): the owner said
+  //   "SUPER, KAZI MI STO TI TREBA PA DA POCNEME"
+  // (super, tell me what you need and let's start) — a crystal-clear acceptance —
+  // but it was classified INTERESTED 0.5 (ambiguous default) because only the
+  // present-tense "pochnuvame" was covered; the AORIST "pocneme"/"почнеме"
+  // (the form Ana herself uses in "Дали да почнеме со соработка?") was missing
+  // from every rule. Result: the session stayed in PERSUASION and the LLM
+  // hallucinated a documents/meeting workflow nobody asked for.
+  //
+  // Covers: "da pocneme", "да почнеме", "pocneme", "почнеме", "zapocneme",
+  // "започнеме" — anywhere in the message (not just at the end), with
+  // negation/doubt guards. Runs in the ACCEPTED section BEFORE the catch-alls.
+  // NEGATION GOTCHA: uses hasStandaloneNegation(u), NOT a bare /(ne|не)/ test —
+  // the words "pocneme"/"започнеме"/"zapocneme"/"zapochneme" themselves contain
+  // the substring "ne"/"не" (po-cne-me), so a substring test would block every
+  // positive match. hasStandaloneNegation only fires on standalone "ne"/"не"
+  // (e.g. "da ne pocneme" → blocked, "pocneme" → accepted).
+  // HESITATION GUARD: "da mozebi ke pocneme" / "da razmislam pa ke pocneme"
+  // (maybe we'll start / let me think then start) are hedged, not committed —
+  // same disease as the da-probame family (audit finding).
+  // ==========================================
+  if (/(?:da\s+)?(?:pochneme|pocneme|почнеме|zapochneme|zapocneme|започнеме)(?:\s|[!.,;?]|$)/i.test(u) && !hasStandaloneNegation(u) && !hasDoubt && !HESITATION_GUARD_WORDS.test(u)) {
+    return { intent: "ACCEPTED", confidence: 0.92, reason: "pocneme — let's start" };
+  }
+
+  // ==========================================
+  // "кажи ми што ти треба" — "tell me what you need" — go-ahead acceptance
+  // The owner invites Ana to tell them what's needed to proceed. In context
+  // this is a clear go-ahead ("ready when you are"), e.g. the first half of
+  // the production message "SUPER, KAZI MI STO TI TREBA PA DA POCNEME".
+  // Question-form variants ("кажи ми што ти треба?") are blocked by hasDoubt.
+  // NOTE: deliberately does NOT include "кажи ми што ми треба" ("tell me what
+  // I need") — that flips the subject (what *I* need, not what *you* need) and
+  // is not a go-ahead; it could be a literal request for the owner's own info.
+  // HESITATION GUARD: "кажи ми што ти треба за да одлучам" (tell me what you
+  // need SO I CAN DECIDE) is NOT a go-ahead — the owner is still deciding.
+  // Decision/thinking words after the phrase downgrade it to INTERESTED.
+  // ==========================================
+  if (/(kazi mi sto ti treba|кажи ми што ти треба|kazete mi sto vi treba|кажете ми што ви треба|kazhi mi shto ti treba)/i.test(u) && !hasStandaloneNegation(u) && !hasDoubt &&
+      !/(odlucam|одлучам|razmislam|размислам|ke vidime|ќе видиме|ke razmislam|ќе размислам)/i.test(u)) {
+    return { intent: "ACCEPTED", confidence: 0.88, reason: "kazi mi sto ti treba — go-ahead" };
+  }
+
   // "договорено" — strong acceptance (0.95)
-  if (/dogovoreno|договорено/i.test(u) && !hasDoubt) {
+  // HESITATION GUARD: "mozebi dogovoreno" (maybe agreed) is hedged (audit finding).
+  // NEGATION GUARD: "ne dogovoreno" (not agreed) must not be accepted (audit finding).
+  if (/dogovoreno|договорено/i.test(u) && !hasDoubt && !HESITATION_GUARD_WORDS.test(u) && !hasStandaloneNegation(u)) {
     return { intent: "ACCEPTED", confidence: 0.95, reason: "dogovoreno" };
   }
 
   if (/^(da|да)$/i.test(u)) {
-    // CONTEXT RULE C: Previous hesitation → downgrade standalone "da" to INTERESTED
+    // CONTEXT RULE C1: Cooperation question boost
+    // If Ana just directly asked "Дали да почнеме со соработка?",
+    // and owner says "da" (the simplest possible yes), that's clear acceptance.
+    if (anaAskingCooperation) {
+      return { intent: "ACCEPTED", confidence: 0.90, reason: "standalone da responding to cooperation question" };
+    }
+    // CONTEXT RULE C2: Previous hesitation → downgrade standalone "da" to INTERESTED
     const hasPreviousHesitation = ctx.previousUserMessages.some(msg =>
       /mislam|мислам|mozebi|можеби|sepak|сепак|ama|ама|ne sum|не сум|ne znam|не знам|razmisl|размисл|prvo|прво|samo|само|probam|пробам|ke vidime|ќе видиме|da vidime|да видиме/i.test(msg)
     );
@@ -190,7 +432,71 @@ export function classifyIntent(userInput, conversation) {
 
   // "може" standalone — weak acceptance (0.65)
   if (/^(moze|може)$/i.test(u) && !hasDoubt) {
+    // CONTEXT RULE C3: Cooperation question boost
+    // If Ana just asked "Дали да почнеме со соработка?" and owner says "moze",
+    // that's a clear acceptance, not ambiguous permission.
+    if (anaAskingCooperation) {
+      return { intent: "ACCEPTED", confidence: 0.90, reason: "moze responding to cooperation question" };
+    }
     return { intent: "ACCEPTED", confidence: 0.65, reason: "moze — low confidence cooperation" };
+  }
+
+  // "моže {name}" — acceptance with personal address (0.90)
+  // e.g., "moze ana", "може ана" — very common Macedonian acceptance pattern
+  // The name can be any short word (agent name, etc.)
+  if (/^(moze|може)\s[a-zа-яё]{2,12}$/i.test(u) && !hasDoubt) {
+    return { intent: "ACCEPTED", confidence: 0.90, reason: "moze plus name — strong personal acceptance" };
+  }
+
+  // "sakam" standalone — "I want" (0.85)
+  if (/^(sakam|сакам)$/i.test(u) && !hasDoubt) {
+    return { intent: "ACCEPTED", confidence: 0.85, reason: "sakam — I want" };
+  }
+
+  // "sakam sorabotka" / "sakam da sorabotuvame" — explicit cooperation desire (0.95)
+  // HESITATION GUARD: "mozebi sakam sorabotka" (maybe I want cooperation) is
+  // hedged, not committed (audit finding — same disease as the probame family).
+  // NOTE: negation is already safe — "ne sakam sorabotka" is caught by the
+  // earlier "ne sakam" REJECTED rule (0.95), so no hasStandaloneNegation needed.
+  if (/(sakam|сакам).{0,20}(sorabotk|соработк|sorabotuv|соработув)/i.test(u) && !hasDoubt && !HESITATION_GUARD_WORDS.test(u)) {
+    return { intent: "ACCEPTED", confidence: 0.95, reason: "sakam sorabotka — explicit cooperation desire" };
+  }
+
+  // "da sum" — "yes I am" (0.85)
+  if (/^(da|да)\s+(sum|сум)$/i.test(u) && !hasDoubt) {
+    return { intent: "ACCEPTED", confidence: 0.85, reason: "da sum — yes I am" };
+  }
+
+  // "probaj" / "probajte" — "try" / "try (polite)" — acceptance (0.85)
+  if (/^(probaj|пробај|probajte|пробајте)$/i.test(u) && !hasDoubt) {
+    return { intent: "ACCEPTED", confidence: 0.85, reason: "probaj/probajte — try" };
+  }
+
+  // "ok" / "okej" standalone — acceptance (0.80)
+  if (/^(ok|ок|okej|океј)$/i.test(u) && !hasDoubt) {
+    return { intent: "ACCEPTED", confidence: 0.80, reason: "ok/okej — okay" };
+  }
+
+  // CONTEXT RULE D: Cooperation question context boost
+  // If Ana just explicitly asked "Дали да почнеме со соработка?" and the
+  // owner replies with a short positive message, boost to ACCEPTED.
+  // This catches positive replies that don't contain explicit acceptance words
+  // but are clearly acceptances given the context of being asked directly.
+  //
+  // IMPORTANT: Must exclude conversation-continuation patterns ("da moze", "da prodolzi", etc.)
+  // because those are conversational permission, not cooperation commitment.
+  // "da moze" stays INTERESTED even with cooperation context.
+  // PRIOR-REJECTION GUARD: if the owner previously refused ("не сум заинтересиран")
+  // and now replies with a bare acknowledgment like "тоа го реков" (that's what
+  // I said — pointing back at the refusal), do NOT boost to ACCEPTED. Without
+  // this guard, CONTEXT RULE D would re-accept what the prior-agreement rule's
+  // hasPriorRejection guard just blocked. Explicit fresh acceptances ("да"/"moze"
+  // via C1/C3, "ajde da probame", etc.) are unaffected.
+  if (anaAskingCooperation && isShortPositive && !hasDoubt && !hasPriorRejection && !HESITATION_GUARD_WORDS.test(u) &&
+      !/(moze|може)\s+[a-zа-яё]{2,12}$/i.test(u) &&
+      !CONV_CONTINUATION_WORDS.test(u) &&
+      !/^(da|да)\s*[,.]?\s*moze(?:те|\s|$)/i.test(u)) {
+    return { intent: "ACCEPTED", confidence: 0.85, reason: "cooperation question context — short positive reply" };
   }
 
   // COMPREHENSIVE GUARD: affirmative start + objection/concern/question → INTERESTED (not ACCEPTED)
@@ -212,17 +518,66 @@ export function classifyIntent(userInput, conversation) {
   // NOTE: "moze"/"може" is intentionally excluded from the affirmative-start pattern.
   // "moze" alone means "may" or "okay" — permission, not commitment (handled above as 0.65).
   // Including it causes false positives (e.g., "moze" → cooperation accepted at 0.9).
-  if (/^(da|да|ajde|ајде|dobro|добро)([,.\s]|$)/i.test(u) && !hasDoubt) return { intent: "ACCEPTED", confidence: 0.9, reason: "affirmative start" };
-  if (/(ajde|ајде)/i.test(u) && !/(ne|не)/i.test(u) && !hasDoubt) return { intent: "ACCEPTED", confidence: 0.9, reason: "ajde" };
-  if (/(probame|пробаме)/i.test(u) && !hasDoubt) return { intent: "ACCEPTED", confidence: 0.9, reason: "probame" };
-  if (/(sorabotuvame|соработуваме|sorabotuvam|соработувам)/i.test(u) && !hasDoubt) return { intent: "ACCEPTED", confidence: 0.95, reason: "sorabotuvame" };
-  if (/vo\s*(red|ред)/i.test(u) && !hasDoubt) return { intent: "ACCEPTED", confidence: 0.9, reason: "vo red" };
-  if (/se\s*(soglasuvam|согласувам)/i.test(u) && !hasDoubt) return { intent: "ACCEPTED", confidence: 0.95, reason: "se soglasuvam" };
-  if (/(prifakjam|прифаќам)/i.test(u) && !hasDoubt) return { intent: "ACCEPTED", confidence: 0.95, reason: "prifakjam" };
-  if (/(zosto|зошто)\s*da\s*(ne|не)/i.test(u) && !hasDoubt) return { intent: "ACCEPTED", confidence: 0.9, reason: "zosto da ne" };
-  if (/(ako|ако)\s*(e|е)\s*(taka|така)/i.test(u) && /(moze|може)/i.test(u) && !hasDoubt) return { intent: "ACCEPTED", confidence: 0.85, reason: "ako e taka moze" };
-  if (/(ke|ќе)\s*(probam|пробам)/i.test(u) && !hasDoubt) return { intent: "ACCEPTED", confidence: 0.85, reason: "ke probam" };
-  if (/(dogovor|договор)/i.test(u) && !hasDoubt) return { intent: "ACCEPTED", confidence: 0.9, reason: "dogovor" };
+  // DECLINE GUARD: block "da/ajde/dobro + ne" only when the standalone "не" is
+  // directly followed by a decline verb (pocneme/sakam/moze/sorabotka/prodolz)
+  // or ends the message ("ajde ne" = "come on, no"). This is TARGETED on purpose:
+  // a broad !hasStandaloneNegation guard here would wrongly downgrade genuine
+  // negated-affirmatives like "да, не е проблем" ("yes, it's not a problem" =
+  // acceptance) to INTERESTED. "da ne pocneme" is also already blocked by the
+  // aorist "pocneme" rule's own hasStandaloneNegation guard — this catch-all
+  // guard only needs to cover the "da " fall-through.
+  if (/^(da|да|ajde|ајде|dobro|добро)([,.\s]|$)/i.test(u) &&
+      !/(da|да|ajde|ајде|dobro|добро)[,.]?\s+(ne|не)(?:\s*(?:pocneme|почнеме|zapocneme|започнеме|zapochneme|pochnuvame|почнуваме|sakam|сакам|moze|може|sorabotk|соработк|prodolz|продолж|probame|пробаме)|[,.;!?]|$)/i.test(u) &&
+      !hasDoubt) return { intent: "ACCEPTED", confidence: 0.9, reason: "affirmative start" };
+  // NEGATION GUARD (reviewer finding): uses hasStandaloneNegation, NOT a bare
+  // /(ne|не)/ test — "ajde, nema problem" (come on, no problem — acceptance)
+  // contains "ne" inside the ne-PREFIX word "nema" and would be wrongly blocked;
+  // "ajde ne" (come on, no — decline) still fires the standalone-ne guard.
+  // HESITATION GUARD: "ajde, mozebi" (come on, maybe) is hedged (audit finding).
+  if (/(ajde|ајде)/i.test(u) && !hasStandaloneNegation(u) && !hasDoubt && !HESITATION_GUARD_WORDS.test(u)) return { intent: "ACCEPTED", confidence: 0.9, reason: "ajde" };
+  if (/(probame|пробаме)/i.test(u) && !hasDoubt && !hasStandaloneNegation(u) && !HESITATION_GUARD_WORDS.test(u)) return { intent: "ACCEPTED", confidence: 0.9, reason: "probame" };
+  // HESITATION GUARD on the remaining catch-alls (audit finding): "mozebi X"
+  // (maybe X) is hedged, not committed — same disease as the probame family.
+  // NEGATION GUARD (reviewer round-2 finding): "ne X" (I/we don't X) must not
+  // be accepted — uses hasStandaloneNegation so ne-PREFIX words ("nema problem,
+  // se soglasuvam") don't wrongly block genuine acceptances.
+  if (/(sorabotuvame|соработуваме|sorabotuvam|соработувам)/i.test(u) && !hasDoubt && !HESITATION_GUARD_WORDS.test(u) && !hasStandaloneNegation(u)) return { intent: "ACCEPTED", confidence: 0.95, reason: "sorabotuvame" };
+  if (/vo\s*(red|ред)/i.test(u) && !hasDoubt && !HESITATION_GUARD_WORDS.test(u) && !hasStandaloneNegation(u)) return { intent: "ACCEPTED", confidence: 0.9, reason: "vo red" };
+  if (/se\s*(soglasuvam|согласувам)/i.test(u) && !hasDoubt && !HESITATION_GUARD_WORDS.test(u) && !hasStandaloneNegation(u)) return { intent: "ACCEPTED", confidence: 0.95, reason: "se soglasuvam" };
+  if (/(prifakjam|прифаќам)/i.test(u) && !hasDoubt && !HESITATION_GUARD_WORDS.test(u) && !hasStandaloneNegation(u)) return { intent: "ACCEPTED", confidence: 0.95, reason: "prifakjam" };
+  // HESITATION GUARD (audit finding): "mozebi zosto da ne" (maybe why not) is
+  // hedged, not committed. NOTE: also matches Cyrillic "да" (previously the
+  // pattern only had Latin "da", so the Cyrillic control "зошто да не" fell to
+  // the ambiguous default — probe finding).
+  if (/(zosto|зошто)\s*(?:da|да)\s*(ne|не)/i.test(u) && !hasDoubt && !HESITATION_GUARD_WORDS.test(u)) return { intent: "ACCEPTED", confidence: 0.9, reason: "zosto da ne" };
+  // HESITATION GUARD (audit finding): blocks "ako e taka moze, ke vidime"
+  // (if it's so, ok — we'll see). Pure "ako e taka ke vidime" (no moze present)
+  // never reaches this rule — it falls through to the INTERESTED da/ke vidime
+  // fallback below.
+  // STANDALONE-WORD moze check (audit finding): uses the same \P{L} boundary
+  // technique as hasStandaloneNegation so the moze-inside-mozebi SUBSTRING trap
+  // is fixed at the SOURCE — "mozebi ako e taka" (maybe if it's so) contains
+  // "moze" as a PREFIX of "mozebi", and "mozeli ako e taka" (they could, if
+  // it's so) as a prefix of "mozeli", but neither is a standalone "moze", so
+  // the rule no longer fires on them at all (they fall through to INTERESTED).
+  // A bare /(moze|може)/ substring test would wrongly accept both hedges.
+  if (/(ako|ако)\s*(e|е)\s*(taka|така)/i.test(u) && /(?:^|\P{L})(?:moze|може)(?:\P{L}|$)/iu.test(u) && !hasDoubt && !HESITATION_GUARD_WORDS.test(u)) return { intent: "ACCEPTED", confidence: 0.85, reason: "ako e taka moze" };
+  // HESITATION GUARD: "mozebi ke probame" (maybe I'll try) is hedged, not a
+  // commitment — same disease as the da-probame family. Clean "ke probame"
+  // (I will try) remains ACCEPTED.
+  // SUBTLE QUIRK (load-bearing): the pattern (probam|пробам) has NO word
+  // boundary at the end, so "probame"/"пробаме" (we will try) matches via the
+  // "probam"/"пробам" prefix. This is INTENTIONAL — it's how "ke probame"
+  // gets caught here. The HESITATION_GUARD_WORDS check below is what separates
+  // ACCEPTED "ke probame" from INTERESTED "mozebi ke probame". If this regex
+  // is ever "tightened" (\b or an end anchor), "ke probame" would silently
+  // stop matching — keep the guard and the no-boundary pattern in lockstep.
+  // NEGATION GUARD (audit finding): "ne ke probam" / "ne ke probame" ("I/we
+  // won't try") must NOT be accepted. Uses hasStandaloneNegation so ne-PREFIX
+  // words ("nesto" in "ke probame nesto novo" = we'll try something new) don't
+  // wrongly block genuine acceptances.
+  if (/(ke|ќе)\s*(probam|пробам)/i.test(u) && !hasDoubt && !hasStandaloneNegation(u) && !HESITATION_GUARD_WORDS.test(u)) return { intent: "ACCEPTED", confidence: 0.85, reason: "ke probam" };
+  if (/(dogovor|договор)/i.test(u) && !hasDoubt && !HESITATION_GUARD_WORDS.test(u) && !hasStandaloneNegation(u)) return { intent: "ACCEPTED", confidence: 0.9, reason: "dogovor" };
 
   // ==========================================
   // 3. INTERESTED — questions, uncertainty, engagement
@@ -239,10 +594,20 @@ export function classifyIntent(userInput, conversation) {
   if (/(znaci|значи)/i.test(u)) return { intent: "INTERESTED", confidence: 0.7, reason: "znaci" };
   if (/(uslovi|услови)/i.test(u)) return { intent: "INTERESTED", confidence: 0.85, reason: "uslovi" };
   if (/(mozebi|можеби)/i.test(u)) return { intent: "INTERESTED", confidence: 0.7, reason: "mozebi" };
-  if (/(razmisluvam|размислувам|ke razmislam|ќе размислам)/i.test(u)) return { intent: "INTERESTED", confidence: 0.7, reason: "razmisluvam" };
+  // NOTE: bare "razmislam"/"размислам" (without "ke") is included so hedges like
+  // "sakam da razmislam pa ke pocneme" land here at 0.7 instead of falling to
+  // the ambiguous default (reviewer finding — HESITATION_GUARD_WORDS already
+  // matches the razmisl root, so the guard and this fallback recognize the same
+  // forms). "razmislam" is always hesitation, never acceptance.
+  if (/(razmisluvam|размислувам|ke razmislam|ќе размислам|razmislam|размислам)/i.test(u)) return { intent: "INTERESTED", confidence: 0.7, reason: "razmisluvam" };
   if (/(ne|не)\s*sum\s*(siguren|сигурен)/i.test(u)) return { intent: "INTERESTED", confidence: 0.7, reason: "ne sum siguren" };
   if (/(sepak|сепак)/i.test(u) && !/(ama|ама)/i.test(u)) return { intent: "INTERESTED", confidence: 0.6, reason: "sepak" };
-  if (/(da|да)\s*(vidime|видиме)/i.test(u)) return { intent: "INTERESTED", confidence: 0.7, reason: "da vidime" };
+  // "да видиме" (let's see) / "ke vidime" (we'll see) — hedge, never acceptance.
+  // NOTE: "ke vidime"/"ќе видиме" added (hedge-audit finding) — both are already
+  // in HESITATION_GUARD_WORDS, so every acceptance rule blocks them, but without
+  // a fallback "ako e taka ke vidime" (if it's so, we'll see) landed at the
+  // ambiguous 0.50 default instead of a proper 0.7 hedge.
+  if (/((?:da|да|ke|ќе)\s*(?:vidime|видиме))/i.test(u)) return { intent: "INTERESTED", confidence: 0.7, reason: "da/ke vidime" };
   if (/(interesno|интересно)/i.test(u)) return { intent: "INTERESTED", confidence: 0.75, reason: "interesno" };
   // NOTE: moze da probame is handled earlier in the ACCEPTED section (0.95).
   if (/(ne|не)\s*(veruvam|верувам)/i.test(u)) return { intent: "INTERESTED", confidence: 0.6, reason: "ne veruvam" };

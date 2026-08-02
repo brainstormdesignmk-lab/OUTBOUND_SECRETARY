@@ -1,3 +1,4 @@
+import { createHarness } from './test-helpers.js';
 // ========================================
 // GLOBAL EXTRACTION PASS — E2E Simulation
 // ========================================
@@ -6,19 +7,12 @@
 // extract all three fields in one pass.
 // ========================================
 import { runGlobalExtraction } from './data-collector.js';
+import { extractTerraceNumber } from './property-extractor.js';
 
-let passed = 0;
-let failed = 0;
+const harness = createHarness();
+const assert = harness.assert;
 
-function assert(label, condition, detail) {
-  if (condition) {
-    console.log(`  ✅ ${label}`);
-    passed++;
-  } else {
-    console.log(`  ❌ ${label}${detail ? ' — ' + detail : ''}`);
-    failed++;
-  }
-}
+
 
 function assertExtract(label, input, currentData, expectedFields, notExpectedFields, detail) {
   const result = runGlobalExtraction(input, currentData);
@@ -194,9 +188,9 @@ assert("E4: '98 iljadi' → cleanPrice=98000", result.cleanPrice === 98000, `got
 result = runGlobalExtraction("156000 evra", {});
 assert("E5: '156000' → cleanPrice=156000", result.cleanPrice === 156000, `got ${result.cleanPrice}`);
 
-// Test 19: Heating NOT extracted by global pass (complex handler in service.js)
+// Test 19: Heating extracted by global pass (keyword: centralno → district)
 result = runGlobalExtraction("centralno", {});
-assert("E7: heating NOT extracted by global pass", result.heating === undefined, `got ${result.heating}`);
+assert("E7: centralno → heating='district'", result.heating === 'district', `got ${JSON.stringify(result.heating)}`);
 
 // Test 20: Documentation negative detection
 result = runGlobalExtraction("ima hipoteka na stanot", {});
@@ -333,15 +327,17 @@ assert("PC2: floor NOT extracted from price-only message", result.floor === unde
 // then PRICE_SENSITIVE skips floor/totalFloors even though present)
 result = runGlobalExtraction("98 iljadi evra, 3 kat, 10katnica", {}, "98 iljadi evra, 3 kat, 10katnica");
 assert("PC3: cleanPrice=98000", result.cleanPrice === 98000, `got ${result.cleanPrice}`);
-// PRICE_SENSITIVE: floor/totalFloors ARE skipped — price context dominates
-assert("PC3: floor NOT extracted (price-sensitive skip)", result.floor === undefined, `got ${JSON.stringify(result.floor)}`);
-assert("PC3: totalFloors NOT extracted (price-sensitive skip)", result.totalFloors === undefined, `got ${JSON.stringify(result.totalFloors)}`);
+// PRICE-SENSITIVE REFINEMENT: explicit floor context ("3 kat" / "10katnica")
+// bypasses the price-sensitive skip — digits adjacent to kat/sprat/katnica
+// can never be confused with price words.
+assert("PC3: floor=3 (explicit '3 kat' bypasses price-sensitive skip)", result.floor === 3, `got ${JSON.stringify(result.floor)}`);
+assert("PC3: totalFloors=10 (explicit '10katnica')", result.totalFloors === 10, `got ${JSON.stringify(result.totalFloors)}`);
 
 // Test: Rent price with floor info in same message
 result = runGlobalExtraction("350 evra kirija, 3 kat, 10katnica", { transactionType: 'rent' }, "350 evra, 3 kat, 10katnica");
 assert("PC4: monthlyRent=350", result.monthlyRent === 350, `got ${result.monthlyRent}`);
-assert("PC4: floor NOT extracted (rent price-sensitive)", result.floor === undefined, `got ${JSON.stringify(result.floor)}`);
-assert("PC4: totalFloors NOT extracted", result.totalFloors === undefined, `got ${JSON.stringify(result.totalFloors)}`);
+assert("PC4: floor=3 (explicit '3 kat' bypasses rent price-sensitive)", result.floor === 3, `got ${JSON.stringify(result.floor)}`);
+assert("PC4: totalFloors=10 (explicit '10katnica')", result.totalFloors === 10, `got ${JSON.stringify(result.totalFloors)}`);
 
 // Test: Bedroom info WITHOUT price — should extract normally (separate message)
 result = runGlobalExtraction("2 spalni", {});
@@ -365,11 +361,10 @@ assert("RT1: cleanPrice NOT extracted for rent", result.cleanPrice === undefined
 // Test 32: Rent + bedrooms + floor (use standalone number for floor to avoid cross-field)
 result = runGlobalExtraction("350 evra, 2 spalni, tret kat", { transactionType: 'rent' }, "350 evra, 2 spalni, tret kat");
 assert("RT2: monthlyRent from '350 evra'", result.monthlyRent === 350, `got ${result.monthlyRent}`);
-// bedrooms and floor are NOT extracted when rent price is in the same message
-// (price-sensitive cross-field contamination guard). They must come separately.
-assert("RT2: bedrooms NOT extracted (price in same message)", result.bedrooms === undefined, `got ${JSON.stringify(result.bedrooms)}`);
-assert("RT2: floor NOT extracted (price in same message)", result.floor === undefined, `got ${JSON.stringify(result.floor)}`);
-// NOTE: ordinal 'tret' is unambiguous; digit '3' could overlap with firstNumber from '350'
+// bedrooms and floor ARE extracted when explicit context is present ("2 spalni"
+// and ordinal "tret kat" can never be confused with the rent amount).
+assert("RT2: bedrooms=2 (explicit '2 spalni')", result.bedrooms === 2, `got ${JSON.stringify(result.bedrooms)}`);
+assert("RT2: floor=3 (explicit 'tret kat')", result.floor === 3, `got ${JSON.stringify(result.floor)}`);
 
 // Test 33: Rent-type does NOT extract cleanPrice
 result = runGlobalExtraction("300 evra mesecno, 40 m2, garaža", { transactionType: 'rent' }, "300 evra mesecno, 40 m2, garaža");
@@ -448,10 +443,10 @@ result = runGlobalExtraction(
 );
 assert("ALL1: cleanPrice=120000", result.cleanPrice === 120000, `got ${result.cleanPrice}`);
 assert("ALL1: totalSqm=55", result.totalSqm === 55, `got ${result.totalSqm}`);
-// floor and totalFloors are NOT extracted when price is in the same message
-// (price-sensitive cross-field contamination guard). They must come separately.
-assert("ALL1: floor NOT extracted (price in same message)", result.floor === undefined, `got ${JSON.stringify(result.floor)}`);
-assert("ALL1: totalFloors NOT extracted (price in same message)", result.totalFloors === undefined, `got ${JSON.stringify(result.totalFloors)}`);
+// floor and totalFloors ARE extracted — the message contains explicit
+// "3 kat" / "10katnica" context which bypasses the price-sensitive guard.
+assert("ALL1: floor=3 (explicit '3 kat')", result.floor === 3, `got ${JSON.stringify(result.floor)}`);
+assert("ALL1: totalFloors=10 (explicit '10katnica')", result.totalFloors === 10, `got ${JSON.stringify(result.totalFloors)}`);
 assert("ALL1: elevator=true", result.elevator === true, `got ${result.elevator}`);
 assert("ALL1: ac=true", result.ac === true, `got ${result.ac}`);
 assert("ALL1: parking=true (garaza)", result.parking === true, `got ${result.parking}`);
@@ -470,11 +465,11 @@ result = runGlobalExtraction(
 );
 assert("ALL2: cleanPrice=120000", result.cleanPrice === 120000, `got ${result.cleanPrice}`);
 assert("ALL2: totalSqm=55", result.totalSqm === 55, `got ${result.totalSqm}`);
-// bedrooms/floor/totalFloors are NOT extracted when price is in the same message
-// (price-sensitive cross-field contamination guard). They must come separately.
-assert("ALL2: bedrooms NOT extracted (price in same message)", result.bedrooms === undefined, `got ${JSON.stringify(result.bedrooms)}`);
-assert("ALL2: floor NOT extracted (price in same message)", result.floor === undefined, `got ${JSON.stringify(result.floor)}`);
-assert("ALL2: totalFloors NOT extracted (price in same message)", result.totalFloors === undefined, `got ${JSON.stringify(result.totalFloors)}`);
+// bedrooms/floor/totalFloors ARE extracted — the message contains explicit
+// "2 спални" / "3 кат" / "10катница" context which bypasses the guard.
+assert("ALL2: bedrooms=2 (explicit '2 спални')", result.bedrooms === 2, `got ${JSON.stringify(result.bedrooms)}`);
+assert("ALL2: floor=3 (explicit '3 кат')", result.floor === 3, `got ${JSON.stringify(result.floor)}`);
+assert("ALL2: totalFloors=10 (explicit '10катница')", result.totalFloors === 10, `got ${JSON.stringify(result.totalFloors)}`);
 assert("ALL2: elevator=true", result.elevator === true, `got ${result.elevator}`);
 assert("ALL2: ac=true", result.ac === true, `got ${result.ac}`);
 assert("ALL2: parking=true", result.parking === true, `got ${result.parking}`);
@@ -568,16 +563,111 @@ assert("R4: 'ima lift' → NOT documentationClean", result.documentationClean ==
 assert("R4: 'ima lift' → NOT parking", result.parking === undefined, `got ${result.parking}`);
 
 // ========================================
+// TEST GROUP: Owner's exact message — parking sold separately + phantom terrace
+// ========================================
+// Owner: "za mene baram cisti stoosumdeset i tri iljadi evra, za stanot, a parking
+//         mestoto seprodava posebno za dodatni sest iljadi"
+// = "For me I want clean 183k EUR for the apartment, and the parking spot is
+//    sold separately for an additional 6k."
+// TWO bugs were reported:
+//   1. Phantom terrace 10m² — extractTerraceNumber substring-matched "deset"
+//      inside "stoosumdeset" (183), and hasTerraceContext matched bare "da"
+//      inside "dodatni".
+//   2. Parking folded into the price — separate-sale detection was gated on
+//      parkingType==='garage', never fired for plain "parking mesto".
+console.log(`\n📦 GROUP: Owner's exact message (parking sold separately)`);
+
+const OWNER_MSG = "za mene baram cisti stoosumdeset i tri iljadi evra, za stanot, a parking mestoto seprodava posebno za dodatni sest iljadi";
+result = runGlobalExtraction(OWNER_MSG, {});
+assert("PSEP1: cleanPrice=183000 (stoosumdeset i tri iljadi)", result.cleanPrice === 183000, `got ${result.cleanPrice}`);
+assert("PSEP1: parking=true (there IS parking)", result.parking === true, `got ${result.parking}`);
+assert("PSEP1: parkingType='private' (upgraded — sold separately)", result.parkingType === 'private', `got ${result.parkingType}`);
+assert("PSEP1: parkingSeparate=true", result.parkingSeparate === true, `got ${result.parkingSeparate}`);
+assert("PSEP1: parkingPrice=6000 (dodatni sest iljadi)", result.parkingPrice === 6000, `got ${result.parkingPrice}`);
+assert("PSEP1: hasTerrace NOT extracted (no terrace mentioned)", result.hasTerrace === undefined, `got ${JSON.stringify(result.hasTerrace)}`);
+assert("PSEP1: terraceSqm NOT extracted", result.terraceSqm === undefined, `got ${JSON.stringify(result.terraceSqm)}`);
+assert("PSEP1: yearBuilt NOT extracted (no 2013 false positive)", result.yearBuilt === undefined, `got ${JSON.stringify(result.yearBuilt)}`);
+
+// Direct regression: extractTerraceNumber must NOT substring-match "deset"
+// inside "stoosumdeset" (183) from a full price sentence.
+const tErr = extractTerraceNumber(OWNER_MSG);
+assert("PSEP2: extractTerraceNumber returns null for full price sentence", tErr === null, `got ${tErr}`);
+// Bare word answers still work (B15 fixture behavior)
+assert("PSEP2: 'cetiri' still → 4", extractTerraceNumber("cetiri") === 4, `got ${extractTerraceNumber("cetiri")}`);
+assert("PSEP2: 'deset' still → 10", extractTerraceNumber("deset") === 10, `got ${extractTerraceNumber("deset")}`);
+
+// Garaza variant (existing behavior must be preserved):
+result = runGlobalExtraction("garaza na -2 ama ja prodavam posebno. za plus 5000", {});
+assert("PSEP3: garaza sold separately → parkingType='garage'", result.parkingType === 'garage', `got ${result.parkingType}`);
+assert("PSEP3: garaza sold separately → parkingSeparate=true", result.parkingSeparate === true, `got ${result.parkingSeparate}`);
+assert("PSEP3: garaza sold separately → parkingPrice=5000", result.parkingPrice === 5000, `got ${result.parkingPrice}`);
+
+// ========================================
+// TEST GROUP: Reported production bugs (price hundreds, volunteered fields)
+// ========================================
+// The user's real Viber messages exposed 5 bugs. Each is regression-tested
+// here against the EXACT production wording.
+// ========================================
+console.log(`\n📦 GROUP: Reported production bugs`);
+
+// Bug 1: Merged hundreds+tens MID-SENTENCE — "tristapeeset" = 350 (not 58 from
+// the "peeset" substring inside it). "tristapeeset i osum" = 358 → 358000.
+result = runGlobalExtraction("stanov go prodavam za tristapeeset i osum iljadi evra", {});
+assert("BUG1: cleanPrice=358000 (tristapeeset=350 + osum=8, mid-sentence merged)", result.cleanPrice === 358000, `got ${result.cleanPrice}`);
+result = runGlobalExtraction("tristapeeset iljadi evra", {});
+assert("BUG1b: cleanPrice=350000 (tristapeeset alone)", result.cleanPrice === 350000, `got ${result.cleanPrice}`);
+
+// Bugs 2+3+4: THE user's exact production message — price + volunteered
+// floor (vtori kat) + year (nova zgrada od 2024) + private parking (so nego).
+// preferredField='cleanPrice' simulates the live data-collection question.
+result = runGlobalExtraction(
+  "STANOV GO PRODAVAM ZA TRISTAPEESET I OSUM ILJADI EVRA. SKAP E AMA IMA PARKING MESTO SO NEGO, NAMESTEN E KOMPLETNO SO KLIMA I PARNO GRADSKO, JUZNA ORIENTACIJALIFT NA VTORI KAT E. NOVA ZGRADA OD 2024",
+  {}, 'cleanPrice');
+assert("BUG2: cleanPrice=358000", result.cleanPrice === 358000, `got ${result.cleanPrice}`);
+assert("BUG2: floor=2 (vtori kat registered despite price in message)", result.floor === 2, `got ${JSON.stringify(result.floor)}`);
+assert("BUG3: yearBuilt=2024 (nova zgrada od 2024 registered)", result.yearBuilt === 2024, `got ${JSON.stringify(result.yearBuilt)}`);
+assert("BUG4: parking=true", result.parking === true, `got ${JSON.stringify(result.parking)}`);
+assert("BUG4: parkingType='private' (parking mesto so nego)", result.parkingType === 'private', `got ${result.parkingType}`);
+assert("BUG4: orientation='jug' (juzna orientacija)", result.orientation === 'jug', `got ${result.orientation}`);
+assert("BUG2b: elevator=true (lift in ORIENTACIJALIFT)", result.elevator === true, `got ${JSON.stringify(result.elevator)}`);
+assert("BUG2c: bedrooms NOT extracted from price message (no room words)", result.bedrooms === undefined, `got ${JSON.stringify(result.bedrooms)}`);
+
+// Bug 3 (lock-mode): year volunteered during ANOTHER field's question is captured
+result = runGlobalExtraction("nova zgrada od 2024", {}, 'cleanPrice');
+assert("BUG3b: yearBuilt=2024 captured during cleanPrice question", result.yearBuilt === 2024, `got ${JSON.stringify(result.yearBuilt)}`);
+assert("BUG3b: cleanPrice NOT set from bare year", result.cleanPrice === undefined, `got ${JSON.stringify(result.cleanPrice)}`);
+// ...but a renovation year must NOT leak into yearBuilt
+result = runGlobalExtraction("cena 120 iljadi, renoviran 2020ta", {}, 'cleanPrice');
+assert("BUG3c: cleanPrice=120000", result.cleanPrice === 120000, `got ${result.cleanPrice}`);
+assert("BUG3c: yearBuilt NOT set from renovation year (2020ta)", result.yearBuilt === undefined, `got ${JSON.stringify(result.yearBuilt)}`);
+
+// Bug 5: "seeset i cetiri kvadrati" (64 m²) must NOT become bedrooms=4
+// The exact user-reported wording ("VKUPNO IMA SEESET I CETIRI KVADRATA") is
+// pinned first, then the KVADRATI variant and the Cyrillic forms.
+result = runGlobalExtraction("VKUPNO IMA SEESET I CETIRI KVADRATA", {});
+assert("BUG5: totalSqm=64 (exact user wording, kvadrata)", result.totalSqm === 64, `got ${result.totalSqm}`);
+assert("BUG5: bedrooms NOT extracted ('cetiri' is part of 64, not bedrooms)", result.bedrooms === undefined, `got ${JSON.stringify(result.bedrooms)}`);
+result = runGlobalExtraction("VKUPNO IMA SEESET I CETIRI KVADRATI", {});
+assert("BUG5: totalSqm=64 (kvadrati variant)", result.totalSqm === 64, `got ${result.totalSqm}`);
+
+// Bug 5b: same in Cyrillic — "шеесет и четири" must parse as 64, not 60
+result = runGlobalExtraction("вкупно има шеесет и четири квадрати", {});
+assert("BUG5b: Cyrillic totalSqm=64 (шеесет и четири)", result.totalSqm === 64, `got ${result.totalSqm}`);
+assert("BUG5b: Cyrillic bedrooms NOT extracted", result.bedrooms === undefined, `got ${JSON.stringify(result.bedrooms)}`);
+result = runGlobalExtraction("вкупно има шеесет и четири квадрата", {});
+assert("BUG5c: Cyrillic 'квадрата' totalSqm=64", result.totalSqm === 64, `got ${result.totalSqm}`);
+
+// ========================================
 // TEST SUMMARY
 // ========================================
 console.log(`\n=======================================================`);
 console.log(`📊 GLOBAL EXTRACTION E2E TEST SUMMARY:`);
-console.log(`   ✅ Passed: ${passed}`);
-console.log(`   ❌ Failed: ${failed}`);
-console.log(`   📋 Total:  ${passed + failed}`);
+console.log(`   ✅ Passed: ${harness.passed}`);
+console.log(`   ❌ Failed: ${harness.failed}`);
+console.log(`   📋 Total:  ${harness.passed + harness.failed}`);
 console.log(`=======================================================`);
 
-if (failed > 0) {
+if (harness.failed > 0) {
   process.exit(1);
 } else {
   console.log(`\n🟢 ALL GLOBAL EXTRACTION TESTS PASSED`);

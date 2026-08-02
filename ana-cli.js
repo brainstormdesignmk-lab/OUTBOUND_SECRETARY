@@ -4,6 +4,9 @@ import { config } from './config.js';
 import { Campaign } from './campaign.js';
 import { parseLeadLine } from './lead-processor.js';
 import { antiBan } from './anti-ban.js';
+import { startHealthServer, stopHealthServer } from './health.js';
+import { logger } from './logger.js';
+import { classifyIntent } from './classifier.js';
 
 const LEAD_TEMP_FILE = '/tmp/ana-today-leads.csv';
 const LEADS_DIR = '/home/metropolis2/real-estate-atoms/leads';
@@ -14,6 +17,44 @@ async function main() {
   }
 
   console.log(`\n╔══════════════════════════════════════════╗\n║     ANA — METROPOLIS OUTBOUND SECRETARY  ║\n║          v2.0 — Production               ║\n╚══════════════════════════════════════════╝\n`);
+
+  // ========================================
+  // BOOT-TIME CLASSIFIER SELF-CHECK
+  // Prints the intent verdict for the exact production acceptance messages:
+  //   "SUPER, KAZI MI STO TI TREBA PA DA POCNEME" (tell me what you need, let's start)
+  //   "PA TOAGO REKOV I JAS" (well, that's what I said too — prior agreement ack)
+  // If either prints anything other than ACCEPTED >= 0.85, the process is
+  // running STALE code — Node caches imported modules per process, so a
+  // campaign started before a classifier fix keeps the old logic in memory
+  // until restarted.
+  // ========================================
+  {
+    const selfChecks = [
+      { msg: 'SUPER, KAZI MI STO TI TREBA PA DA POCNEME', desc: 'go-ahead acceptance' },
+      { msg: 'PA TOAGO REKOV I JAS', desc: 'prior agreement acknowledgment' },
+    ];
+    let allHealthy = true;
+    for (const { msg, desc } of selfChecks) {
+      const check = classifyIntent(msg, '');
+      const healthy = check.intent === 'ACCEPTED' && check.confidence >= 0.85;
+      if (healthy) {
+        console.log(`✅ CLASSIFIER SELF-CHECK: "${msg}" → ${check.intent} ${check.confidence.toFixed(2)} (${desc})`);
+      } else {
+        allHealthy = false;
+        console.log(`⛔ CLASSIFIER SELF-CHECK FAILED: "${msg}" → ${check.intent} ${check.confidence.toFixed(2)} (${desc})`);
+      }
+    }
+    if (!allHealthy) {
+      // FAIL-FAST: a stale deployment would silently run a broken campaign
+      // (owner acceptances misread as INTERESTED → LLM hallucinates workflows).
+      // Refuse to start so the operator is forced to restart/redeploy.
+      console.log(`\n⛔ THIS PROCESS IS RUNNING STALE CODE.`);
+      console.log(`   Restart the campaign locally with the latest files, or redeploy`);
+      console.log(`   classifier.js (and all project files) to the production server`);
+      console.log(`   and restart there.\n`);
+      process.exit(1);
+    }
+  }
 
   const argFile = process.argv[2];
   let leadsFile = null;
@@ -84,14 +125,23 @@ async function main() {
     process.exit(0);
   }
 
+  // === HEALTH-CHECK SERVER (Task 10) — Docker/k8s orchestration probes ===
+  startHealthServer();
+
   console.log(`\n▶️  Starting campaign with ${count} lead(s)...\n`);
   await campaign.start();
 
+  // Graceful shutdown of the health server so the process can exit cleanly
+  stopHealthServer();
+
   console.log(`\n✅ Campaign complete. Check ${config.CSV_OUTPUT_PATH}\n`);
+  logger.info('cli_done', 'Campaign complete', { csv: config.CSV_OUTPUT_PATH });
   process.exit(0);
 }
 
 main().catch(err => {
   console.error('❌ Fatal error:', err.message);
+  logger.error('cli_fatal', 'Fatal error', { error: err.message });
+  stopHealthServer();
   process.exit(1);
 });

@@ -1,8 +1,9 @@
-import { readFileSync, existsSync, appendFileSync } from 'fs';
+import { readFileSync, existsSync, appendFileSync, mkdirSync } from 'fs';
 import { config } from './config.js';
 import { extractFacts } from './memory.js';
 import { generateFirstMessage } from './service.js';
 import { LeadSession, LeadState } from './scheduler.js';
+import { withRetrySync } from './retry-utils.js';
 
 /**
  * Parse a CSV line from scraped leads
@@ -78,27 +79,52 @@ export function createSessionFromLead(lead) {
 }
 
 /**
- * Append completed lead to CSV output
+ * Append completed lead to CSV output.
+ *
+ * WRITE RESILIENCE (task: retry + fallback-to-console):
+ *   1. RETRY — the write (mkdir + header + row) is wrapped in withRetrySync
+ *      with exponential backoff, so transient FS failures (network drive
+ *      hiccup, antivirus lock, EMFILE/EBUSY, disk busy) retry instead of
+ *      dropping the row. mkdir/existsSync guards make the operation
+ *      idempotent, so a retry never duplicates the header.
+ *   2. FALLBACK-TO-CONSOLE — if ALL retries fail, the full row is printed
+ *      to the console so collected data is NEVER lost silently. The
+ *      operator can copy it into the CSV manually.
  */
 export function appendToCSV(session) {
   const header = LeadSession.getCSVHeader();
   const row = session.toCSVRow();
-
-  // Check if file exists, if not write header first
   const filePath = config.CSV_OUTPUT_PATH;
-  const dir = filePath.substring(0, filePath.lastIndexOf('/') + 1);
 
-  // Ensure directory exists
-  if (!existsSync(dir)) {
-    const { mkdirSync } = require('fs');
-    mkdirSync(dir, { recursive: true });
+  try {
+    withRetrySync(() => {
+      const dir = filePath.substring(0, filePath.lastIndexOf('/') + 1);
+
+      // Ensure directory exists
+      if (!existsSync(dir)) {
+        mkdirSync(dir, { recursive: true });
+      }
+
+      // Append header if file doesn't exist (idempotent on retry)
+      if (!existsSync(filePath)) {
+        appendFileSync(filePath, header + '\n');
+      }
+
+      appendFileSync(filePath, row + '\n');
+    }, {
+      maxRetries: 3,
+      baseDelayMs: 500,
+      maxDelayMs: 4000,
+      onRetry: (err, attempt) => {
+        console.warn(`\n[CSV RETRY ${attempt}/3] Write failed for ${session?.phone || 'unknown'}: ${err.message}`);
+      }
+    });
+
+    console.log(`\n✅ Appended to CSV: ${row}`);
+  } catch (err) {
+    // FALLBACK-TO-CONSOLE — never lose collected data
+    console.error(`\n[CSV FAILED] Could not write row for ${session?.phone || 'unknown'} to ${filePath}: ${err.message}`);
+    console.error('[CSV FALLBACK] Row preserved below — save it manually:');
+    console.log(row);
   }
-
-  // Append header if file doesn't exist
-  if (!existsSync(filePath)) {
-    appendFileSync(filePath, header + '\n');
-  }
-
-  appendFileSync(filePath, row + '\n');
-  console.log(`\n✅ Appended to CSV: ${row}`);
 }

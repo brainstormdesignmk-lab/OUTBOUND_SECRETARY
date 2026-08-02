@@ -4,6 +4,13 @@ import { generateResponse } from './service.js';
 import { LeadSession, LeadState } from './scheduler.js';
 import { antiBan } from './anti-ban.js';
 import { getFollowUpMessage, getNoResponseClose } from './deal-terms.js';
+import { isNumberBlocked, addToBlocklist } from './offensive-filter.js';
+import { isValidPhone, isValidMessage } from './retry-utils.js';
+import { SessionStore, getSessionStore } from './session-store.js';
+import { metrics } from './metrics.js';
+import { logger } from './logger.js';
+import { setHealthState } from './health.js';
+import { PHASES, transition } from './handlers/state-machine.js';
 
 export class Campaign {
   constructor() {
@@ -11,6 +18,7 @@ export class Campaign {
     this.currentIndex = 0;
     this.running = false;
     this.paused = false;
+    this.sessionStore = getSessionStore();
   }
 
   /**
@@ -19,6 +27,7 @@ export class Campaign {
   loadLeads(filePath) {
     const leads = loadLeadsFromFile(filePath);
     console.log(`\n📋 Loaded ${leads.length} leads from ${filePath}\n`);
+    metrics.set('leadsLoaded', leads.length);
 
     for (const lead of leads) {
       console.log(`   ${lead.phone} — ${lead.title.substring(0, 50)}...`);
@@ -36,7 +45,41 @@ export class Campaign {
       }
     }
 
+    // Save newly loaded sessions to disk (first snapshot)
+    this.sessionStore.save(this.sessions);
+
+    logger.info('leads_loaded', `Loaded ${this.sessions.length} leads from ${filePath}`, { count: this.sessions.length, file: filePath });
+    setHealthState({ loaded: this.sessions.length });
+
     return this.sessions.length;
+  }
+
+  /**
+   * Try to recover sessions from disk. Returns true if sessions were recovered.
+   */
+  async recoverSessions() {
+    try {
+      const savedSessions = await this.sessionStore.load();
+      if (savedSessions.length > 0) {
+        // Filter to only active (in-progress) sessions
+        const activeSessions = savedSessions.filter(s => s.isActive());
+        console.log(`\n🔄 RECOVERY: Found ${savedSessions.length} saved sessions (${activeSessions.length} active)`);
+
+        if (activeSessions.length > 0) {
+          this.sessions = activeSessions;
+          metrics.set('sessionsRecovered', activeSessions.length);
+          for (const s of activeSessions) {
+            const msgCount = s.messages.length;
+            const lastMsg = msgCount > 0 ? s.messages[msgCount - 1].text.substring(0, 60) : '(none)';
+            console.log(`   ↪ ${s.phone}: ${s.state} [phase: ${s.phase || '?'}] (${msgCount} msgs, last: "${lastMsg}...")`);
+          }
+          return true;
+        }
+      }
+    } catch (err) {
+      console.warn(`[RECOVERY] Could not recover sessions: ${err.message}`);
+    }
+    return false;
   }
 
   /**
@@ -48,12 +91,18 @@ export class Campaign {
       return;
     }
 
+    // Save sessions at start (establishes recovery point)
+    await this.sessionStore.save(this.sessions);
+
     this.running = true;
     this.currentIndex = 0;
 
     console.log(`\n========================================`);
     console.log(`🚀 CAMPAIGN STARTED — ${this.sessions.length} leads`);
     console.log(`========================================\n`);
+
+    logger.info('campaign_start', `Campaign started with ${this.sessions.length} leads`, { count: this.sessions.length });
+    setHealthState({ running: true, loaded: this.sessions.length, currentIndex: 0, startedAt: new Date().toISOString(), lastError: null });
 
     for (let i = 0; i < this.sessions.length; i++) {
       if (!this.running) {
@@ -75,20 +124,66 @@ export class Campaign {
     }
 
     this.running = false;
+
+    // Final save before finishing
+    await this.sessionStore.save(this.sessions);
+
     console.log(`\n========================================`);
     console.log(`🏁 CAMPAIGN FINISHED`);
     console.log(`========================================\n`);
+    logger.info('campaign_end', 'Campaign finished', { total: this.sessions.length });
+    setHealthState({ running: false });
     this.printSummary();
+  }
+
+  /**
+   * Validate a session before processing. Returns error message or null.
+   */
+  validateSession(session, index) {
+    if (!session) {
+      return `Session ${index + 1} is null/undefined`;
+    }
+    if (!session.phone) {
+      return `Session ${index + 1} has no phone number`;
+    }
+    if (!isValidPhone(session.phone)) {
+      return `Session ${index + 1} has invalid phone: ${session.phone}`;
+    }
+    if (!session.messages || session.messages.length === 0) {
+      return `Session ${index + 1} (${session.phone}) has no messages`;
+    }
+    if (!session.messages[0] || !session.messages[0].text) {
+      return `Session ${index + 1} (${session.phone}) has empty first message`;
+    }
+    return null; // Valid
   }
 
   /**
    * Process a single lead through its lifecycle
    */
   async processLead(session, index) {
-    console.log(`\n--- Lead ${index + 1}: ${session.phone} ---`);
+    console.log(`\n--- Lead ${index + 1}: ${session.phone || 'unknown'} ---`);
+    logger.info('lead_started', `Processing lead ${index + 1}`, { phone: session.phone, index });
+    setHealthState({ currentIndex: index });
+
+    // === INPUT VALIDATION ===
+    const validationError = this.validateSession(session, index);
+    if (validationError) {
+      console.error(`   ❌ ${validationError}`);
+      logger.error('lead_invalid', validationError, { phone: session.phone });
+      return;
+    }
+
+    // === BLOCKLIST CHECK ===
+    if (isNumberBlocked(session.phone)) {
+      console.log(`   ⏭️ Skipping ${session.phone} — number is blocked`);
+      logger.warn('lead_blocked', 'Number is blocklisted', { phone: session.phone });
+      return;
+    }
 
     if (!antiBan.canSendToContact(session.phone)) {
       console.log(`   ⏭️ Skipping — anti-ban limits reached or outside active hours`);
+      logger.warn('lead_skipped_antiban', 'Anti-ban limits reached or outside active hours', { phone: session.phone });
       return;
     }
 
@@ -110,6 +205,7 @@ export class Campaign {
 
     if (reply1) {
       console.log(`   📩 Reply received: "${reply1.substring(0, 80)}..."`);
+      logger.info('reply_received', 'Reply to first message', { phone: session.phone, text: reply1.substring(0, 120) });
       await this.handleReply(session, reply1);
     } else {
       // === STEP 3: Send follow-up ===
@@ -133,11 +229,9 @@ export class Campaign {
         // === STEP 5: Close no response ===
         const closeMsg = getNoResponseClose();
         session.addSentMessage(closeMsg);
-        session.markTimedOut();
         console.log(`   ⏰ No response. Closing: "${closeMsg}"`);
-
-        // Append to CSV with no-response status
-        appendToCSV(session);
+        logger.warn('lead_no_response', 'No response — closing', { phone: session.phone });
+        this.closeNoResponse(session);
       }
     }
   }
@@ -183,12 +277,38 @@ export class Campaign {
   /**
    * Handle a reply from the owner
    */
-  async handleReply(session, replyText) {
+  async handleReply(session, replyText, invalidAttempts = 0) {
     try {
+      // === INPUT VALIDATION ===
+      if (!isValidMessage(replyText, 10000)) {
+        console.log(`   ❌ Invalid reply text (empty or too long)`);
+        // Guard against infinite loop: max 3 retry attempts for invalid input
+        if (invalidAttempts >= 3) {
+          console.log(`   ⛔ Max invalid reply attempts reached (${invalidAttempts}). Closing.`);
+          this.closeNoResponse(session);
+          return;
+        }
+        // Ask again with a gentle prompt
+        const retryMsg = 'Ве молам, испратете валидна порака.';
+        session.addSentMessage(retryMsg);
+        console.log(`   📤 Ana: "${retryMsg}"`);
+        // Wait for a proper reply (increment counter)
+        const retryReply = await this.waitForReply(session, config.REPLY_TIMEOUT);
+        if (retryReply) {
+          await this.handleReply(session, retryReply, invalidAttempts + 1);
+        } else {
+          this.closeNoResponse(session);
+        }
+        return;
+      }
+
+      metrics.inc('repliesReceived');
       const response = await generateResponse(session, replyText);
 
       if (!response || !response.text) {
         console.log('   ❌ Empty response from service');
+        metrics.inc('emptyResponses');
+        logger.error('empty_response', 'Empty response from service', { phone: session.phone });
         return;
       }
 
@@ -196,8 +316,22 @@ export class Campaign {
       console.log(`   💬 Thinking delay: ${Math.round(delay / 1000)}s`);
       await this.sleep(delay);
 
+      // TERMINATE responses should NOT be sent to the owner (strike 3 protocol)
+      if (response.type === 'TERMINATE') {
+        console.log(`   🚫 SESSION TERMINATED — offensive behavior (strike 3)`);
+        metrics.inc('terminated', 1, { phone: session.phone });
+        logger.warn('lead_terminated', 'Session terminated — offensive behavior (strike 3)', { phone: session.phone });
+        addToBlocklist(session.phone, 'offensive_behavior_strike3');
+        session.markBlocklisted(); // appliance-grade: BLOCKLISTED is its own terminal state
+        appendToCSV(session);
+        this.sessionStore.save(this.sessions); // persist the terminal state (crash-safe)
+        console.log(`   ❌ Lead terminated due to offensive behavior.`);
+        return;
+      }
+
       console.log(`   📤 Ana: "${response.text}"`);
       session.addSentMessage(response.text);
+      metrics.inc('messagesSent');
 
       if (response.type === 'QUESTION') {
         session.markOwnerInterested();
@@ -214,25 +348,86 @@ export class Campaign {
           session.followUpSent = true;
           antiBan.recordSent(session.phone);
           console.log(`   📤 Follow-up: "${followUp}"`);
+          logger.info('followup_sent', 'Follow-up message sent', { phone: session.phone });
 
           const nextReply2 = await this.waitForReply(session, config.FOLLOWUP_TIMEOUT - config.REPLY_TIMEOUT);
 
           if (nextReply2) {
             await this.handleReply(session, nextReply2);
           } else {
-            session.markTimedOut();
             console.log(`   ⏰ No response. Closing.`);
-            appendToCSV(session);
+            this.closeNoResponse(session);
           }
         }
       } else if (response.type === 'CLOSE') {
         session.markClosed(true);
+        metrics.inc('closedSuccess');
         appendToCSV(session);
+        logger.info('lead_closed', 'Lead closed successfully', { phone: session.phone });
         console.log(`   ✅ Lead closed successfully.`);
+      } else if (response.type === 'CLOSED') {
+        // Rejection or unsuccessful close (no data collected)
+        session.markClosed(false);
+        metrics.inc('closedNotInterested');
+        appendToCSV(session);
+        logger.info('lead_closed_not_interested', 'Owner not interested', { phone: session.phone });
+        console.log(`   ❌ Owner not interested.`);
       } else if (response.type === 'NO_INTEREST') {
         session.markClosed(false);
+        metrics.inc('closedNotInterested');
         appendToCSV(session);
+        logger.info('lead_closed_not_interested', 'Owner not interested', { phone: session.phone });
         console.log(`   ❌ Owner not interested.`);
+      } else if (response.type === 'ESCALATE') {
+        // HUMAN ESCALATION — the owner explicitly asked for a real person
+        // (handoff text already sent above). Park the session for the
+        // operator: NEEDS_HUMAN is a terminal LeadState, the CSV row's
+        // status column carries 'needs_human', and isActive() = false so
+        // the bot never resumes it automatically. Persist BEFORE the
+        // early return so the escalation survives a crash.
+        const reason = session.escalationReason || 'owner_requested_human';
+        // Guard: a session that is ALREADY parked (defensive path — e.g.
+        // service.js parked-session guard returned ESCALATE for a session
+        // that was somehow re-processed) must not append a duplicate CSV
+        // row or re-emit the escalation event. Recovery filters NEEDS_HUMAN
+        // sessions out, so this is belt-and-braces only. NOTE: the generic
+        // send step above has already appended this handoff text to
+        // session.messages — the owner may see a second handoff, but no
+        // duplicate CSV row is written. Acceptable for a defensive path.
+        if (session.state === LeadState.NEEDS_HUMAN) {
+          console.log(`   🤝 ${session.phone} already escalated to human — skipping duplicate`);
+          return;
+        }
+        session.markNeedsHuman();
+        metrics.inc('escalatedToHuman', 1, { phone: session.phone, reason });
+        logger.warn('lead_escalated', 'Lead escalated to human operator', { phone: session.phone, reason });
+        appendToCSV(session);
+        this.sessionStore.save(this.sessions);
+        console.log(`   🤝 ESCALATED TO HUMAN — ${session.phone}`);
+        return;
+      } else if (response.type === 'WARNING') {
+        // Warning issued (strike 1 or 2) — continue conversation
+        metrics.inc('warnings');
+        logger.warn('strike_warning', `Warning issued (strike ${session.offensiveStrikes}/3)`, { phone: session.phone, strike: session.offensiveStrikes });
+        console.log(`   ⚠️  WARNING issued (strike ${session.offensiveStrikes}/3)`);
+        // Do NOT send the warning text? Actually we already printed it above.
+        // The message is already logged as "Ana: ..." above.
+        // Wait for next reply
+        console.log(`   ⏳ Waiting for next reply...`);
+        const nextReply = await this.waitForReply(session, config.REPLY_TIMEOUT);
+        if (nextReply) {
+          console.log(`   📩 Reply: "${nextReply.substring(0, 80)}..."`);
+          await this.handleReply(session, nextReply);
+        } else {
+          console.log(`   ⏰ No response. Closing.`);
+          logger.warn('lead_no_response', 'No response after warning — closing', { phone: session.phone });
+          this.closeNoResponse(session);
+        }
+      } else if (response.type === 'TERMINATE') {
+        // TERMINATE is now handled BEFORE the Ana message is printed/sent.
+        // This is a safety fallback in case TERMINATE reaches the type-switch.
+        // Log and close without sending any message.
+        console.log(`   🚫 Lead ${session.phone} terminated.`);
       } else if (response.type === 'TERMS_EXPLANATION') {
         // Owner asked for terms, wait for their response to the terms
         console.log(`   ⏳ Waiting for owner's response to terms...`);
@@ -249,8 +444,7 @@ export class Campaign {
           if (termsReply2) {
             await this.handleReply(session, termsReply2);
           } else {
-            session.markTimedOut();
-            appendToCSV(session);
+            this.closeNoResponse(session);
           }
         }
       } else if (response.type === 'PITCH' || response.type === 'NORMAL') {
@@ -266,43 +460,142 @@ export class Campaign {
           console.log(`   📩 Reply: "${nextReply.substring(0, 80)}..."`);
           await this.handleReply(session, nextReply);
         } else {
-          session.markTimedOut();
-          appendToCSV(session);
           console.log(`   ⏰ No response. Closing.`);
+          this.closeNoResponse(session);
         }
 
       } else if (response.type === 'ERROR') {
-        console.log(`   ❌ Service error. Continuing...`);
-        session.markTimedOut();
-        appendToCSV(session);
+        // SERVICE-ERROR ESCALATION: an ERROR response means the bot could
+        // not serve this owner (LLM/network failure — generateResponse's
+        // safe fallback already sent the owner a technical-error text).
+        // The FIRST error keeps the conversation open so it can recover;
+        // a SECOND consecutive error hands the lead to a human instead of
+        // silently dropping it.
+        metrics.inc('serviceErrors');
+        if (this.shouldEscalateServiceError(session)) {
+          session.escalationReason = 'repeated_service_errors';
+          session.markNeedsHuman();
+          metrics.inc('escalatedToHuman', 1, { phone: session.phone, reason: 'repeated_service_errors' });
+          logger.error('service_error', 'Repeated service errors — escalated to human', { phone: session.phone, errors: session.serviceErrorCount });
+          appendToCSV(session);
+          this.sessionStore.save(this.sessions);
+          console.log(`   ❌ Service error (x${session.serviceErrorCount}) — ESCALATED TO HUMAN ${session.phone}`);
+          return;
+        }
+        // First error: fallback text already sent — wait briefly for the
+        // owner's next reply so the conversation can recover. Uses the
+        // dedicated short SERVICE_ERROR_WAIT_MS (NOT the 30-min
+        // REPLY_TIMEOUT) so a transient failure doesn't stall the whole
+        // campaign waiting on a likely-non-responsive owner.
+        console.log(`   ❌ Service error (1). Waiting for next reply...`);
+        logger.error('service_error', 'Service error — waiting for next reply', { phone: session.phone, errors: session.serviceErrorCount });
+        const nextReply = await this.waitForReply(session, config.SERVICE_ERROR_WAIT_MS);
+        if (nextReply) {
+          await this.handleReply(session, nextReply);
+        } else {
+          this.closeNoResponse(session);
+        }
       }
+
+      // LeadState ↔ Phase sync (appliance-grade guarantee 3: only
+      // campaign.js mutates LeadState). When the phase machine parked
+      // the session in AWAITING_PHOTOS, mirror it to the LeadState; when
+      // it leaves (owner_back → DATA_COLLECTION), move back.
+      if (session.phase === PHASES.AWAITING_PHOTOS && session.state === LeadState.COLLECTING_DATA) {
+        session.markWaitingPhotos();
+      } else if (session.phase !== PHASES.AWAITING_PHOTOS && session.state === LeadState.WAITING_PHOTOS) {
+        session.markCollectingData();
+      }
+
+      // PERSIST: Save sessions after ALL state changes in this turn.
+      // Placed at the end of the switch block so all markClosed(),
+      // markTimedOut(), addSentMessage(), etc. are captured.
+      // Uses non-blocking save (promise chain) so the conversation
+      // flow continues without waiting for disk I/O.
+      // If a crash occurs, the next load() will replay from the
+      // last successful save — at worst losing one reply's state.
+      this.sessionStore.save(this.sessions);
 
     } catch (err) {
       console.error(`   ❌ Error handling reply: ${err.message}`);
+      logger.error('reply_error', 'Error handling reply', { phone: session.phone, error: err.message });
+      setHealthState({ lastError: err.message });
     }
+  }
+
+  /**
+   * Track consecutive service errors and decide whether to escalate.
+   * Returns true from the 2nd consecutive ERROR onward. The count is
+   * persisted on the session (session-store) so it survives restarts.
+   *
+   * @param {Object} session
+   * @returns {boolean} — true when the lead should be handed to a human
+   */
+  shouldEscalateServiceError(session) {
+    session.serviceErrorCount = (session.serviceErrorCount || 0) + 1;
+    return session.serviceErrorCount >= 2;
+  }
+
+  /**
+   * Close a session on no-response/timeout.
+   * Fires the phase-layer timeout transition (AWAITING_PHOTOS → CLOSED) if
+   * applicable, then the LeadState close + CSV append. Kept DRY because
+   * every no-reply branch in handleReply/processLead uses this pattern.
+   */
+  closeNoResponse(session) {
+    if (session.phase === PHASES.AWAITING_PHOTOS) {
+      transition(session, 'timeout'); // AWAITING_PHOTOS → CLOSED (phase layer)
+    }
+    session.markTimedOut();
+    appendToCSV(session);
+  }
+
+  /**
+   * Tally the final LeadState distribution across all sessions.
+   * Separated from printSummary so it can be unit-tested.
+   *
+   * @returns {Object} counts keyed by outcome
+   */
+  countSummary() {
+    const counts = {
+      success: 0,
+      notInterested: 0,
+      timeout: 0,
+      blocklisted: 0,
+      waitingPhotos: 0,
+      needsHuman: 0
+    };
+    for (const s of this.sessions) {
+      switch (s.state) {
+        case LeadState.CLOSED_SUCCESS: counts.success++; break;
+        case LeadState.CLOSED_NOT_INTERESTED: counts.notInterested++; break;
+        case LeadState.CLOSED_TIMEOUT: counts.timeout++; break;
+        case LeadState.BLOCKLISTED: counts.blocklisted++; break;
+        case LeadState.WAITING_PHOTOS: counts.waitingPhotos++; break;
+        case LeadState.NEEDS_HUMAN: counts.needsHuman++; break;
+      }
+    }
+    return counts;
   }
 
   /**
    * Print campaign summary
    */
   printSummary() {
-    let success = 0, noResponse = 0, notInterested = 0, timeout = 0;
-
-    for (const s of this.sessions) {
-      switch (s.state) {
-        case LeadState.CLOSED_SUCCESS: success++; break;
-        case LeadState.CLOSED_NO_RESPONSE: noResponse++; break;
-        case LeadState.CLOSED_NOT_INTERESTED: notInterested++; break;
-        case LeadState.CLOSED_TIMEOUT: timeout++; break;
-      }
-    }
+    const c = this.countSummary();
 
     console.log(`📊 Campaign Summary:`);
-    console.log(`   ✅ Successfully closed: ${success}`);
-    console.log(`   ❌ Not interested: ${notInterested}`);
-    console.log(`   ⏰ No response: ${noResponse}`);
-    console.log(`   ⏳ Timed out: ${timeout}`);
+    console.log(`   ✅ Successfully closed: ${c.success}`);
+    console.log(`   ❌ Not interested: ${c.notInterested}`);
+    console.log(`   ⏳ Timed out: ${c.timeout}`);
+    console.log(`   🚫 Blocklisted: ${c.blocklisted}`);
+    console.log(`   📸 Waiting for photos: ${c.waitingPhotos}`);
+    console.log(`   🤝 Escalated to human: ${c.needsHuman}`);
     console.log(`   📁 CSV saved to: ${config.CSV_OUTPUT_PATH}`);
+
+    // === METRICS (Task 6) — live counters + optional file trail ===
+    metrics.snapshot('campaign_end');
+    metrics.print();
   }
 
   getTime() {

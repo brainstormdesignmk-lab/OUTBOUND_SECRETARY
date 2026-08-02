@@ -1,3 +1,4 @@
+import { createHarness } from './test-helpers.js';
 // ========================================
 // COMPLEX STATEFUL HANDLERS — Test Suite
 // ========================================
@@ -13,18 +14,10 @@
 // ========================================
 import { extractTerraceNumber, isPositive, isNegative } from './property-extractor.js';
 
-let passed = 0;
-let failed = 0;
+const harness = createHarness();
+const assert = harness.assert;
 
-function assert(label, condition, detail) {
-  if (condition) {
-    console.log(`  ✅ ${label}`);
-    passed++;
-  } else {
-    console.log(`  ❌ ${label}${detail ? ' — ' + detail : ''}`);
-    failed++;
-  }
-}
+
 
 // ========================================
 // SIMULATED HANDLER FUNCTIONS
@@ -121,16 +114,35 @@ function handlePhotos(u, data, hasScraperPhotos) {
       data.photos = true;
     }
   } else {
+    // PHOTO RECOVERY RULE — checked FIRST (before the positive branch).
+    // isPositive() matches bare substrings like "ke"/"pratam"/"ke vi pratam",
+    // so "NEMAM AMA KE NAPRAVAM POPLADNE I KE VI PRATAM" (negative-now +
+    // promise-later) must go to RECOVERY_ASKED, NOT VIBER_PENDING.
+    const hasIdiomPositive = /nema\s+(?:problem|проблем)|bez\s+(?:problem|проблем)|ne\s+e\s+problem|не\s+е\s+проблем/i.test(u);
+    if (/nemam\s+fotografi|немам\s+фотографии|nemam\s+sliki|немам\s+слики|momentalno\s+nemam|моментално\s+немам|ne\s+se\s+pri\s+raka|не\s+се\s+при\s+рака|ke\s+gi\s+baram|ќе\s+ги\s+барам|ke\s+gi\s+pobaram|ќе\s+ги\s+побарам|ke\s+gi\s+pratam\s+podocna|ќе\s+ги\s+пратам\s+подоцна|podocna\s+ke\s+pratam|подоцна\s+ќе\s+пратам|nema\s+momentalno|нема\s+моментално|nemam\s+sega|немам\s+сега|sega\s+nemam|сега\s+немам|ne\s+mozam\s+sega|не\s+можам\s+сега|ke\s+ispratam\s+podocna|ќе\s+испратам\s+подоцна|ke\s+pobaram\s+pa\s+ke\s+pratam|ќе\s+побарам\s+па\s+ќе\s+пратам|ne\s+mi\s+se\s+pri\s+raka|не\s+ми\s+се\s+при\s+рака|nemam\s+pri\s+raka|немам\s+при\s+рака|ne\s+se\s+naogjaat\s+sega|не\s+се\s+наоѓаат\s+сега/i.test(u) ||
+        // Short neg-now/future words (ne/не, ke/ќе) use letter-boundary matching
+        // so they don't fire as substrings of innocent words like "denes"/"денес"
+        // (today) — "denes ke pratam" is a POSITIVE commitment, not a recovery.
+        (!hasIdiomPositive && /nemam|немам|nema|нема|bez|без|(?:^|[^a-zа-я])ne(?:$|[^a-zа-я])|(?:^|[^a-zа-я])не(?:$|[^a-zа-я])/i.test(u) && /moment|момент|sega|сега|podocna|подоцна|(?:^|[^a-zа-я])ke(?:$|[^a-zа-я])|(?:^|[^a-zа-я])ќе(?:$|[^a-zа-я])|pratam|пратам|napravam|направам|popladne|попладне|utre|утре|docna|доцна|baram|барам|pobaram|побарам|sliki|слики|fotografi|фотографии|raka|рака/i.test(u))) {
+      data.photosPermission = false;
+      data.photosSource = "RECOVERY_ASKED";
+      data.photosStatus = "RECOVERY_ASKED";
+      data.photos = false;
+      data.photosPending = true;
+      return { type: "QUESTION" }; // Recovery question
+    }
     if (isPositive(u) || /ima|има|imam|имам|ke pratam|ќе пратам|pratam|пратам|moze da pratam|може да пратам|da|да|ok|океј|da imam|да имам|ima fotografi|има фотографии|ima sliki|има слики|ke vi pratam|ќе ви пратам|ke ispratam|ќе испратам|ke pushtam|ќе пуштам|ima na oglas|има на оглас|ke vi ispratam|ќе ви испратам|ispratam|испратам|tuka da vi pratam|тука да ви пратам/i.test(u)) {
       data.photosPermission = true;
       data.photosSource = "VIBER_PENDING";
       data.photosStatus = "VIBER_PENDING";
       data.photos = true;
+      data.photosPending = false;
     } else if (isNegative(u) || /nemam|немам|nema|нема|bez|без|nema sliki|нема слики|bez sliki|без слики|ne|не|nema fotografi|нема фотографии|nemam sliki|немам слики|nemam momentalno|немам моментално|ti kazav|ти кажав|kazav|кажав|rekov|реков|nemam|немам|nema momentalno|нема моментално|ne mozam|не можам|ne moze|не може/i.test(u)) {
       data.photosPermission = false;
       data.photosSource = "NONE";
       data.photosStatus = "NONE";
       data.photos = false;
+      data.photosPending = false;
     }
   }
   return null;
@@ -705,11 +717,11 @@ console.log(`━━━━━━━━━━━━━━━━━━━━━━�
   assert("P7: 'nemam' → NONE", d.photosPermission === false && d.photosSource === "NONE", `got source=${d.photosSource}`);
 })();
 
-// P8: Normal flow — "nema sliki"
+// P8: Normal flow — "nema sliki" (don't have photos — recoverable)
 (() => {
   const d = freshData();
   handlePhotos("nema sliki", d, false);
-  assert("P8: 'nema sliki' → NONE", d.photosPermission === false && d.photosSource === "NONE", `got source=${d.photosSource}`);
+  assert("P8: 'nema sliki' → RECOVERY_ASKED (nema+sliki fallback)", d.photosPermission === false && d.photosSource === "RECOVERY_ASKED" && d.photosPending === true, `got source=${d.photosSource}`);
 })();
 
 // P9: Scraper flow — "da" (approves scraper photos)
@@ -778,11 +790,11 @@ console.log(`━━━━━━━━━━━━━━━━━━━━━━�
   assert("P17: SCRAPER_APPROVED already processed → photos=true", d.photos === true, `got photos=${d.photos}`);
 })();
 
-// P18: Normal flow — Cyrillic "немам слики" → NONE
+// P18: Normal flow — Cyrillic "немам слики" → RECOVERY_ASKED
 (() => {
   const d = freshData();
   handlePhotos("немам слики", d, false);
-  assert("P18: 'немам слики' → NONE", d.photosPermission === false && d.photosSource === "NONE" && d.photosStatus === "NONE" && d.photos === false, `got source=${d.photosSource}`);
+  assert("P18: 'немам слики' → RECOVERY_ASKED", d.photosPermission === false && d.photosSource === "RECOVERY_ASKED" && d.photosStatus === "RECOVERY_ASKED" && d.photos === false && d.photosPending === true, `got source=${d.photosSource}`);
 })();
 
 // P19: Normal flow — "ok" → VIBER_PENDING
@@ -878,11 +890,11 @@ console.log(`━━━━━━━━━━━━━━━━━━━━━━�
   assert("P31: SCRAPER_NOT_CURRENT already processed → photos=true", d.photos === true, `got photos=${d.photos}`);
 })();
 
-// P32: Normal flow — "nema momentalno" (don't have currently) → NONE
+// P32: Normal flow — "nema momentalno" (don't have currently) → RECOVERY_ASKED
 (() => {
   const d = freshData();
   handlePhotos("nema momentalno", d, false);
-  assert("P32: 'nema momentalno' → NONE", d.photosPermission === false && d.photosSource === "NONE", `got source=${d.photosSource}`);
+  assert("P32: 'nema momentalno' → RECOVERY_ASKED", d.photosPermission === false && d.photosSource === "RECOVERY_ASKED" && d.photosPending === true, `got source=${d.photosSource}`);
 })();
 
 // P33: Normal flow — "da imam" (I have, short form) → VIBER_PENDING
@@ -964,11 +976,72 @@ console.log(`━━━━━━━━━━━━━━━━━━━━━━�
   assert("P42: 'ti kazav' → NONE", d.photosPermission === false && d.photosSource === "NONE", `got source=${d.photosSource}`);
 })();
 
-// P43: Normal flow — "bez sliki" (without photos) → NONE
+// P43: Normal flow — "bez sliki" (without photos) → RECOVERY_ASKED (bez+sliki fallback)
 (() => {
   const d = freshData();
   handlePhotos("bez sliki", d, false);
-  assert("P43: 'bez sliki' → NONE", d.photosPermission === false && d.photosSource === "NONE", `got source=${d.photosSource}`);
+  assert("P43: 'bez sliki' → RECOVERY_ASKED", d.photosPermission === false && d.photosSource === "RECOVERY_ASKED" && d.photosPending === true, `got source=${d.photosSource}`);
+})();
+
+// P44: THE BUG — "nemam ama ke napravam popladne i ke vi pratam"
+// Owner says "I don't have them but I'll take them this afternoon and send them."
+// Must be RECOVERY_ASKED (photosPending=true), NOT VIBER_PENDING.
+(() => {
+  const d = freshData();
+  const result = handlePhotos("nemam ama ke napravam popladne i ke vi pratam", d, false);
+  assert("P44: 'nemam ama ke napravam popladne i ke vi pratam' → RECOVERY_ASKED", d.photosSource === "RECOVERY_ASKED" && d.photosStatus === "RECOVERY_ASKED" && d.photos === false && d.photosPending === true, `got source=${d.photosSource}, pending=${d.photosPending}`);
+  assert("P44: recovery question asked", result !== null && result.type === "QUESTION", `got ${JSON.stringify(result)}`);
+})();
+
+// P45: Pure promise "ke vi pratam" (will send) with NO negative-now → VIBER_PENDING
+(() => {
+  const d = freshData();
+  handlePhotos("ke vi pratam", d, false);
+  assert("P45: 'ke vi pratam' → VIBER_PENDING (no negative-now)", d.photosSource === "VIBER_PENDING" && d.photosPending === false, `got source=${d.photosSource}, pending=${d.photosPending}`);
+})();
+
+// P46: "momentalno nemam" (don't have right now) → RECOVERY_ASKED
+(() => {
+  const d = freshData();
+  const result = handlePhotos("momentalno nemam", d, false);
+  assert("P46: 'momentalno nemam' → RECOVERY_ASKED", d.photosSource === "RECOVERY_ASKED" && d.photosPending === true, `got source=${d.photosSource}`);
+})();
+
+// P47: "ke gi baram" (I'll look for them) → RECOVERY_ASKED
+(() => {
+  const d = freshData();
+  handlePhotos("ke gi baram", d, false);
+  assert("P47: 'ke gi baram' → RECOVERY_ASKED", d.photosSource === "RECOVERY_ASKED" && d.photosPending === true, `got source=${d.photosSource}`);
+})();
+
+// P48: "ne se pri raka" (not at hand) → RECOVERY_ASKED
+(() => {
+  const d = freshData();
+  handlePhotos("ne se pri raka", d, false);
+  assert("P48: 'ne se pri raka' → RECOVERY_ASKED", d.photosSource === "RECOVERY_ASKED" && d.photosPending === true, `got source=${d.photosSource}`);
+})();
+
+// P49: Idiomatic positive "nema problem ke pratam" (no problem, I'll send)
+// must NOT be misclassified as recovery — stays VIBER_PENDING.
+(() => {
+  const d = freshData();
+  handlePhotos("nema problem ke pratam", d, false);
+  assert("P49: 'nema problem ke pratam' → VIBER_PENDING (idiom guard)", d.photosSource === "VIBER_PENDING" && d.photosPending === false, `got source=${d.photosSource}, pending=${d.photosPending}`);
+})();
+
+// P50: "denes ke pratam" (today I'll send) — "denes" contains "ne" as a substring,
+// but letter-boundary matching prevents the false recovery → VIBER_PENDING.
+(() => {
+  const d = freshData();
+  handlePhotos("denes ke pratam", d, false);
+  assert("P50: 'denes ke pratam' → VIBER_PENDING (letter-boundary guard)", d.photosSource === "VIBER_PENDING" && d.photosPending === false, `got source=${d.photosSource}, pending=${d.photosPending}`);
+})();
+
+// P51: Cyrillic "денес ќе пратам" (today I'll send) → VIBER_PENDING
+(() => {
+  const d = freshData();
+  handlePhotos("денес ќе пратам", d, false);
+  assert("P51: 'денес ќе пратам' → VIBER_PENDING (letter-boundary guard)", d.photosSource === "VIBER_PENDING" && d.photosPending === false, `got source=${d.photosSource}, pending=${d.photosPending}`);
 })();
 
 
@@ -977,12 +1050,12 @@ console.log(`━━━━━━━━━━━━━━━━━━━━━━�
 // ========================================
 console.log(`\n=======================================================`);
 console.log(`📊 COMPLEX HANDLERS TEST SUMMARY:`);
-console.log(`   ✅ Passed: ${passed}`);
-console.log(`   ❌ Failed: ${failed}`);
-console.log(`   📋 Total:  ${passed + failed}`);
+console.log(`   ✅ Passed: ${harness.passed}`);
+console.log(`   ❌ Failed: ${harness.failed}`);
+console.log(`   📋 Total:  ${harness.passed + harness.failed}`);
 console.log(`=======================================================`);
 
-if (failed > 0) {
+if (harness.failed > 0) {
   process.exit(1);
 } else {
   console.log(`\n🟢 ALL COMPLEX HANDLER TESTS PASSED`);

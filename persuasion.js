@@ -7,7 +7,7 @@
 //   2. buildPersuasionPrompt() — full LLM prompt template
 //   3. postProcessPersuasionResponse() — clean, dedup, closing question, hard filters
 // ========================================
-import { cleanResponse } from './guardrails.js';
+import { cleanResponse, hasMixedScript, fixMixedScript, hasDanglingConjunction, stripDanglingConjunction } from './guardrails.js';
 
 // ========================================
 // BUILD PERSUASION CONTEXT
@@ -80,6 +80,17 @@ const propertyLabel = session.adMemory?.propertyType === 'apartment' ? 'стан
 "Да, немате никакви обврски кон нас. Дали сте расположени да соработуваме?"
 "Драго ми е што дознав дека имотот сè уште е слободен. Дали сте расположени да разговараме подетално?"
 
+ПРОИЗВОДСТВЕНО ПРАВИЛО (МОРА ДА СЛЕДИШ):
+НИКОГАШ не измислувај вредности за квадратура, кат, спрат, цена или други
+карактеристики на имотот. Користи САМО информации кои сопственикот експлицитно ги кажал.
+Ако сопственикот не дал некој податок, не претпоставувај — само продолжи со разговорот.
+
+НЕ измислувај работен процес: НИКОГАШ не спомнувај документи, договори, средби,
+термини, посети или чекори кои сопственикот не ги спомнал. Ако сопственикот е
+подготвен да почне („да почнеме“, „кажи ми што ти треба“), едноставно потврди дека
+ќе му поставиш неколку прашања за имотот — НЕ опишувај процедури, документација или
+термини. Само прашај за соработка или за првиот податок.
+
 ${persuasionContext ? `\nКОНТЕКСТ:\n${persuasionContext}\n` : ''}
 РАЗГОВОР:
 ${conv}
@@ -100,6 +111,16 @@ export function postProcessPersuasionResponse(response, isRent) {
 
   // Clean via guardrails and remove "Ана:" prefix
   let cleaned = cleanResponse(response, '').replace(/^Ана:?\s*/i, '').trim();
+
+  // SCRIPT-CONSISTENCY GUARDS: repair mixed Latin/Cyrillic words ("потencijални")
+  // and dangling duplicated conjunctions ("клиенти и потенцијални и.").
+  // These are LLM output artifacts, not owner messages — repair before sending.
+  if (hasMixedScript(cleaned)) {
+    cleaned = fixMixedScript(cleaned);
+  }
+  if (hasDanglingConjunction(cleaned)) {
+    cleaned = stripDanglingConjunction(cleaned);
+  }
 
   // Remove duplicate phrases (fix for stutter)
   cleaned = cleaned.replace(/(Дали сте расположени)\s+\1/gi, '$1');

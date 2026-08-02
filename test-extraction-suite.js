@@ -1,3 +1,4 @@
+import { createHarness } from './test-helpers.js';
 // ========================================
 // test-extraction-suite.js
 // Automated tests for the 5 critical extraction patterns.
@@ -14,19 +15,11 @@
 
 import { runGlobalExtraction } from './data-collector.js';
 
-const currentYear = new Date().getFullYear();
-let passed = 0;
-let failed = 0;
+const harness = createHarness();
+const assert = harness.assert;
 
-function assert(label, condition, detail) {
-  if (condition) {
-    console.log(`  ✅ ${label}`);
-    passed++;
-  } else {
-    console.log(`  ❌ ${label}: ${detail}`);
-    failed++;
-  }
-}
+const currentYear = new Date().getFullYear();
+
 
 // ========================================
 // TEST 1: Compound floor extraction
@@ -43,6 +36,15 @@ assert('bare 8/10 → totalFloors=10', result.totalFloors === 10, `got ${result.
 result = runGlobalExtraction('na osmi od deset', {});
 assert('na osmi od deset → floor=8', result.floor === 8, `got ${result.floor}`);
 assert('na osmi od deset → totalFloors=10', result.totalFloors === 10, `got ${result.totalFloors}`);
+
+// Priority 9: Quick numeric compound — "4 od 8"
+result = runGlobalExtraction('4 od 8', {});
+assert('4 od 8 → floor=4', result.floor === 4, `got ${result.floor}`);
+assert('4 od 8 → totalFloors=8', result.totalFloors === 8, `got ${result.totalFloors}`);
+
+result = runGlobalExtraction('4 od 8', {}, 'floor');
+assert('4 od 8 pref=floor → floor=4', result.floor === 4, `got ${result.floor}`);
+assert('4 od 8 pref=floor → totalFloors=8', result.totalFloors === 8, `got ${result.totalFloors}`);
 
 // ========================================
 // TEST 2: Bedroom counting
@@ -124,6 +126,56 @@ assert('renoviran without year → renovated=true', result.renovated === true, `
 assert('renoviran without year → no year extracted', result.renovationYear === null || result.renovationYear === undefined, `got ${result.renovationYear}`);
 
 // ========================================
+// TEST 6: Priority 10 — 5-message rapid-fill scenario
+// Extracts ALL fields from voluminous messages in order,
+// with zero repeated questions.
+// ========================================
+console.log('\n📦 Test 6: Priority 10 — 5-message rapid-fill');
+
+// Simulate sequential messages as they arrive in a real conversation
+var dataP10 = { transactionType: 'sale', propertyType: 'apartment' };
+
+// Message 1: "125 iljadi" → cleanPrice
+result = runGlobalExtraction('125 iljadi', dataP10, 'cleanPrice');
+Object.assign(dataP10, result);
+assert('P10 Msg1: cleanPrice=125000', dataP10.cleanPrice === 125000, `got ${dataP10.cleanPrice}`);
+assert('P10 Msg1: no side-effect fields', Object.keys(result).length === 1, `got extra: ${Object.keys(result).filter(k => k !== 'cleanPrice').join(',')}`);
+
+// Message 2: "93 kvadrati so 2 terasi od 5m2" → totalSqm + terrace
+result = runGlobalExtraction('93 kvadrati so 2 terasi od 5m2', dataP10, 'totalSqm');
+Object.assign(dataP10, result);
+assert('P10 Msg2: totalSqm=93', dataP10.totalSqm === 93, `got ${dataP10.totalSqm}`);
+assert('P10 Msg2: hasTerrace=true', dataP10.hasTerrace === true, `got ${dataP10.hasTerrace}`);
+assert('P10 Msg2: terraceSqm=5', dataP10.terraceSqm === 5, `got ${dataP10.terraceSqm}`);
+
+// Message 3: "4 od 8" → floor + totalFloors
+result = runGlobalExtraction('4 od 8', dataP10, 'floor');
+Object.assign(dataP10, result);
+assert('P10 Msg3: floor=4', dataP10.floor === 4, `got ${dataP10.floor}`);
+assert('P10 Msg3: totalFloors=8', dataP10.totalFloors === 8, `got ${dataP10.totalFloors}`);
+
+// Message 4: "ima lift" → elevator
+result = runGlobalExtraction('ima lift', dataP10, 'elevator');
+Object.assign(dataP10, result);
+assert('P10 Msg4: elevator=true', dataP10.elevator === true, `got ${dataP10.elevator}`);
+assert('P10 Msg4: no false bedrooms', !result.bedrooms, `got bedrooms=${result.bedrooms}`);
+
+// Message 5: "inverter" → ac=true (inverter AC is standard AC field in Macedonian context)
+result = runGlobalExtraction('inverter', dataP10, 'ac');
+Object.assign(dataP10, result);
+assert('P10 Msg5: ac=true', dataP10.ac === true, `got ${dataP10.ac}`);
+
+// Verify complete state
+assert('P10 Complete: cleanPrice=125000', dataP10.cleanPrice === 125000, `got ${dataP10.cleanPrice}`);
+assert('P10 Complete: totalSqm=93', dataP10.totalSqm === 93, `got ${dataP10.totalSqm}`);
+assert('P10 Complete: hasTerrace=true', dataP10.hasTerrace === true, `got ${dataP10.hasTerrace}`);
+assert('P10 Complete: terraceSqm=5', dataP10.terraceSqm === 5, `got ${dataP10.terraceSqm}`);
+assert('P10 Complete: floor=4', dataP10.floor === 4, `got ${dataP10.floor}`);
+assert('P10 Complete: totalFloors=8', dataP10.totalFloors === 8, `got ${dataP10.totalFloors}`);
+assert('P10 Complete: elevator=true', dataP10.elevator === true, `got ${dataP10.elevator}`);
+assert('P10 Complete: ac=true', dataP10.ac === true, `got ${dataP10.ac}`);
+
+// ========================================
 // TEST 5: Multi-field extraction
 // ========================================
 console.log('\n📦 Test 5: Multi-field extraction');
@@ -144,8 +196,8 @@ assert('multi: no false renovated from "nova"', !result.renovated, `got renovate
 // SUMMARY
 // ========================================
 console.log(`\n${'='.repeat(50)}`);
-const total = passed + failed;
-console.log(`\n${failed === 0 ? '🟢' : '🔴'} RESULTS: ${passed}/${total} passed, ${failed} failed`);
+const total = harness.passed + harness.failed;
+console.log(`\n${harness.failed === 0 ? '🟢' : '🔴'} RESULTS: ${harness.passed}/${total} passed, ${harness.failed} failed`);
 console.log(`${'='.repeat(50)}\n`);
 
-process.exit(failed > 0 ? 1 : 0);
+process.exit(harness.failed > 0 ? 1 : 0);

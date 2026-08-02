@@ -166,8 +166,16 @@ export function extractFacts(text) {
   }
 
   // === DOCUMENTATION ===
-  if (/(cista dokumentacija|cista|sredena|uredna dokumentacija|cist papir|dokumentacija)/i.test(t) &&
-      !/(ne e cista|nemam dokumentaci|problem so dokumentaci|nema dokument|bez dokument)/i.test(t)) {
+  // Only extract documentation status from explicit documentation keywords.
+  // NEVER infer from area, terrace, rooms, floor, or other property details.
+  // The bare words "cista" (clean) and "dokumentacija" (documentation) are
+  // intentionally excluded because they match too broadly — "cista" can appear
+  // in "cista soba" (clean room), "cista cena" (net price), etc., and
+  // "dokumentacija" can appear in "nema dokumentacija" (no docs) which the
+  // negative check might miss. Only compound phrases that unambiguously
+  // refer to property documentation are accepted.
+  if (/(cista dokumentacija|чиста документација|средена документација|uredna dokumentacija|уредна документација|cist papir|чист папир|cist imoten list|чист имотен лист|cist imoten|чист имотен|cisti dokumenti|чисти документи|vlasnicki list|власнички лист|legalizirano|легализирано|katastar|катастар)/i.test(t) &&
+      !/(ne e cista|nemam dokumentaci|problem so dokumentaci|nema dokument|bez dokument|ne e sredeno|не е средено|ima hipoteka|има хипотека)/i.test(t)) {
     data.documentationClean = true;
   }
 

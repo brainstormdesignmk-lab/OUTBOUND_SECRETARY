@@ -4,7 +4,9 @@
   "type": "module",
   "main": "service.js",
   "scripts": {
-    "test": "node test-ana.js"
+    "test": "node run-tests.js",
+    "test:ana": "node test-ana.js",
+    "test:list": "node run-tests.js --list"
   },
   "dependencies": {
     "dotenv": "^16.6.1",

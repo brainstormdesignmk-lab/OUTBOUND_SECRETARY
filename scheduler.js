@@ -1,14 +1,53 @@
 import { config } from './config.js';
 
+// ========================================
+// LeadState — the appliance-grade LeadState enum (Layer 1 of the
+// three-layer architecture: LeadState / Phase / Strike).
+//
+// Vocabulary: NEW_LEAD → CONTACTING → COLLECTING_DATA → WAITING_PHOTOS,
+// then one of the terminal states (CLOSED_* / BLOCKLISTED / NEEDS_HUMAN).
+// PERSUASION lives in the Phase layer (handlers/state-machine.js) and
+// stays orthogonal — a session in PERSUASION is still LeadState CONTACTING
+// (or COLLECTING_DATA if data collection began).
+// NEEDS_HUMAN is the human-escalation terminal state: the bot recognized
+// the conversation must be handed off (owner explicitly asks for a real
+// person, or repeated service failures make the bot unreliable). The
+// session is parked so the operator can pick it up (CSV state column),
+// and the bot never resumes it automatically (isActive() = false).
+//
+// INVARIANTS (appliance-grade guarantees 1-3):
+//   - Only campaign.js mutates session.state (via these mark* methods).
+//   - The Phase and Strike machines NEVER touch LeadState.
+//   - String values are persisted (session-store / CSV), so they must
+//     stay stable. Legacy values are normalized on load (normalizeState).
+// ========================================
 export const LeadState = {
-  AWAITING_GREETING: 'awaiting_greeting',
-  AWAITING_PITCH_RESPONSE: 'awaiting_pitch_response',
+  NEW_LEAD: 'new_lead',
+  CONTACTING: 'contacting',
   COLLECTING_DATA: 'collecting_data',
+  WAITING_PHOTOS: 'waiting_photos',
+  NEEDS_HUMAN: 'needs_human',
   CLOSED_SUCCESS: 'closed_success',
-  CLOSED_NO_RESPONSE: 'closed_no_response',
   CLOSED_NOT_INTERESTED: 'closed_not_interested',
-  CLOSED_TIMEOUT: 'closed_timeout'
+  CLOSED_TIMEOUT: 'closed_timeout',
+  BLOCKLISTED: 'blocklisted'
 };
+
+// ========================================
+// LEGACY STATE NORMALIZATION
+// Maps pre-rename state strings (v1) to the appliance-grade vocabulary
+// so crash recovery survives the upgrade. Applied on deserialize.
+// 'closed_no_response' was never actually set (no-response → timeout).
+// ========================================
+const LEGACY_STATE_MAP = {
+  'awaiting_greeting': LeadState.NEW_LEAD,
+  'awaiting_pitch_response': LeadState.CONTACTING,
+  'closed_no_response': LeadState.CLOSED_TIMEOUT
+};
+
+export function normalizeState(state) {
+  return LEGACY_STATE_MAP[state] || state;
+}
 
 export class LeadSession {
   constructor(lead) {
@@ -18,7 +57,8 @@ export class LeadSession {
     this.adUrl = lead.url || '';
     this.adMemory = lead.memory || {};
 
-    this.state = LeadState.AWAITING_GREETING;
+    this.state = LeadState.NEW_LEAD;
+    this.phase = 'PERSUASION';  // mirror of cooperation state (persisted)
     this.messages = [];       // { role, text, timestamp }
     this.collectedData = { ...this.adMemory };
 
@@ -56,14 +96,34 @@ export class LeadSession {
   }
 
   // === STATE TRANSITIONS ===
+  // Appliance-grade guarantee 3: these are the ONLY places session.state
+  // is mutated, and only campaign.js calls them.
   markGreetingSent() {
-    this.state = LeadState.AWAITING_PITCH_RESPONSE;
+    this.state = LeadState.CONTACTING;
   }
 
   markOwnerInterested() {
     this.state = LeadState.COLLECTING_DATA;
     // Reset reply timer since they just replied
     this.lastReplyAt = Date.now();
+  }
+
+  markWaitingPhotos() {
+    this.state = LeadState.WAITING_PHOTOS;
+  }
+
+  markCollectingData() {
+    this.state = LeadState.COLLECTING_DATA;
+  }
+
+  markBlocklisted() {
+    this.state = LeadState.BLOCKLISTED;
+  }
+
+  markNeedsHuman() {
+    this.state = LeadState.NEEDS_HUMAN;
+    // Remember WHY so the operator picking this up has context
+    this.escalationReason = this.escalationReason || 'owner_requested_human';
   }
 
   markClosed(success = true) {
@@ -94,9 +154,10 @@ export class LeadSession {
   }
 
   isActive() {
-    return this.state === LeadState.AWAITING_GREETING ||
-           this.state === LeadState.AWAITING_PITCH_RESPONSE ||
-           this.state === LeadState.COLLECTING_DATA;
+    return this.state === LeadState.NEW_LEAD ||
+           this.state === LeadState.CONTACTING ||
+           this.state === LeadState.COLLECTING_DATA ||
+           this.state === LeadState.WAITING_PHOTOS;
   }
 
   // === CSV OUTPUT ===

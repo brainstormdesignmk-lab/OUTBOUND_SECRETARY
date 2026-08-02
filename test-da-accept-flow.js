@@ -1,3 +1,4 @@
+import { createHarness } from './test-helpers.js';
 // ========================================
 // TEST: Owner says strong acceptance signal → should ask price first, not terrace
 // ========================================
@@ -18,18 +19,10 @@
 
 import { generateResponse } from './service.js';
 
-let passed = 0;
-let failed = 0;
+const harness = createHarness();
+const assert = harness.assert;
 
-function assert(label, condition, detail) {
-  if (condition) {
-    console.log(`  ✅ ${label}`);
-    passed++;
-  } else {
-    console.log(`  ❌ ${label}: ${detail}`);
-    failed++;
-  }
-}
+
 
 console.log('\n========================================');
 console.log('🧪 TEST: strong acceptance → price first, not terrace');
@@ -47,7 +40,7 @@ async function runTest() {
       cooperationAccepted: false
     },
     messages: [
-      { role: 'model', text: 'Здраво, јас сум Ана од Metropolis. Ве контактирам за огласот за станот што се продава. Дали е сѐ уште достапен и дали сте заинтересирани за соработка без провизија за вас?' }
+      { role: 'model', text: 'Здраво, јас сум Ана од Metropolis - Агенција за Недвижности. Ве контактирам за огласот за станот што се продава. Дали е се уште достапен и дали сте заинтересирани за соработка без провизија за вас?' }
     ],
     phone: '+38970123456'
   };
@@ -172,12 +165,12 @@ async function runTest() {
   // =========================================
   console.log('\n=======================================================');
   console.log('📊 TEST SUMMARY:');
-  console.log(`   ✅ Passed: ${passed}`);
-  console.log(`   ❌ Failed: ${failed}`);
-  console.log(`   📋 Total:  ${passed + failed}`);
+  console.log(`   ✅ Passed: ${harness.passed}`);
+  console.log(`   ❌ Failed: ${harness.failed}`);
+  console.log(`   📋 Total:  ${harness.passed + harness.failed}`);
   console.log('=======================================================');
 
-  if (failed > 0) {
+  if (harness.failed > 0) {
     console.log('\n❌ TEST FAILED\n');
     process.exit(1);
   } else {

@@ -14,7 +14,11 @@ export function parseMacedonianNumber(text) {
   // (finds the tens root, then adds the "i" + ones remainder).
   // Only trigger for text > 3 chars to avoid interfering with short words
   // like "tri" or "pet" that the simple includes() check handles correctly.
-  const trimmed = text.trim();
+  // Lowercased so ALL-CAPS Viber messages ("VTORI", "TRISTAPEESET") match
+  // the word map — this function is called from every caller (extractFloor,
+  // countBedrooms, scanHistoryForField, extractTerraceNumber, ...), including
+  // paths that bypass runGlobalExtraction's normalization.
+  const trimmed = text.trim().toLowerCase();
   if (!/\s/.test(trimmed) && trimmed.length > 3) {
     const mergedResult = parseNumberWords(text);
     if (mergedResult !== null) return mergedResult;
@@ -34,7 +38,7 @@ export function parseMacedonianNumber(text) {
     'десет': 10, 'deset': 10,
     'edinaeset': 11, 'единаесет': 11,
     'dvanaeset': 12, 'дванаесет': 12,
-    'trinaeset': 13, 'тринаесет': 13,
+    'trinaeset': 13, 'тринаесет': 13, 'trinaese': 13, 'тринаесе': 13,
     'cetirinaeset': 14, 'четиринаесет': 14,
     'petnaeset': 15, 'петнаесет': 15,
     'sesnaeset': 16, 'шеснаесет': 16,
@@ -89,7 +93,20 @@ export function parseNumberWords(text) {
     'sest': 6,
     'sedum': 7,
     'osum': 8,
-    'devet': 9
+    'devet': 9,
+    // Cyrillic units — "шеесет и четири" (64) must parse the same as the
+    // Latin "seeset i cetiri". The connector "и" is handled by the [iи]
+    // character class in the suffix regexes below.
+    'еден': 1, 'една': 1, 'едно': 1,
+    'два': 2, 'две': 2,
+    'три': 3,
+    'четири': 4,
+    'пет': 5,
+    'шест': 6,
+    'седум': 7,
+    'осум': 8,
+    'девет': 9,
+    'десет': 10
   };
   const rootGroup = '(eden|edna|edno|dva|dve|tri|cetiri|pet|sest|sedum|osum|devet)';
   let result = 0;
@@ -153,6 +170,84 @@ export function parseNumberWords(text) {
     }
   }
 
+  // ========================================
+  // MERGED HUNDREDS+TENS: "dvestaseeset" = 200+60 = 260,
+  // "tristapeeset" = 350 (300+50)
+  // Very common in Viber/SMS: "tristapeeset i osum iljadi evra" = 358000.
+  // Pattern: hundreds prefix merged directly with tens word (no space).
+  // Matches at ANY position (with letter-boundary checks) so mid-sentence
+  // merged forms are caught BEFORE irregularTens — otherwise irregularTens
+  // would substring-match "peeset" (50) inside "tristapeeset" (350) and
+  // return 50, corrupting the price (58,000 instead of 358,000).
+  // ========================================
+  if (!found) {
+    const mergedHT = [
+      { prefix: /(?:^|[^a-zа-я])(dvest[ea]|двест[аe])/i, hVal: 200 },
+      { prefix: /(?:^|[^a-zа-я])(triest[ea]|трист[аe]|trista|триста)/i, hVal: 300 },
+      { prefix: /(?:^|[^a-zа-я])(cetiristotini|четиристотини)/i, hVal: 400 },
+      { prefix: /(?:^|[^a-zа-я])(petstotini|петстотини)/i, hVal: 500 },
+      { prefix: /(?:^|[^a-zа-я])(seststotini|шестстотини)/i, hVal: 600 },
+      { prefix: /(?:^|[^a-zа-я])(sedumstotini|седумстотини)/i, hVal: 700 },
+      { prefix: /(?:^|[^a-zа-я])(osumstotini|осумстотини)/i, hVal: 800 },
+      { prefix: /(?:^|[^a-zа-я])(devetstotini|деветстотини)/i, hVal: 900 },
+    ];
+    // Tens words sorted longest-first so "seeset" wins over "eeset"/"eset"
+    // and "deveeset" over "devedeset" when both could match a prefix.
+    const tensWords = ['seeset','шеесет','peeset','пеесет','dvaeset','дваесет',
+      'triest','триест','pedeset','педесет','osumdeset','осумдесет',
+      'sedumdeset','седумдесет','deveeset','девеесет','devedeset','деведесет',
+      'osemdeset','осемдесет','stopeeset','стопеесет','stodvaeset','стодваесет',
+      'deset','десет','eeset','еесет','eset','есет']
+      .sort((a, b) => b.length - a.length);
+    const tensDirectMap = {
+      'seeset': 60, 'шеесет': 60, 'eeset': 60, 'еесет': 60,
+      'eset': 60, 'есет': 60, 'peeset': 50, 'пеесет': 50,
+      'dvaeset': 20, 'дваесет': 20, 'triest': 30, 'триест': 30,
+      'pedeset': 50, 'педесет': 50, 'osumdeset': 80, 'осумдесет': 80,
+      'sedumdeset': 70, 'седумдесет': 70, 'deveeset': 90, 'девеесет': 90,
+      'devedeset': 90, 'деведесет': 90, 'osemdeset': 80, 'осемдесет': 80,
+      'deset': 10, 'десет': 10,
+      'stopeeset': 150, 'стопеесет': 150, 'stodvaeset': 120, 'стодваесет': 120
+    };
+    for (const { prefix, hVal } of mergedHT) {
+      const pMatch = u.match(prefix);
+      if (!pMatch) continue;
+      // pMatch[1] is the hundreds word (any leading non-letter is a
+      // non-capturing boundary). The tens word must IMMEDIATELY follow it
+      // (merged form) with a non-letter after it.
+      const afterHundreds = u.slice(pMatch.index + pMatch[0].length);
+      const wordStart = pMatch.index + (pMatch[0].length - pMatch[1].length);
+      let tensFound = false;
+      for (const tw of tensWords) {
+        if (afterHundreds.startsWith(tw) && !/[a-zа-я]/.test(afterHundreds[tw.length] || '')) {
+          const tensVal = tensDirectMap[tw] !== undefined ? tensDirectMap[tw] : parseNumberWords(tw);
+          if (tensVal !== null && tensVal >= 10) {
+            result = hVal + tensVal;
+            consumedLength = pMatch.index + pMatch[0].length + tw.length;
+            firstMatchIndex = wordStart;
+            found = true;
+            tensFound = true;
+            break;
+          }
+        }
+      }
+      if (!tensFound) {
+        // Hundreds prefix without a merged tens suffix (e.g., "trista" alone
+        // or "trista iljadi" — a spaced tens is parsed from `remaining` below).
+        // Only accept when the next char isn't a letter, so we never match
+        // inside an unrelated word ("dvestapati" is not 200). The connector
+        // "i"/"и" is allowed ("tristailjadi" = trista + iljadi).
+        const nextCh = afterHundreds[0] || '';
+        if (nextCh && /[a-zа-я]/.test(nextCh) && !/^[iи]$/.test(nextCh)) continue;
+        result = hVal;
+        consumedLength = pMatch.index + pMatch[0].length;
+        firstMatchIndex = wordStart;
+        found = true;
+      }
+      break;
+    }
+  }
+
   if (!found) {
     const irregularTens = {
       'triest': 30, 'триест': 30,
@@ -205,11 +300,52 @@ export function parseNumberWords(text) {
   }
 
   if (found) {
-    const remaining = u.slice(consumedLength).trim();
-    const iBrojMatch = remaining.match(/^i\s*(eden|edna|edno|dva|dve|tri|cetiri|pet|sest|sedum|osum|devet|deset)\s*$/i);
+    let remaining = u.slice(consumedLength).trim();
+
+    // Try "i {unit}" suffix first (most common: "seeset i pet" → 60+5)
+    // Both Latin and Cyrillic connector (i/и) and units are accepted:
+    // "шеесет и четири" → 64, "седумдесет и осум" → 78.
+    const iBrojMatch = remaining.match(/^[iи]\s*(eden|edna|edno|dva|dve|tri|cetiri|pet|sest|sedum|osum|devet|deset|еден|една|едно|два|две|три|четири|пет|шест|седум|осум|девет|десет)\s*$/i);
     if (iBrojMatch) {
       result += rootMap[iBrojMatch[1].toLowerCase()] || 0;
     }
+    // If no "i {unit}" and remaining text exists, try parsing it as tens+units.
+    // Handles spaced forms like "dvesta seeset i pet" → 200 + 60 + 5 = 265
+    // where only the hundreds word was matched but the tens+units follow.
+    else if (remaining) {
+      const tensWords = ['seeset','шеесет','peeset','пеесет','dvaeset','дваесет',
+        'triest','триест','pedeset','педесет','osumdeset','осумдесет',
+        'sedumdeset','седумдесет','deveeset','девеесет','devedeset','деведесет',
+        'osemdeset','осемдесет','stopeeset','стопеесет','stodvaeset','стодваесет',
+        'deset','десет','eeset','еесет','eset','есет'];
+      const tensDirectMap = {
+        'seeset': 60, 'шеесет': 60, 'eeset': 60, 'еесет': 60,
+        'eset': 60, 'есет': 60, 'peeset': 50, 'пеесет': 50,
+        'dvaeset': 20, 'дваесет': 20, 'triest': 30, 'триест': 30,
+        'pedeset': 50, 'педесет': 50, 'osumdeset': 80, 'осумдесет': 80,
+        'sedumdeset': 70, 'седумдесет': 70, 'deveeset': 90, 'девеесет': 90,
+        'devedeset': 90, 'деведесет': 90, 'osemdeset': 80, 'осемдесет': 80,
+        'deset': 10, 'десет': 10,
+        'stopeeset': 150, 'стопеесет': 150, 'stodvaeset': 120, 'стодваесет': 120
+      };
+      for (const tw of tensWords.sort((a,b) => b.length - a.length)) {
+        if (remaining.startsWith(tw)) {
+          const tensVal = tensDirectMap[tw] !== undefined ? tensDirectMap[tw] : parseNumberWords(tw);
+          if (tensVal !== null && tensVal >= 10) {
+            result += tensVal;
+            const afterTens = remaining.slice(tw.length).trim();
+            // Both Latin and Cyrillic connector (i/и) and units accepted,
+            // matching the iBrojMatch above ("dvesta seeset i pet" → 265).
+            const unitMatch = afterTens.match(/^[iи]\s*(eden|edna|edno|dva|dve|tri|cetiri|pet|sest|sedum|osum|devet|еден|една|едно|два|две|три|четири|пет|шест|седум|осум|девет)\s*$/i);
+            if (unitMatch) {
+              result += rootMap[unitMatch[1].toLowerCase()] || 0;
+            }
+          }
+          break;
+        }
+      }
+    }
+
     result += getStoPrefix();
     return result;
   }
@@ -227,15 +363,20 @@ export function parseOrdinalFloor(text) {
     'втор': 2, 'vtor': 2,
     'трет': 3, 'tret': 3,
     'четврт': 4, 'cetvrt': 4,
-    'петти': 5, 'petti': 5,
+    'петти': 5, 'petti': 5, 'peti': 5,
     'шести': 6, 'sesti': 6,
     'седми': 7, 'sedmi': 7,
     'осми': 8, 'osmi': 8,
     'деветти': 9, 'devetti': 9
   };
 
+  // Lowercased so ALL-CAPS Viber messages ("VTORI KAT") match the ordinal
+  // map — this function is called from every caller (extractFloor,
+  // scanHistoryForField, extractCompoundFloor, ...), including paths that
+  // bypass runGlobalExtraction's normalization.
+  const lt = text.toLowerCase();
   for (const [word, num] of Object.entries(ordinals)) {
-    if (text.includes(word)) return num;
+    if (lt.includes(word)) return num;
   }
   return null;
 }
@@ -280,7 +421,8 @@ export function countBedrooms(text) {
     'gostinska', 'гостинска', 'gostinski', 'гостински',
     'bracna', 'брачна', 'brachna',
     'pomala', 'помала', 'pomali', 'помали',
-    'pogolema', 'поголема', 'pogolemi', 'поголеми'
+    'pogolema', 'поголема', 'pogolemi', 'поголеми',
+    'roditelska', 'родителска', 'roditelski', 'родителски'
   ];
   let roomCount = 0;
   for (const word of roomWords) {
@@ -296,8 +438,7 @@ export function countBedrooms(text) {
   const roomSegments = u.split(/\s*,\s*|\s+(?:i|и)\s+/);
   if (roomSegments.length >= 2) {
     let roomsFromList = 0;
-    for (const seg of roomSegments) {
-      if (/(spaln|спалн|detsk|детск|gostinsk|гостинск|golem|голем|mala|мала|soba|соба|sobi|соби|bracn|брачн|brachn|pomal|помал|pogolem|поголем)/i.test(seg)) {
+    for (const seg of roomSegments) {        if (/(spaln|спалн|detsk|детск|gostinsk|гостинск|golem|голем|mala|мала|soba|соба|sobi|соби|bracn|брачн|brachn|pomal|помал|pogolem|поголем|roditelsk|родителск)/i.test(seg)) {
         const num = parseMacedonianNumber(seg);
         if (num !== null && num >= 1 && num <= 20) {
           roomsFromList += num;
@@ -334,7 +475,9 @@ export function countBedrooms(text) {
   const wordNum = parseMacedonianNumber(u);
   if (wordNum !== null && wordNum >= 0 && wordNum <= 10) {
     // Skip if the only number words are actually ordinal floor references
-    const hasOrdinalContext = /(tret|трет|vtor|втор|prv|прв|cetvrt|четврт|petti|петти|sesti|шести|sedmi|седми|osmi|осми|devetti|деветти)\s*(kat|кат|sprat|спрат)/i.test(u);
+    // Inflected ordinal forms (vtori/втори, treti/трети, prvi/први) as well
+    // as bare ordinals — "vtori kat" must never count as bedrooms=2.
+    const hasOrdinalContext = /(treti|трети|tret|трет|vtori|втори|vtor|втор|prvi|први|prv|прв|cetvrti|четврти|cetvrt|четврт|petti|петти|sesti|шести|sedmi|седми|osmi|осми|devetti|деветти)\s*(kat|кат|sprat|спрат)/i.test(u);
     if (hasOrdinalContext) return null;
     // Skip if message contains terrace or question context (answering terrace/other follow-up)
     // Uses |teras|терас to match ALL inflected forms (terasa, terasi, terase, etc.)
@@ -342,13 +485,20 @@ export function countBedrooms(text) {
     // Skip if message contains year/decade context — "osumdesti" (1980s) should
     // NOT be interpreted as 8 bedrooms. "osum" is a substring of "osumdesti"
     // and parseMacedonianNumber would return 8, but the context is year/decade.
-    if (/izgraden|граден|osumdesti|осумдесетти|osumdeset|осумдесет|godina|година|gradba|градба|graden|граден|pedesetti|педесетти|deveesetti|девеесетти|sedumdesetti|седумдесетти/i.test(u)) return null;
+    if (/izgraden|граден|osumdesti|осумдесетти|osumdeseti|осумдесети|osumdeset|осумдесет|godina|година|gradba|градба|graden|граден|pedesetti|педесетти|deveesetti|девеесетти|deveeseti|девеесети|deveeset|девеесет|devedeseti|деведесети|sedumdesetti|седумдесетти|sedumdeseti|седумдесети|sedumdeset|седумдесет/i.test(u)) return null;
+    // Skip if the message has OTHER-FIELD units/context — a number word in an
+    // sqm/floor/price sentence ("seeset i cetiri kvadrati" = 64 m²) belongs
+    // to that field, not bedrooms. "cetiri" inside the compound "seeset i
+    // cetiri" must NOT become bedrooms=4 (reported production bug).
+    if (/m2|м2|кв|kvadrati|квадрати|kvadrata|квадрата|kvadrat|квадрат|sqm|kat|кат|sprat|спрат|evra|евра|iljadi|илјади|parking|паркинг|garaza|гаража|lift|лифт|klima|клима/i.test(u)) return null;
     return wordNum;
   }
   const firstNum = extractFirstNumber(u);
   if (firstNum !== null && firstNum >= 0 && firstNum <= 20) {
     // Skip if message contains other-field context (sqm, floor, terrace, price)
-    if (/m2|м2|кв|kvadrati|квадрати|sqm|kat|кат|sprat|спрат|terasa|тераса|m²|evra|евра/i.test(u)) return null;
+    // 'iljadi' included: "cena 15 iljadi, golem stan" must NOT set bedrooms=15
+    // (a price digit leaking into bedrooms via this fallback).
+    if (/m2|м2|кв|kvadrati|квадрати|sqm|kat|кат|sprat|спрат|terasa|тераса|m²|evra|евра|iljadi|илјади/i.test(u)) return null;
     return firstNum;
   }
 
@@ -503,7 +653,7 @@ export function extractPrice(text) {
   const uClean = text.toLowerCase();
   const hasPriceKeywords = /iljadi|илјади|evra|евра|eur|evro|евро|cena|цена|plate|плате|plakja|плаќа|kirija|кирија/i.test(uClean);
   if (!hasPriceKeywords) {
-    const hasNonPriceContext = /m2|м2|kvadrati|квадрати|kvadrata|квадрата|kv|кв|sqm|kat|кат|sprat|спрат|katnica|катница|lift|лифт|klima|клима|garaza|гаража|terasa|тераса|spalni|спални|parking|паркинг|garage|гараж|potkrovje|поткровје/i.test(uClean);
+    const hasNonPriceContext = /m2|м2|kvadrati|квадрати|kvadrata|квадрата|kv|кв|sqm|kat|кат|sprat|спрат|katnica|катница|lift|лифт|klima|клима|garaza|гаража|terasa|тераса|spalni|спални|parking|паркинг|garage|гараж|potkrovje|поткровје|zgrada|зграда|godina|година|izgraden|изграден|graden|граден/i.test(uClean);
     if (hasNonPriceContext) return null;
   }
 
@@ -597,16 +747,25 @@ export function extractTerraceNumber(text) {
     return null;
   }
 
-  // Phase 3: No "terasa" in text — existing fallback logic
+  // Phase 3: No "terasa" in text — existing fallback logic.
+  // IMPORTANT: Only run on SHORT bare answers (≤3 words) with NO other-field
+  // context. NEVER call parseMacedonianNumber on a full sentence — it uses
+  // substring matching, so "deset" inside "stoosumdeset" (183) false-matches
+  // to 10. And never let a bare digit (e.g. "6" in "na 6 kat") be read as a
+  // terrace size when floor/sqm/price context is present.
   const sqmMatch = text.match(/(\d{1,4})\s*(kvadrata|kvadrati|m2|м2|kv|кв)/i);
   if (sqmMatch) return parseInt(sqmMatch[1]);
 
-  const wordNum = parseMacedonianNumber(text);
-  if (wordNum !== null && wordNum >= 1 && wordNum <= 100) return wordNum;
+  const wordCount = words.length; // reuse the top-of-function `words` split
+  const hasOtherContext = /iljadi|илјади|evra|евра|eur|evro|евро|kvadrati|квадрати|kvadrata|квадрата|m2|м2|kv|кв|sqm|kat|кат|sprat|спрат|sprata|спрата|kata|ката|katnica|катница|spalni|спални|parking|паркинг|garaza|гаража|lift|лифт|klima|клима|godina|година|izgraden|граден|renoviran|реновиран/i.test(text);
+  if (wordCount <= 3 && !hasOtherContext) {
+    const wordNum = parseMacedonianNumber(text);
+    if (wordNum !== null && wordNum >= 1 && wordNum <= 100) return wordNum;
 
-  const numbers = text.match(/\d+/g);
-  if (numbers && numbers.length > 0) {
-    return parseInt(numbers[numbers.length - 1]);
+    const numbers = text.match(/\d+/g);
+    if (numbers && numbers.length > 0) {
+      return parseInt(numbers[numbers.length - 1]);
+    }
   }
   return null;
 }
@@ -640,28 +799,44 @@ export function parseYearBuilt(text) {
     if (year >= 70 && year <= 99) return 1900 + year;
   }
 
-  if (/80ti|80 ти|80-ти|80ти|осумдесетти|80-i|80i|осамдесетти|osumdesti|osumdesetti/i.test(text)) return 1985;
-  if (/80ta|80 та|80та|1980-ти|1980ти|осумдесетта|80-ta/i.test(text)) return 1980;
-  if (/90ti|90 ти|90-ти|90ти|деведесетти|90-i|90i|деведесетти/i.test(text)) return 1995;
-  if (/90ta|90 та|90та|1990-ти|1990ти|деведесетта|90-ta/i.test(text)) return 1990;
-  if (/70ti|70 ти|70-ти|70ти|седумдесетти/i.test(text)) return 1975;
-  if (/70ta|70 та|70та|седумдесетта/i.test(text)) return 1970;
+  // Decade word variants — both single-t and double-t spellings, Latin + Cyrillic.
+  // Viber users type "osumdeseti", "осумдесети" (single т), "deveeseti", "sedumdeseti" etc.
+  // The "-ti/-tti" forms mean approximate year → mid-decade (1985/1995/1975).
+  if (/80ti|80 ти|80-ти|80ти|осумдесетти|осумдесети|80-i|80i|осамдесетти|осамдесети|osumdesti|osumdeseti|osumdesetti|osamdesetti|osamdeseti/i.test(text)) return 1985;
+  if (/80ta|80 та|80та|1980-ти|1980ти|осумдесетта|осумдесета|80-ta|osumdesetta|osumdeseta|osamdesetta|osamdeseta/i.test(text)) return 1980;
+  if (/90ti|90 ти|90-ти|90ти|деведесетти|деведесети|девеесетти|девеесети|90-i|90i|deveeseti|deveesetti|devedeseti|devedesetti/i.test(text)) return 1995;
+  if (/90ta|90 та|90та|1990-ти|1990ти|деведесетта|деведесета|девеесета|90-ta|deveesetta|deveeseta|devedesetta|devedeseta/i.test(text)) return 1990;
+  if (/70ti|70 ти|70-ти|70ти|седумдесетти|седумдесети|sedumdesti|sedumdeseti|sedumdesetti/i.test(text)) return 1975;
+  if (/70ta|70 та|70та|седумдесетта|седумдесета|sedumdesetta|sedumdeseta/i.test(text)) return 1970;
+  // 50s/60s decade lines were entirely missing — same disease (silently null).
+  // E.g. 'pedeseti'/'peesetti' (50s), 'seeseti'/'seesetti' (60s), Viber spellings.
+  if (/50ti|50 ти|50-ти|50ти|50-i|50i|педесетти|педесети|пеесетти|пеесети|pedesetti|pedeseti|peesetti|peeseti/i.test(text)) return 1955;
+  if (/50ta|50 та|50та|50-ta|педесетта|педесета|пеесетта|пеесета|pedesetta|pedeseta|peesetta|peeseta/i.test(text)) return 1950;
+  if (/60ti|60 ти|60-ти|60ти|60-i|60i|шеесетти|шеесети|seesetti|seeseti/i.test(text)) return 1965;
+  if (/60ta|60 та|60та|60-ta|шеесетта|шеесета|seesetta|seeseta/i.test(text)) return 1960;
   if (/2000ti|2000 ти|двеилјадити/i.test(text)) return 2005;
   if (/2000ta|2000 та|двеилјадита/i.test(text)) return 2000;
 
   // Word boundary BOTH before AND after to prevent matching "deveeset"
   // inside "deveesetitri" (93). The dual `\b` requires the decade word
   // to be standalone — not part of a compound number.
-  if (/\bdeveeset\b|\bдевеесет\b|\b90\b|\bдеведесет\b/i.test(text)) {
-    if (/nekoja|некоја|nekoi|некои|неколку|некое|nekoe/i.test(text)) return 1995;
+  if (/\bdeveeset\b|\bдевеесет\b|\b90\b|\bдеведесет\b|\bdevedeset\b/i.test(text)) {
+    if (/nekoja|некоја|nekoi|некои|неколку|некое|nekoe|nekade|некаде/i.test(text)) return 1995;
     return 1990;
   }
 
   // Same dual word-boundary fix for 80s: prevent matching "osemdeset" inside
   // "osemdeseti" or other compound forms.
-  if (/\bosemdeset\b|\bосумдесет\b|\b80\b/i.test(text)) {
-    if (/nekoja|некоја|nekoi|некои|неколку|некое|nekoe/i.test(text)) return 1985;
+  if (/\bosemdeset\b|\bосумдесет\b|\b80\b|\bosumdeset\b/i.test(text)) {
+    if (/nekoja|некоја|nekoi|некои|неколку|некое|nekoe|nekade|некаде/i.test(text)) return 1985;
     return 1980;
+  }
+
+  // 70s bare-word block (word-only; bare digits like "70" are handled by the
+  // twoDigit block above — note "70 godini" currently maps to 1970 via twoDigit).
+  if (/\bsedumdeset\b|\bседумдесет\b/i.test(text)) {
+    if (/nekoja|некоја|nekoi|некои|неколку|некое|nekoe|nekade|некаде/i.test(text)) return 1975;
+    return 1970;
   }
 
   const yearWordMap = {

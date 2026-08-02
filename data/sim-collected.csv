@@ -1,0 +1,5 @@
+clean_price,owner_name,phone,address,naselba,transaction_type,property_type,year_built,total_sqm,neto_sqm,terrace_sqm,bedrooms,furnished,floor,elevator,heating,parking,ac,orientation,documentation_clean,description,photos,status,contacted_at
+358000,Petar Petrovski,,UL. PARTIZANSKA 12, SKOPJE,,sale,,2024,64,,4,2,true,2,да,district,true,да,jug,,Се продава стан на Аеродром 64м2,да,closed_success,2026-08-01T21:28:12.476Z
+,Ke Se Smiram Ama Bidi Tuka So Pametot, Citaj Sto Ti Pisuvam,,KE SE SMIRAM AMA BIDI TUKA SO PAMETOT, CITAJ STO TI PISUVAM,,sale,,,,,,,,,,,,,,,Се продава стан во Карпош,да,closed_success,2026-08-01T21:28:12.101Z
+358000,Petar Petrovski,,UL. PARTIZANSKA 12, SKOPJE,,sale,,2024,64,,4,2,true,2,да,district,true,да,jug,,Се продава стан на Аеродром 64м2,да,closed_success,2026-08-01T21:29:10.816Z
+,Ke Se Smiram Ama Bidi Tuka So Pametot, Citaj Sto Ti Pisuvam,,KE SE SMIRAM AMA BIDI TUKA SO PAMETOT, CITAJ STO TI PISUVAM,,sale,,,,,,,,,,,,,,,Се продава стан во Карпош,да,closed_success,2026-08-01T21:29:11.097Z
