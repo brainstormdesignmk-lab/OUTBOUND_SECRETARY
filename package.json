@@ -5,10 +5,12 @@
   "main": "service.js",
   "scripts": {
     "test": "node run-tests.js",
-    "test:ana": "node test-ana.js",
+    "test:ana": "node test-full-conversation.js",
     "test:list": "node run-tests.js --list"
   },
   "dependencies": {
+    "blessed": "^0.1.81",
+    "chalk": "^5.6.2",
     "dotenv": "^16.6.1",
     "groq-sdk": "^0.15.0"
   }

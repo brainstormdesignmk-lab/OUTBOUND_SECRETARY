@@ -467,7 +467,32 @@ assertEqual(countBedrooms("edna spalna i edna detska"), 2, "'edna spalna i edna 
   // Additional multi-room patterns: Cyrillic/Latin variants, 3+ way splits
   assertEqual(countBedrooms("dva spalni i edna detska i edna gostinska"), 4, "'dva spalni i edna detska i edna gostinska' → 4 (dva=2 + edna=1 + edna=1)");
   assertEqual(countBedrooms("cetiri spalni i dve detski"), 6, "'cetiri spalni i dve detski' → 6 (cetiri=4 + dve=2)");
-  assertEqual(countBedrooms("5 sobi"), 5, "'5 sobi' → 5 (digit + sobi via extractFirstNumber fallback)");  // ============================================================
+  assertEqual(countBedrooms("5 sobi"), 5, "'5 sobi' → 5 (digit + sobi via extractFirstNumber fallback)");
+
+  // ============================================================
+  // TIME-SPAN GUARD — "mesec dva" (a month or two) is TIME, not bedrooms
+  // Reported: "PA AKO MOZE DA SE PRODADE ZA MESEC DVA BI BILO SUPER" logged
+  // a confusing "REJECTED: bedrooms=2 (context mismatch)" — countBedrooms
+  // grabbed "dva" from "mesec dva". Worse, "...mesec dva, golem e" would
+  // have stored bedrooms=2 at HIGH (golem is a bedroom keyword).
+  // ============================================================
+  assertEqual(countBedrooms("pa ako moze da se prodade za mesec dva bi bilo super"), null, "reported: 'PA AKO MOZE DA SE PRODADE ZA MESEC DVA BI BILO SUPER' → null (time span, not bedrooms)");
+  assertEqual(countBedrooms("mesec dva"), null, "'mesec dva' → null");
+  assertEqual(countBedrooms("месец два"), null, "Cyrillic 'месец два' → null");
+  assertEqual(countBedrooms("dva meseca"), null, "'dva meseca' → null");
+  assertEqual(countBedrooms("za tri meseci"), null, "'za tri meseci' → null");
+  assertEqual(countBedrooms("ke se prodade za nedela dve"), null, "'nedela dve' → null");
+  assertEqual(countBedrooms("za dva dena ke vi pratam sliki"), null, "'dva dena' → null (two days, not bedrooms)");
+  assertEqual(countBedrooms("ke prodadam za dve godini"), null, "'dve godini' → null (years, not bedrooms)");
+  // Digit variant: "mesec 2" must also be guarded
+  assertEqual(countBedrooms("da se prodade za mesec 2"), null, "'mesec 2' (digit) → null");
+  // Controls — genuine bedroom answers still extract (no regression)
+  assertEqual(countBedrooms("dve sobi"), 2, "CONTROL: 'dve sobi' → 2 (bedroom answer, no time span)");
+  assertEqual(countBedrooms("2 spalni"), 2, "CONTROL: '2 spalni' → 2");
+  assertEqual(countBedrooms("dve spalni i detska"), 2, "CONTROL: 'dve spalni i detska' → 2");
+  assertEqual(countBedrooms("ima dve spalni, ke vi pratam sliki"), 2, "CONTROL: 'ima dve spalni, ke vi pratam sliki' → 2 (bedroom answer with mention of sending photos)");
+
+  // ============================================================
   // stopeeset (сто+педесет=150) + i (and) + dve (2) = 152 × 1000 = 152000
   // ============================================================
   assertEqual(countBedrooms("stopeeset i dve iljadi"), null, "'stopeeset i dve iljadi' → null (not a bedroom message)");
@@ -504,6 +529,12 @@ assertEqual(extractPrice("dvesto iljadi"), 200000, "B13: 'dvesto iljadi' → 200
 assertEqual(extractPrice("petstodvaeset iljadi"), 520000, "B13: 'petstodvaeset iljadi' → 520000");
 assertEqual(extractPrice("dvaeset iljadi"), 20000, "B13: 'dvaeset iljadi' → 20000");
 assertEqual(extractPrice("triest iljadi"), 30000, "B13: 'triest iljadi' → 30000");
+// Viber spelling "trieset" (30) + spaced hundreds — reported production bug:
+// "DVESTA TRIESET I OSUM ILJADI EVRA" was parsed as 200000 (stopped at "dvesta").
+assertEqual(parseNumberWords("trieset"), 30, "B13: 'trieset' (Viber spelling) → 30");
+assertEqual(parseNumberWords("триесет"), 30, "B13: 'триесет' (Cyrillic) → 30");
+assertEqual(parseNumberWords("dvesta trieset i osum"), 238, "B13: 'dvesta trieset i osum' → 238");
+assertEqual(extractPrice("dvesta trieset i osum iljadi evra"), 238000, "B13: 'dvesta trieset i osum iljadi evra' → 238000");
 assertEqual(extractPrice("pedeset iljadi"), 50000, "B13: 'pedeset iljadi' → 50000");
 assertEqual(extractPrice("seeset iljadi"), 60000, "B13: 'seeset iljadi' → 60000");
 assertEqual(extractPrice("sedumdeset iljadi"), 70000, "B13: 'sedumdeset iljadi' → 70000");
@@ -584,15 +615,16 @@ console.log(`\n📦 GROUP: B16 — Heating type detection patterns (comprehensiv
 // (runComplexStatefulHandlers, "heating (FIXED — parno follow-up, B16)").
 // Kept here because that handler is not exported; the global extractHeating
 // in data-collector.js has different semantics and is tested separately.
-// District: /gradsko|граѓско|dalinsko|toplovod|beg/i
-// Private central: /centralno|централно|central|sopstveno|сопствено|individualno|индивидуално|svoja|своја|kotel|kotlarnica|котларница|сопствена|sopstvena|moe|мое|nase|наше|licno|лично|zgradata|зградата|na zgradata|на зградата|sopstveno parno|сопствено парно|moe parno|мое парно|nase parno|наше парно|licno parno|лично парно|parno moe|парно мое|parno nase|парно наше|parno licno|парно лично|parno na zgradata|парно на зградата|sopstveno|сопствено|sopstveno parno|сопствено парно/i
+// District: /gradsko|граѓско|dalinsko|toplovod|beg|centralno|централно|central/i
+//   (centralno/central = централно парно = градско, NOT private — reported bug)
+// Private central: /sopstveno|сопствено|individualno|индивидуално|svoja|своја|kotel|kotlarnica|котларница|сопствена|sopstvena|moe|мое|nase|наше|licno|лично|zgradata|зградата|na zgradata|на зградата|sopstveno parno|сопствено парно|moe parno|мое парно|nase parno|наше парно|licno parno|лично парно|parno moe|парно мое|parno nase|парно наше|parno licno|парно лично|parno na zgradata|парно на зградата|sopstveno|сопствено|sopstveno parno|сопствено парно/i
 // Inverter: /klima|клима|inverter|инвертер|split|сплит|invertor|инвертор|klima inverter|клима инвертер|термопумпа|toplotna|топлотна|na klima|на клима|se gream|се греам/i
 // Electric: /struja|струја|electric|термо|термосистем|termo|radijatori|радијатори|kalorifer|калорифер/i
 // Solid_fuel/oil: /drva|дрва|peleti|пелети|pellet|пелет|nafta|нафта|loz|лож|огрев|ogrev|jаглен|jaglen|uglen|у́глен/i
 //   Sub-check: /drva|дрва|peleti|пелети|pellet|пелет|ogrev|огрев/i → wood_pellets, else → oil
 function testHeatingPattern(u) {
-  if (/gradsko|градско|граѓско|dalinsko|dalecno|далечно|toplovod|beg/i.test(u)) return "district";
-  if (/centralno|централно|central|sopstveno|сопствено|individualno|индивидуално|svoja|своја|kotel|kotlarnica|котларница|сопствена|sopstvena|moe|мое|nase|наше|licno|лично|zgradata|зградата|na zgradata|на зградата|sopstveno parno|сопствено парно|moe parno|мое парно|nase parno|наше парно|licno parno|лично парно|parno moe|парно мое|parno nase|парно наше|parno licno|парно лично|parno na zgradata|парно на зградата|sopstveno|сопствено|sopstveno parno|сопствено парно/i.test(u)) return "private_central";
+  if (/gradsko|градско|граѓско|dalinsko|dalecno|далечно|toplovod|beg|centralno|централно|central/i.test(u)) return "district";
+  if (/sopstveno|сопствено|individualno|индивидуално|svoja|своја|kotel|kotlarnica|котларница|сопствена|sopstvena|moe|мое|nase|наше|licno|лично|zgradata|зградата|na zgradata|на зградата|sopstveno parno|сопствено парно|moe parno|мое парно|nase parno|наше парно|licno parno|лично парно|parno moe|парно мое|parno nase|парно наше|parno licno|парно лично|parno na zgradata|парно на зградата|sopstveno|сопствено|sopstveno parno|сопствено парно/i.test(u)) return "private_central";
   if (/klima|клима|inverter|инвертер|split|сплит|invertor|инвертор|klima inverter|клима инвертер|термопумпа|toplotna|топлотна|na klima|на клима|se gream|се греам/i.test(u)) return "inverter";
   if (/struja|струја|electric|термо|термосистем|termo|radijatori|радијатори|kalorifer|калорифер/i.test(u)) return "electric";
   if (/drva|дрва|peleti|пелети|pellet|пелет|nafta|нафта|loz|лож|огрев|ogrev|jаглен|jaglen|uglen|у́глен/i.test(u)) {
@@ -614,8 +646,9 @@ assertEqual(testHeatingPattern("gradsko parno"), "district", "B16: 'gradsko parn
 
 // ── PRIVATE CENTRAL tests ──
 console.log(`  ── Private central variants`);
-assertEqual(testHeatingPattern("centralno"), "private_central", "B16: 'centralno' → private_central");
-assertEqual(testHeatingPattern("central"), "private_central", "B16: 'central' → private_central");
+assertEqual(testHeatingPattern("centralno"), "district", "B16: 'centralno' → district (централно парно = градско)");
+assertEqual(testHeatingPattern("central"), "district", "B16: 'central' → district");
+assertEqual(testHeatingPattern("централно"), "district", "B16: 'централно' (Cyrillic) → district");
 assertEqual(testHeatingPattern("sopstveno"), "private_central", "B16: 'sopstveno' → private_central");
 assertEqual(testHeatingPattern("сопствено"), "private_central", "B16: 'сопствено' (Cyrillic) → private_central");
 assertEqual(testHeatingPattern("individualno"), "private_central", "B16: 'individualno' → private_central");
@@ -689,8 +722,8 @@ assertEqual(testHeatingPattern("парно"), "parno_bare", "B16: bare 'парн
 console.log(`  ── Distinctness checks`);
 // 'gradsko' should NOT match private_central
 assertEqual(testHeatingPattern("gradsko"), "district", "B16: 'gradsko' → district (not private_central)");
-// 'centralno' should NOT match district
-assertEqual(testHeatingPattern("centralno"), "private_central", "B16: 'centralno' → private_central (not district)");
+// 'centralno' now IS district (reported bug: owner answers 'CENTRALNO' → gradsko)
+assertEqual(testHeatingPattern("centralno"), "district", "B16: 'centralno' → district (не private_central)");
 // Compound with both should resolve by order: district patterns checked first
 assertEqual(testHeatingPattern("gradsko centralno"), "district", "B16: 'gradsko centralno' → district (matches first)");
 // Even with centralno first, gradsko in string still matches district (first pattern wins)

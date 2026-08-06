@@ -194,7 +194,7 @@ export function parseNumberWords(text) {
     // Tens words sorted longest-first so "seeset" wins over "eeset"/"eset"
     // and "deveeset" over "devedeset" when both could match a prefix.
     const tensWords = ['seeset','шеесет','peeset','пеесет','dvaeset','дваесет',
-      'triest','триест','pedeset','педесет','osumdeset','осумдесет',
+      'triest','триест','trieset','триесет','pedeset','педесет','osumdeset','осумдесет',
       'sedumdeset','седумдесет','deveeset','девеесет','devedeset','деведесет',
       'osemdeset','осемдесет','stopeeset','стопеесет','stodvaeset','стодваесет',
       'deset','десет','eeset','еесет','eset','есет']
@@ -202,7 +202,7 @@ export function parseNumberWords(text) {
     const tensDirectMap = {
       'seeset': 60, 'шеесет': 60, 'eeset': 60, 'еесет': 60,
       'eset': 60, 'есет': 60, 'peeset': 50, 'пеесет': 50,
-      'dvaeset': 20, 'дваесет': 20, 'triest': 30, 'триест': 30,
+      'dvaeset': 20, 'дваесет': 20, 'triest': 30, 'триест': 30, 'trieset': 30, 'триесет': 30,
       'pedeset': 50, 'педесет': 50, 'osumdeset': 80, 'осумдесет': 80,
       'sedumdeset': 70, 'седумдесет': 70, 'deveeset': 90, 'девеесет': 90,
       'devedeset': 90, 'деведесет': 90, 'osemdeset': 80, 'осемдесет': 80,
@@ -250,7 +250,7 @@ export function parseNumberWords(text) {
 
   if (!found) {
     const irregularTens = {
-      'triest': 30, 'триест': 30,
+      'triest': 30, 'триест': 30, 'trieset': 30, 'триесет': 30,
       'pedeset': 50, 'педесет': 50,
       'seeset': 60, 'шеесет': 60,
       'stopeeset': 150, 'стопеесет': 150,
@@ -314,14 +314,14 @@ export function parseNumberWords(text) {
     // where only the hundreds word was matched but the tens+units follow.
     else if (remaining) {
       const tensWords = ['seeset','шеесет','peeset','пеесет','dvaeset','дваесет',
-        'triest','триест','pedeset','педесет','osumdeset','осумдесет',
+        'triest','триест','trieset','триесет','pedeset','педесет','osumdeset','осумдесет',
         'sedumdeset','седумдесет','deveeset','девеесет','devedeset','деведесет',
         'osemdeset','осемдесет','stopeeset','стопеесет','stodvaeset','стодваесет',
         'deset','десет','eeset','еесет','eset','есет'];
       const tensDirectMap = {
         'seeset': 60, 'шеесет': 60, 'eeset': 60, 'еесет': 60,
         'eset': 60, 'есет': 60, 'peeset': 50, 'пеесет': 50,
-        'dvaeset': 20, 'дваесет': 20, 'triest': 30, 'триест': 30,
+        'dvaeset': 20, 'дваесет': 20, 'triest': 30, 'триест': 30, 'trieset': 30, 'триесет': 30,
         'pedeset': 50, 'педесет': 50, 'osumdeset': 80, 'осумдесет': 80,
         'sedumdeset': 70, 'седумдесет': 70, 'deveeset': 90, 'девеесет': 90,
         'devedeset': 90, 'деведесет': 90, 'osemdeset': 80, 'осемдесет': 80,
@@ -472,6 +472,18 @@ export function countBedrooms(text) {
   // BUT skip if the word number is actually an ordinal floor reference (tret kat, vtor sprat)
   // OR if the message is about a different field (terrace follow-up, question words)
   // OR if the message has year/decade context ("osumdesti" → 1980s, not 8 bedrooms)
+  //
+  // TIME-SPAN GUARD: the owner may talk about HOW LONG something takes
+  // ("mesec dva" = a month or two, "nedela dve" = a week or two, "dva dena"
+  // = two days, "tri meseci" = three months). Those number words are TIME
+  // amounts, NOT bedroom counts. "PA AKO MOZE DA SE PRODADE ZA MESEC DVA BI
+  // BILO SUPER" (if it could sell in a month or two, that'd be great)
+  // previously grabbed "dva" as bedrooms=2 — harmless when rejected at LOW,
+  // but "...mesec dva, golem e" would store it at HIGH (golem is a bedroom
+  // keyword). Only ADJACENT unit+number / number+unit pairs trigger, so a
+  // genuine bedroom answer that merely mentions time elsewhere in the
+  // sentence is left alone.
+  const timeSpanRe = /(?:mesec|месец|meseci|месеци|nedela|недела|nedeli|недели|dena|дена|denovi|денови|cas|час|casovi|часови|sati|сати|godina|година|godini|години)\s+(?:\d+|eden|edna|edno|dva|dve|tri|cetiri|pet|sest|sedum|osum|devet|deset|еден|една|едно|два|две|три|четири|пет|шест|седум|осум|девет|десет)|(?:\d+|eden|edna|edno|dva|dve|tri|cetiri|pet|sest|sedum|osum|devet|deset|еден|една|едно|два|две|три|четири|пет|шест|седум|осум|девет|десет)\s+(?:meseca|месеца|meseci|месеци|nedela|недела|nedeli|недели|dena|дена|denovi|денови|cas|час|casa|часа|sati|сати|godina|година|godini|години)/i;
   const wordNum = parseMacedonianNumber(u);
   if (wordNum !== null && wordNum >= 0 && wordNum <= 10) {
     // Skip if the only number words are actually ordinal floor references
@@ -491,6 +503,9 @@ export function countBedrooms(text) {
     // to that field, not bedrooms. "cetiri" inside the compound "seeset i
     // cetiri" must NOT become bedrooms=4 (reported production bug).
     if (/m2|м2|кв|kvadrati|квадрати|kvadrata|квадрата|kvadrat|квадрат|sqm|kat|кат|sprat|спрат|evra|евра|iljadi|илјади|parking|паркинг|garaza|гаража|lift|лифт|klima|клима/i.test(u)) return null;
+    // TIME-SPAN: "mesec dva", "nedela dve", "dva dena", "tri meseci" —
+    // the number word is a time amount, not a bedroom count.
+    if (timeSpanRe.test(u)) return null;
     return wordNum;
   }
   const firstNum = extractFirstNumber(u);
@@ -498,7 +513,20 @@ export function countBedrooms(text) {
     // Skip if message contains other-field context (sqm, floor, terrace, price)
     // 'iljadi' included: "cena 15 iljadi, golem stan" must NOT set bedrooms=15
     // (a price digit leaking into bedrooms via this fallback).
-    if (/m2|м2|кв|kvadrati|квадрати|sqm|kat|кат|sprat|спрат|terasa|тераса|m²|evra|евра|iljadi|илјади/i.test(u)) return null;
+    // TERRACE INFLECTIONS (reported): the word-number fallback above already
+    // uses |teras|терас (matches ALL inflections); the digit fallback only had
+    // "terasa" — so "imaima terasi 2" (2 terraces) leaked bedrooms=2 through
+    // this path. Use |teras|терас here too for consistency.
+    // PARKING/GARAGE (reported): "parking mesto na -1 vo centar" extracted
+    // bedrooms=1 from the garage LEVEL. The word-number fallback above
+    // already skips parking context; the digit fallback must too.
+    if (/m2|м2|кв|kvadrati|квадрати|sqm|kat|кат|sprat|спрат|teras|терас|m²|evra|евра|iljadi|илјади|parking|паркинг|garaza|гаража/i.test(u)) return null;
+    // NEGATIVE-LEVEL GUARD (reported): "-1"/"na -1"/"на -2" is a basement
+    // or parking level, never a bedroom count. extractFirstNumber strips the
+    // minus ("-1" → 1), so the guard must run here.
+    if (/-\s*\d/.test(u)) return null;
+    // TIME-SPAN: "mesec 2", "2 dena" — time, not bedrooms.
+    if (timeSpanRe.test(u)) return null;
     return firstNum;
   }
 
@@ -653,7 +681,7 @@ export function extractPrice(text) {
   const uClean = text.toLowerCase();
   const hasPriceKeywords = /iljadi|илјади|evra|евра|eur|evro|евро|cena|цена|plate|плате|plakja|плаќа|kirija|кирија/i.test(uClean);
   if (!hasPriceKeywords) {
-    const hasNonPriceContext = /m2|м2|kvadrati|квадрати|kvadrata|квадрата|kv|кв|sqm|kat|кат|sprat|спрат|katnica|катница|lift|лифт|klima|клима|garaza|гаража|terasa|тераса|spalni|спални|parking|паркинг|garage|гараж|potkrovje|поткровје|zgrada|зграда|godina|година|izgraden|изграден|graden|граден/i.test(uClean);
+    const hasNonPriceContext = /m2|м2|kvadrati|квадрати|kvadrata|квадрата|kv|кв|sqm|kat|кат|sprat|спрат|katnica|катница|lift|лифт|klima|клима|garaza|гаража|terasa|тераса|spalni|спални|parking|паркинг|garage|гараж|potkrovje|поткровје|zgrada|зграда|godina|година|izgraden|изграден|graden|граден|renoviran|реновиран|renovira|реновира|obnoven|обновен|osvezen|освежен/i.test(uClean);
     if (hasNonPriceContext) return null;
   }
 
@@ -699,11 +727,34 @@ export function extractTerraceNumber(text) {
       return null;
     };
 
+    // PLURAL-FORM COUNT GUARD (reported): "imaima terasi 2" (there are 2
+    // terraces) / "2 terasi" / "dve terasi" — a BARE number next to the
+    // PLURAL forms (terasi/тераси/terase/терасе) is the terrace COUNT, not
+    // the m² size, and must never be stored as terraceSqm. Numbers with an
+    // explicit area unit ("terasi 5m2", "5 kvadrati") are still sizes, and
+    // the SINGULAR forms (terasa/тераса/terrace) keep the old bare-number
+    // behavior ("terasa 4" = 4 m²).
+    const isPluralForm = /terasi|тераси|terase|терасе/i.test(words[terasaWordIdx]);
+    const hasAreaUnit = (w) => /m2|м2|m²|kvadrat|квадрат|kv|кв|sqm/i.test(w);
+    // true when w is a pure number (digit or Macedonian word) with NO area unit
+    const isBareCountWord = (w) => {
+      const clean = w.replace(/[.,!?;:]+$/, '');
+      if (hasAreaUnit(clean)) return false; // "5m2" / "2kvadrati" → size, not count
+      if (/^\d{1,4}$/.test(clean)) return true; // "2" → count candidate
+      const wordNum = parseMacedonianNumber(clean); // "dve" → count candidate
+      return wordNum !== null && wordNum >= 1 && wordNum <= 200;
+    };
+
     // PRIORITY 1: Check for a number RIGHT AFTER the terrace word.
     // e.g., "terasi 5", "terasa 5m2", "terase 4" — the clearest signal.
+    // With a PLURAL form, a bare count right after is the terrace COUNT,
+    // not the size — skip it ("terasi 2" → null; the follow-up asks for m²).
     if (terasaWordIdx + 1 < words.length) {
-      const nextResult = extractWordNumber(words[terasaWordIdx + 1]);
-      if (nextResult !== null) return nextResult;
+      const nextWord = words[terasaWordIdx + 1];
+      if (!(isPluralForm && isBareCountWord(nextWord))) {
+        const nextResult = extractWordNumber(nextWord);
+        if (nextResult !== null) return nextResult;
+      }
     }
 
     // PRIORITY 2: Find ALL numbers, prefer those with "kvadrati" context
@@ -728,10 +779,13 @@ export function extractTerraceNumber(text) {
         const hasSqmBetween = words.slice(start, end).some(w =>
           /kvadrati|квадрати|kvadrata|квадрата|m2|м2|kv|кв|sqm/i.test(w)
         );
-        if (hasSqmBetween && distance < bestContextDistance) {
+        // A number with an ATTACHED unit ("5m2") is an unambiguous SIZE even
+        // without a separate sqm word between it and the terrace word — treat
+        // it as context so "ima 2 terasi od 5m2" resolves to 5, not the count 2.
+        if ((hasSqmBetween || hasAreaUnit(words[i])) && distance < bestContextDistance) {
           bestContextDistance = distance;
           bestWithContext = result;
-        } else if (!hasSqmBetween && distance < bestBareDistance) {
+        } else if (!hasSqmBetween && !hasAreaUnit(words[i]) && distance < bestBareDistance) {
           bestBareDistance = distance;
           bestBare = result;
         }
@@ -741,7 +795,9 @@ export function extractTerraceNumber(text) {
     // Prefer context-enhanced number over bare trailing number
     if (bestWithContext !== null) return bestWithContext;
     // Only accept bare numbers within 2 words of terasa (e.g., "terasa 4")
-    if (bestBare !== null && bestBareDistance <= 2) return bestBare;
+    // PLURAL COUNT GUARD: with a plural form a bare number is the terrace
+    // count ("ima 2 terasi"), never a size — reject it.
+    if (bestBare !== null && bestBareDistance <= 2 && !isPluralForm) return bestBare;
 
     // No good number found near terrace — return null instead of guessing
     return null;

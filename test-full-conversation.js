@@ -12,10 +12,12 @@
 // (see handlers/persuasion-phase.js, call-time read, production never
 // sets it). The battery must never depend on Groq availability or
 // rate limits. To run this as a genuine live smoke test, temporarily
-// remove the flag below (requires a real GROQ_API_KEY in .env).
+// remove the flag below (requires a real GROQ_API_KEY in the env or
+// ~/.ana/ana.env — see env.js).
 // ============================================================
 process.env.ANA_OFFLINE_LLM = '1';
 
+import './env.js'; // side-effect: load ~/.ana/ana.env if present (see env.js)
 import { generateResponse } from './service.js';
 import { AnaClient } from './ana-client.js';
 

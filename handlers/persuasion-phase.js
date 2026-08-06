@@ -15,9 +15,8 @@
 //      exponential-backoff retry and post-processing.
 // ========================================
 import Groq from "groq-sdk";
-import dotenv from 'dotenv';
 import { config } from '../config.js';
-import { classifyIntent, CONV_CONTINUATION_WORDS as convContWords } from '../classifier.js';
+import { classifyIntent, CONV_CONTINUATION_WORDS as convContWords, parseConversationContext } from '../classifier.js';
 import { buildPersuasionContext, buildPersuasionPrompt, postProcessPersuasionResponse } from '../persuasion.js';
 import { withRetry } from '../retry-utils.js';
 import { transitionTo } from './state-machine.js';
@@ -37,15 +36,13 @@ function mirrorPhase(session, phase, event = 'phase_detected') {
   transitionTo(session, phase, event);
 }
 
-// IMPORTANT: dotenv must load BEFORE the Groq client is instantiated.
-// This module is imported (and evaluated) by service.js at load time,
-// so a dotenv.config() inside service.js would run too late — the API
-// key from groq.env would be undefined here. Load it first.
-// NOTE: the key file is named groq.env (not .env) because the freebuff
-// CLI crashes on this machine whenever a .env* file exists in the CWD
-// (it calls statx(), missing on kernel < 4.11). dotenv.config() with an
-// explicit path sidesteps that entirely.
-dotenv.config({ path: 'groq.env' });
+// IMPORTANT: env vars are loaded by env.js (see ../env.js) — the key
+// lives in the real environment or ~/.ana/ana.env, NEVER in a .env*
+// file inside the project CWD. That is deliberate: the freebuff CLI
+// crashes on this machine (and on the 32-bit Atom deploy boxes, both
+// kernel < 4.11) whenever a .env* file exists in the CWD, because it
+// calls statx() which is missing on kernels older than 4.11. Keeping
+// the env file in the user's home dir sidesteps that entirely.
 
 // LAZY GROQ CLIENT — constructed on FIRST persuasion call, never at module
 // load. The Groq SDK constructor THROWS when GROQ_API_KEY is missing/empty,
@@ -53,7 +50,8 @@ dotenv.config({ path: 'groq.env' });
 // import time — breaking the offline test battery that must run with no key
 // (the ANA_OFFLINE_LLM seam above returns before construction is reached).
 // Production is unaffected: the key is read from process.env (populated by
-// dotenv.config() above) at construction time, exactly as before.
+// env.js / ~/.ana/ana.env at entry-point startup) at construction time,
+// exactly as before.
 let _groqClient = null;
 function getGroqClient() {
   if (!_groqClient) {
@@ -95,7 +93,17 @@ export function detectPhase({ u, conv, session, isRent }) {
       return /^(?:moze|може|da|да|vazi|важи|ok|ок|okej|океј|super|супер|povelete|повелете|slobodno|слободно|ajde|ајде|dogovoreno|договорено|soglasuvam|согласувам|prifakjam|прифаќам|sorabotuvame|соработуваме|probaj|пробај|probajte|пробајте|da probame|да пробаме|moze slobodno|може слободно|se soglasuvam|се согласувам|ajde da probame|ајде да пробаме|moze da|може да|moze probame|може пробаме|ajde probame|ајде пробаме)(?:\s+(?:da|да|moze|може|slobodno|слободно|probame|пробаме|soglasuvam|согласувам))?$/i.test(trimmed);
     })();
 
-    if (isShortPositiveConfirm) {
+    // FUTURE/HYPOTHETICAL COOPERATION GUARD (reported): if Ana's last message
+    // asked about cooperation in the FUTURE / conditionally ("Дали сте
+    // расположени да соработуваме во иднина, ако имате друг имот?"), a bare
+    // short positive ("moze"/"da"/"ok") is polite social agreement, NOT a
+    // cooperation commitment — the owner is wrapping up the conversation. The
+    // same guard the classifier applies (anaAskingFutureCooperation).
+    const lastAnaMsg = parseConversationContext(conv).lastAnaMessage;
+    const futureCooperationAsked =
+      /(?:во\s+иднина|vo\s+idnina|иднина|idnina|ако\s+(?:имате|имаш|има|сакате)|ako\s+(?:imate|imas|ima|sakate)|доколку|dokolku|друг\s+имот|drug\s+imot|друг\s+стан|drug\s+stan|подоцна|podocna|во\s+прилика|vo\s+prilika|кога\s+ќе|koga\s+ke|следниот\s+пат|sledniot\s+pat)/i.test(lastAnaMsg);
+
+    if (isShortPositiveConfirm && !futureCooperationAsked) {
       session.collectedData.cooperationAccepted = true;
       session.rejectionCount = 0;
       if (!session.collectedData.transactionType && session.adMemory?.transactionType) {
@@ -121,7 +129,7 @@ export function detectPhase({ u, conv, session, isRent }) {
         console.log(`[COOPERATION: GATE BLOCKED — conversation continuation (${classification.reason})]`);
         phase = "PERSUASION";
         classification = { intent: "INTERESTED", confidence: 0.7 };
-      } else if (classification.intent === "ACCEPTED" && classification.confidence >= 0.85) {
+      } else if (classification.intent === "ACCEPTED" && classification.confidence >= 0.85 && !futureCooperationAsked) {
         session.collectedData.cooperationAccepted = true;
         session.rejectionCount = 0;
         if (!session.collectedData.transactionType && session.adMemory?.transactionType) {
@@ -137,7 +145,10 @@ export function detectPhase({ u, conv, session, isRent }) {
           mirrorPhase(session, 'PERSUASION');
           return {
             response: {
-              text: isRent ? "Агенцијата не зема ништо од вас за услугата. Само ви ги зголемува шансите за побрзо издавање на вашиот имот. Да пробаме?" : "Агенцијата не зема ништо од вас за услугата. Само ви ги зголемува шансите за побрза продажба на вашиот имот. Да пробаме?",
+              // Rent: the owner DOES pay the standard commission, so the rent
+              // variant must never claim "агенцијата не зема ништо од вас"
+              // (sale-only phrasing).
+              text: isRent ? "Агенцијата се грижи за целокупниот процес на издавање — клиенти, посети и договор — по стандардна провизија. Да пробаме?" : "Агенцијата не зема ништо од вас за услугата. Само ви ги зголемува шансите за побрза продажба на вашиот имот. Да пробаме?",
               type: "NORMAL"
             }
           };
@@ -145,7 +156,9 @@ export function detectPhase({ u, conv, session, isRent }) {
           mirrorPhase(session, 'PERSUASION');
           return {
             response: {
-              text: isRent ? "Не ве разбирам. Сакате да издадете, експерти ви ја нудат својата услуга без надокнада од ваша страна, а вие одбивате. Што велите да се обидеме?" : "Не ве разбирам. Сакате да продадете, експерти ви ја нудат својата услуга без надокнада од ваша страна, а вие одбивате. Што велите да се обидеме?",
+              // Rent: never "без надокнада од ваша страна" (sale-only) —
+              // rent owners owe the standard 50%/100% commission.
+              text: isRent ? "Не ве разбирам. Сакате да издадете, а ние ви нудиме професионална услуга за издавање по стандардна провизија. Што велите да се обидеме?" : "Не ве разбирам. Сакате да продадете, експерти ви ја нудат својата услуга без надокнада од ваша страна, а вие одбивате. Што велите да се обидеме?",
               type: "NORMAL"
             }
           };
@@ -212,7 +225,7 @@ export async function runPersuasion({ conv, userInput, classification, isRent })
   }
 
   const persuasionContext = buildPersuasionContext(classification);
-  const prompt = buildPersuasionPrompt(conv, userInput, persuasionContext);
+  const prompt = buildPersuasionPrompt(conv, userInput, persuasionContext, isRent);
 
   // Construct the client BEFORE the retry wrapper: a missing/empty API key is a
   // configuration error, not a transient failure — it must fail fast (and be

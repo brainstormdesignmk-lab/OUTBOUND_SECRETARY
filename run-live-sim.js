@@ -17,7 +17,8 @@
  *
  * No mocks, no service stubs: real extraction, real phase state machine,
  * real property-folder + CSV writes, and the real Groq LLM is available if
- * the persuasion phase is ever hit (GROQ_API_KEY comes from .env).
+ * the persuasion phase is ever hit (GROQ_API_KEY comes from the env or
+ * ~/.ana/ana.env — see env.js; never a .env* file in the CWD).
  *
  * The default production file paths are Linux-only, so this driver sets
  * local ./data/ overrides itself (before importing config) via dynamic
@@ -48,6 +49,8 @@ process.env.ANA_ACTIVE_HOURS_END ??= '24';
 process.env.ANA_ACTIVE_HOURS_AFTERNOON_START ??= '0';
 process.env.ANA_ACTIVE_HOURS_AFTERNOON_END ??= '24';
 process.env.ANA_NO_MESSAGE_DAY ??= '9'; // invalid day → never "no message" day
+
+await import('./env.js'); // side-effect: load ~/.ana/ana.env (see env.js)
 
 const { Campaign } = await import('./campaign.js');
 const { LeadState } = await import('./scheduler.js');

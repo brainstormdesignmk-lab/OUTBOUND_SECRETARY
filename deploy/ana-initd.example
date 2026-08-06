@@ -1,0 +1,79 @@
+#!/bin/sh
+# ========================================
+# ana-initd.example — sysvinit service script for the Atom boxes
+# ========================================
+# antiX 21 has NO systemd (it's sysvinit/runit), so a systemd unit won't
+# work. This classic init script runs Ana as a service. Copy it to
+# /etc/init.d/ana on the target box, adjust the paths below, then:
+#
+#   sudo cp deploy/ana-initd.example /etc/init.d/ana
+#   sudo chmod +x /etc/init.d/ana
+#   sudo update-rc.d ana defaults          # start on boot (sysvinit)
+#   sudo service ana start                 # or: /etc/init.d/ana start
+#
+# NOTE: the env file lives at ~/.ana/ana.env on the target box (see
+# ana.env.example) — NEVER inside the project CWD, so the freebuff CLI
+# statx() crash (kernel < 4.11) can never trigger.
+# ========================================
+
+### BEGIN INIT INFO
+# Provides:          ana
+# Required-Start:    $network $remote_fs
+# Required-Stop:     $network $remote_fs
+# Default-Start:     2 3 4 5
+# Default-Stop:      0 1 6
+# Short-Description: Metropolis Ana outbound campaign
+# Description:       Runs the Ana outbound secretary campaign
+### END INIT INFO
+
+# --- CONFIGURE THESE FOR THE TARGET BOX ---
+ANA_DIR="/home/metropolis3/Documents/real-estate-atoms/secretaries/outbound_final"
+ANA_USER="metropolis3"
+ANA_NODE="$(command -v node)"          # Node 16.20.2 linux-x86 on the Atoms
+ANA_ENV_FILE="/home/${ANA_USER}/.ana/ana.env"
+PID_FILE="/var/run/ana.pid"
+LOG_FILE="/var/log/ana.log"
+# --- END CONFIG ---
+
+# Ensure the env file is loaded BEFORE node starts (process.env for
+# ana-cli.js + env.js). This also proves the ~/.ana layout works.
+load_env() {
+  if [ -f "$ANA_ENV_FILE" ]; then
+    # shellcheck disable=SC1090
+    set -a; . "$ANA_ENV_FILE"; set +a
+  else
+    echo "WARN: $ANA_ENV_FILE missing — Ana will fail-fast on missing GROQ_API_KEY" >&2
+  fi
+}
+
+start() {
+  load_env
+  echo "Starting Ana (as $ANA_USER)..."
+  # shellcheck disable=SC2086
+  start-stop-daemon --start --background --make-pidfile --pidfile "$PID_FILE" \
+    --chuid "$ANA_USER" --chdir "$ANA_DIR" \
+    --startas "$ANA_NODE" -- "$ANA_DIR/ana-cli.js" >> "$LOG_FILE" 2>&1
+}
+
+stop() {
+  echo "Stopping Ana..."
+  start-stop-daemon --stop --pidfile "$PID_FILE" --retry 5 || true
+  rm -f "$PID_FILE"
+}
+
+status() {
+  if [ -f "$PID_FILE" ] && kill -0 "$(cat "$PID_FILE")" 2>/dev/null; then
+    echo "Ana is running (pid $(cat "$PID_FILE"))"
+    exit 0
+  fi
+  echo "Ana is not running"
+  exit 1
+}
+
+case "$1" in
+  start)   start ;;
+  stop)    stop ;;
+  restart) stop; sleep 1; start ;;
+  status)  status ;;
+  *) echo "Usage: $0 {start|stop|restart|status}"; exit 1 ;;
+esac

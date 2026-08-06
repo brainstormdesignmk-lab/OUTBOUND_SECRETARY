@@ -1,0 +1,27 @@
+# ANA MULTI-LEAD SAMPLE — three scraper formats in one file (the normalizer auto-detects each)
+# reklama5 : id,title,phone,url
+3571074,SE IZDAVA NOV STAN 42 m2 VO STAR AERODROM,+38978334393,https://reklama5.mk/AdDetails?ad=3571074
+5540516,Се продава 3 собен стан во Urban Garden - Аеродром,+38978950414,https://reklama5.mk/AdDetails?ad=5540516
+5502969,"Издавање на апартман во Мичурин за краток престој, неделно,",+38972251731,https://reklama5.mk/AdDetails?ad=5502969
+5563315,СЕ ПРОДАВА СТАН ВО МИЧУРИН 62М2,+38970318811,https://reklama5.mk/AdDetails?ad=5563315
+4710350,Nokevanje i kratok Prestoj,+38976220022,https://reklama5.mk/AdDetails?ad=4710350
+5436709,Se prodava stan 121m2 cair,+38976408292,https://reklama5.mk/AdDetails?ad=5436709
+5531598,"Продажба на стан до Дајмонд, центар Скопје",+38978252219,https://reklama5.mk/AdDetails?ad=5531598
+5589967,Se prodava stan vo Topansko Pole,+38975339558,https://reklama5.mk/AdDetails?ad=5589967
+5536052,RENOVIRAN NAMESTEN STAN 76M2 2 SPALNI AERODROM SKOPJANKA,+38976206296,https://reklama5.mk/AdDetails?ad=5536052
+5461450,"Се продава стан 84м² – Дебар Маало, на агол, југо-запад",+38971211872,https://reklama5.mk/AdDetails?ad=5461450
+# pazar3 : title,N/A,N/A,"phone1, phone2",url
+Se izdava namesten stan Centar sproti Univerzalna,N/A,N/A,"070 234 423, 078 377 677",https://www.pazar3.mk/oglas/stan-centar
+Izdavam stan pozadi Univerzalna sala,N/A,N/A,"071 865 443, 072 063 714, 078 377 677",https://www.pazar3.mk/oglas/stan-pozadi
+Убаво уреден стан (50 м2) во East Gate Living A1,N/A,N/A,"071 214 013, 078 377 677",https://www.pazar3.mk/oglas/east-gate
+Stan Ostrovo 57m2- SE izdava,N/A,N/A,"075 201 108, 078 377 677",https://www.pazar3.mk/oglas/stan-ostrovo
+Стан центар со две спални новоградба,N/A,N/A,"070 574 772, 078 377 677",https://www.pazar3.mk/oglas/stan-novogradba
+Apartment for rent in Skopje City Square Plostad Makedonija,N/A,N/A,"070 300 421, 078 377 677",https://www.pazar3.mk/oglas/apartment
+# imoti247 : id,title,url,phone  (phone/url swapped vs reklama5!)
+75889,"Plac-Gorno Konjari,Petrovec",https://imoti247.com/Plac-Gorno-KonjariPetrovec-75889.html,+38970376475
+75885,СЕ ПРОДАВА ПЛАЦ ВО ВОЛКОВО,https://imoti247.com/se-prodava-plac-vo-volkovo-75885.html,+38978251554 | +38975293311
+75871,Se prodava,https://imoti247.com/Se-prodava-75871.html,+38970588636 | +38978421858
+75861,Плац во Орешани,https://imoti247.com/plac-vo-oreshani-75861.html,+38972303439 | +38972222720
+75808,PLAC 2385m2 VO VIZBEGOVO KAJ BESA PETROL,https://imoti247.com/PLAC-2385m2-VO-VIZBEGOVO-KAJ-BESA-PETROL-75808.html,+38971419974 | +38970245212
+# A no-phone line must be skipped by the normalizer:
+5372742,Дарма Дома издава стан во Карпош !,,https://reklama5.mk/AdDetails?ad=5372742

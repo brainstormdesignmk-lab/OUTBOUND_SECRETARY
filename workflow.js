@@ -1,3 +1,44 @@
+// LAND FIELD WHITELIST — land properties (plac/плац, niva/нива, parcela/
+// парцела, zemjiste/земјиште, oranica/ораница, livada/ливада, vinograd/
+// виноград, gradina/градина, zemja/земја, ...) have NO building features:
+// no terrace, bedrooms, floor, heating, parking, orientation, furnishing,
+// year built, renovation, elevator, AC. The essentials are price, sqm,
+// documentation, owner name, address — plus PHOTOS (reported: a land owner
+// may send a drawing/sketch of the plot or a photo of the land — the plot
+// itself is the listing's visual, and a sketch is the land equivalent of a
+// building photo). Everything else is never asked for land (previously only
+// 5 of the building fields were skipped and the rest of the batch —
+// terrace, bedrooms, heating, parking, orientation, yearBuilt, renovated,
+// photos — was still pumped through the whole question flow; reported as
+// the "whole batch" problem for land leads). monthlyRent is in the whitelist
+// for rent land leads, cleanPrice for sale — the per-transaction order picks
+// one.
+const LAND_FIELDS = ['cleanPrice', 'monthlyRent', 'totalSqm', 'documentationClean', 'photos', 'ownerName', 'address'];
+
+// BUSINESS/COMMERCIAL FIELD WHITELIST — commercial properties (локал, офис,
+// деловен простор, продавница, ресторан, магацин, office, shop, restaurant,
+// warehouse, ...) have a different field set than residential apartments:
+// they need price/sqm/floor/totalFloors/heating/ac/parking/orientation/
+// furnished/yearBuilt/renovated/renovationYear/documentation/photos/name/
+// address (the reported list) — but NOT terrace, NOT bedrooms, NOT elevator.
+// A commercial space has no sleeping rooms; terrace/elevator are
+// residential-centric and would produce absurd questions for a business
+// property. Every OTHER building field stays (a business unit sits on a
+// floor, has heating, parking, AC, was built/renovated, has docs + photos).
+// monthlyRent is in the whitelist for rent leads, cleanPrice for sale — the
+// per-transaction order picks one.
+const COMMERCIAL_FIELDS = [
+  'cleanPrice', 'monthlyRent',
+  'totalSqm', 'floor', 'totalFloors', 'heating', 'ac', 'parking',
+  'orientation', 'furnished', 'yearBuilt', 'renovated', 'renovationYear',
+  'documentationClean', 'photos', 'ownerName', 'address'
+];
+
+const isLand = (data) => data.propertyType === 'land';
+const isLandField = (f) => LAND_FIELDS.includes(f);
+const isCommercial = (data) => data.propertyType === 'commercial';
+const isCommercialField = (f) => COMMERCIAL_FIELDS.includes(f);
+
 export function getNextMissingField(data) {
   const skipBedrooms = data.bedrooms !== null && data.bedrooms !== undefined && data.bedrooms !== '';
   const skipPropertyType = data.propertyType !== null;
@@ -61,7 +102,10 @@ export function getNextMissingField(data) {
     if (skipBedrooms && f === 'bedrooms') return false;
     if (skipPropertyType && f === 'propertyType') return false;
     if (skipTransaction && f === 'transactionType') return false;
-    if (data.propertyType === 'land' && ['floor', 'totalFloors', 'elevator', 'ac', 'furnished'].includes(f)) return false;
+    if (isLand(data) && !isLandField(f)) return false;
+    // COMMERCIAL WHITELIST: business properties never ask terrace/bedrooms/
+    // elevator (see COMMERCIAL_FIELDS above) — mirror of the land whitelist.
+    if (isCommercial(data) && !isCommercialField(f)) return false;
     if (data.renovated === false && f === 'renovationYear') return false;
     if (data.hasTerrace === true && f === 'terraceSqm') return false;
     // FIELD CONFIDENCE: if field has value but confidence < 0.7, it's considered missing
@@ -78,9 +122,10 @@ export function getNextMissingField(data) {
     if (skipPropertyType && field === 'propertyType') continue;
     if (skipTransaction && field === 'transactionType') continue;
 
-    if (data.propertyType === 'land') {
-      if (['floor', 'totalFloors', 'elevator', 'ac', 'furnished'].includes(field)) continue;
-    }
+    if (isLand(data) && !isLandField(field)) continue;
+
+    // COMMERCIAL WHITELIST (mirror of the land whitelist above).
+    if (isCommercial(data) && !isCommercialField(field)) continue;
 
     if (data.renovated === false && field === 'renovationYear') continue;
 
@@ -107,7 +152,8 @@ export function getNextMissingField(data) {
 export function getQuestion(field, propertyType, hasScraperPhotos = false, photosStatus = null) {
   const typeLabel = propertyType === 'apartment' ? 'станот' :
                     propertyType === 'house' ? 'куќата' :
-                    propertyType === 'land' ? 'плацот' : 'имотот';
+                    propertyType === 'land' ? 'плацот' :
+                    propertyType === 'commercial' ? 'локалот' : 'имотот';
 
   const questions = {
     available: `Дали ${typeLabel} е се уште достапен?`,
@@ -128,17 +174,24 @@ export function getQuestion(field, propertyType, hasScraperPhotos = false, photo
     renovated: 'Дали е реновиран?',
     renovationYear: 'Која година е реновиран?',
     documentationClean: 'Дали имате чист имотен лист?',
-    photos: getPhotosQuestion(hasScraperPhotos, photosStatus),
+    photos: getPhotosQuestion(propertyType, hasScraperPhotos, photosStatus),
     ownerName: 'Како да ве запишам?',
     address: 'Која е точната адреса?'
   };
   return questions[field] || null;
 }
 
-function getPhotosQuestion(hasScraperPhotos, photosStatus) {
+function getPhotosQuestion(propertyType, hasScraperPhotos, photosStatus) {
   // If photos are already set, we shouldn't be asking this
   if (hasScraperPhotos) {
     return 'Фотографиите од огласот ги имаме. Дали се актуелни?';
+  }
+  // LAND VARIANT (reported): a land owner may send a drawing/sketch of the
+  // plot or a photo of the land — the land itself is the visual (the plot's
+  // shape, boundaries, surroundings), so the question explicitly offers the
+  // sketch/drawing option that a building owner wouldn't have.
+  if (propertyType === 'land') {
+    return 'Дали имате фотографија од плацот или скица/цртеж што би можеле да ни ги испратите на Viber?';
   }
   return 'Дали имате фотографии што би можеле да ни ги испратите на Viber?';
 }

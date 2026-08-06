@@ -71,6 +71,31 @@ assert('edna spalna → bedrooms=1', result.bedrooms === 1, `got ${result.bedroo
 result = runGlobalExtraction('spalna plus detska', {});
 assert('spalna plus detska → bedrooms=2', result.bedrooms === 2, `got ${result.bedrooms}`);
 
+// PHANTOM-BEDROOMS REGRESSIONS (reported):
+// 1) "parking mesto na -1 vo centar" — the "-1" is the GARAGE LEVEL, not a
+//    bedroom count (extractFirstNumber strips the minus → 1). Previously this
+//    leaked bedrooms=1 (0.6 MEDIUM) into the session.
+result = runGlobalExtraction('parking mesto na -1 vo centar', {});
+assert('parking level: NO phantom bedrooms', result.bedrooms === undefined, `got bedrooms=${result.bedrooms}`);
+assert('parking level: parking still extracted', result.parking === true, `got parking=${result.parking}`);
+assert('parking level: parkingType=garage', result.parkingType === 'garage', `got parkingType=${result.parkingType}`);
+
+// 2) "imaima terasi 2" — the "2" is the number of TERRACES; the inflected
+//    plural "terasi" must trip the terrace context skip (the old digit
+//    fallback only had "terasa").
+result = runGlobalExtraction('imaima terasi 2', {});
+assert('terrace count: NO phantom bedrooms', result.bedrooms === undefined, `got bedrooms=${result.bedrooms}`);
+
+// 3) "garaza na -2" (garage at level -2) — negative level, no bedroom count.
+result = runGlobalExtraction('garaza na -2 posebno', {});
+assert('garage -2: NO phantom bedrooms', result.bedrooms === undefined, `got bedrooms=${result.bedrooms}`);
+
+// 4) Control — real bedroom answers still extract after the new guards.
+result = runGlobalExtraction('2 spalni', {});
+assert('control: 2 spalni → bedrooms=2', result.bedrooms === 2, `got bedrooms=${result.bedrooms}`);
+result = runGlobalExtraction('tri spalni, na vtor kat', {});
+assert('control: tri spalni → bedrooms=3', result.bedrooms === 3, `got bedrooms=${result.bedrooms}`);
+
 // ========================================
 // TEST 3: Terrace separation
 // ========================================

@@ -35,15 +35,32 @@ export function buildPersuasionContext(classification) {
 // ========================================
 // BUILD PERSUASION PROMPT
 // ========================================
-export function buildPersuasionPrompt(conv, userInput, persuasionContext) {
+export function buildPersuasionPrompt(conv, userInput, persuasionContext, isRent) {
+  // Commission/obligations backstop instructions — transaction-aware.
+  // Sale: the owner owes nothing (we earn from the difference). Rent: the
+  // owner DOES pay the standard 50%/100% commission on signing day — never
+  // tell a rent owner they have no obligations.
+  const obligationsRule = isRent
+    ? 'Ако сопственикот праша за обврски, кажи дека за издавање неговата обврска е само стандардната провизија (50% од една месечна кирија, 100% ако е над 1000 евра), платена на денот на потпишување на договорот.'
+    : 'Ако сопственикот праша за обврски, кажи кратко: "Да, немате никакви обврски кон нас."';
+  const mustPayRule = isRent
+    ? 'Ако сопственикот праша дали тој треба да ви плати нешто ("ke vi platam nesto?", "ke vi dolzam nesto?", "дали ќе ви платам нешто?"), кажи дека за издавање се плаќа стандардната провизија (50% од една месечна кирија, 100% ако е над 1000 евра) на денот на потпишување на договорот.'
+    : 'Ако сопственикот праша дали тој треба да ви плати нешто ("ke vi platam nesto?", "ke vi dolzam nesto?", "дали ќе ви платам нешто?"), кажи дека нема никакви обврски кон вас — ја добива својата цена, а разликата е ваша провизија.';
+  const freeWorkRule = isRent
+    ? 'Ако сопственикот праша дали работите бесплатно/за џабе ("rabotite besplatno", "rabotite za dzabe", "дали работите бесплатно", "работите ли за џабе"), кажи дека за издавање се наплаќа стандардната провизија (50% од една месечна кирија, 100% ако е над 1000 евра) на денот на потпишување — НЕ кажувај само "имаме голем број клиенти".'
+    : 'Ако сопственикот праша дали работите бесплатно/за џабе ("rabotite besplatno", "rabotite za dzabe", "дали работите бесплатно", "работите ли за џабе"), објасни дека заработувачката е разликата меѓу неговата чиста цена и постигнатата купопродажна цена — НЕ кажувај само "имаме голем број клиенти".';
+  // Client-question backstop: the owner asks whether the AGENCY has someone
+  // interested ("imate nekoj zainteresiran?", "dali imate zainteresirani?",
+  // "imate li kupci?"). The hardcoded early-response gate catches the known
+  // phrasings; if a novel variant slips through to the LLM, this rule forces
+  // the standard confident answer instead of the generic "имаме голем број
+  // клиенти" pitch. Same wording for rent and sale (clients are clients).
+  const clientQuestionRule = 'Ако сопственикот праша дали имате заинтересиран клиент/купувач/закупец ("imate nekoj zainteresiran", "imate zainteresirani", "dali imate kupci", "имате некој заинтересиран"), одговори: "Постојано имаме заинтересирани клиенти за тој реон." — НЕ кажувај само "имаме голем број клиенти".';
+
   return `
 Ти си Ана, професионална македонска агенка за недвижности.
 
 ЛИНГВИСТИЧКИ ПРАВИЛА (МОРА ДА СЛЕДИШ):
-
-const propertyLabel = session.adMemory?.propertyType === 'apartment' ? 'стан' :
-                          session.adMemory?.propertyType === 'house' ? 'куќа' :
-                          session.adMemory?.propertyType === 'land' ? 'плац' : 'имот';
 
 КРИТИЧНИ ЛИНГВИСТИЧКИ ПРАВИЛА:
 1. НИКОГАШ не кажувај "Ви разбирам". Секогаш кажувај "Ве разбирам".
@@ -54,18 +71,23 @@ const propertyLabel = session.adMemory?.propertyType === 'apartment' ? 'стан
    - Наместо "вие сте заинтересирани" → "вие сте расположени"
 4. Користи "Ве" кога се однесува на вас (директен објект). Користи "Ви" кога е индиректен објект.
 5. Ако не си сигурна дали е "Ви" или "Ве", користи "Вас" (Вас ве разбирам).
+6. НИКОГАШ не пишувај "как" (разговорна скратена форма). Секогаш пишувај "како": "како ќе го промовираме имотот", НИКОГАШ "как ќе го промовираме имотот".
 
 ПРИМЕРИ ЗА ТОЧНА УПОТРЕБА:
 ❌ "Ви разбирам" → ✅ "Ве разбирам"
 ❌ "Ви благодарам за довербата" → ✅ "Ви благодарам" (тука "Ви" е точно, бидејќи е индиректен објект)
 ❌ "Вие сте заинтересирани" → ✅ "Дали сте расположени"
+❌ "как ќе го промовираме имотот" → ✅ "како ќе го промовираме имотот"
 
 ПРАВИЛА:
 - Одговарај КРАТКО. Максимум 1-2 реченици.
 - НЕ додавај "Ви благодарам за довербата" освен ако не е неопходно.
 - НЕ објаснувај повеќе од потребното.
 - Одговори директно на прашањето.
-- Ако сопственикот праша за обврски, кажи кратко: "Да, немате никакви обврски кон нас."
+- ${obligationsRule}
+- ${freeWorkRule}
+- ${mustPayRule}
+- ${clientQuestionRule}
 - Секогаш заврши со прашање за соработка: "Дали сте расположени да соработуваме?"
 - Пишувај исклучиво на стандарден македонски јазик (македонски книжевен јазик).
 - НЕ користі русизми, украинизми или србизми.
@@ -121,6 +143,25 @@ export function postProcessPersuasionResponse(response, isRent) {
   if (hasDanglingConjunction(cleaned)) {
     cleaned = stripDanglingConjunction(cleaned);
   }
+
+  // MACEDONIAN STYLE GUARD: the LLM sometimes writes the truncated colloquial
+  // "как" ("сакате да знаете как ќе го промовираме имотот") instead of the
+  // standard "како". Letter-boundary matching (not \b — doesn't work with
+  // Cyrillic) keeps real words intact: "каква", "какви", "каков", "како",
+  // "секако", "така" never match because "как" is followed by a letter.
+  // Boundaries exclude BOTH cases of both scripts ([a-zA-Zа-яА-Я]) so
+  // all-caps Cyrillic words (КАКВА, СЕКАКО, КАКОВ) stay intact without
+  // relying on the engine's case-folding of character classes.
+  // Script is preserved (как→како, kak→kako) and so is case
+  // (как/Как/КАК → како/Како/КАКО, kak/Kak/KAK → kako/Kako/KAKO).
+  cleaned = cleaned.replace(/(^|[^a-zA-Zа-яА-Я])(как|kak)($|[^a-zA-Zа-яА-Я])/gi, (m, pre, word, post) => {
+    const allCaps = word === word.toUpperCase() && /[A-ZА-Я]/.test(word);
+    const titleCase = !allCaps && word[0] === word[0].toUpperCase();
+    const isLatin = /^[a-z]+$/i.test(word);
+    const base = isLatin ? 'kako' : 'како';
+    const replacement = allCaps ? base.toUpperCase() : titleCase ? (isLatin ? 'Kako' : 'Како') : base;
+    return pre + replacement + post;
+  });
 
   // Remove duplicate phrases (fix for stutter)
   cleaned = cleaned.replace(/(Дали сте расположени)\s+\1/gi, '$1');

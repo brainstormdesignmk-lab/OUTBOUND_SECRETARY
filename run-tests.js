@@ -28,9 +28,12 @@ const args = process.argv.slice(2);
 const filter = args.find((a) => !a.startsWith('--'));
 const listOnly = args.includes('--list');
 
-// Discover suites deterministically (alphabetical).
+// Discover suites deterministically (alphabetical). test-helpers.js matches
+// the test-* pattern but is a shared assert harness, not a runnable suite —
+// running it standalone exits 0 as a silent no-op, inflating the battery
+// count with a fake PASS. Exclude it so the summary is honest.
 const suites = readdirSync(__dirname)
-  .filter((f) => /^test-.*\.js$/.test(f))
+  .filter((f) => /^test-.*\.js$/.test(f) && f !== 'test-helpers.js')
   .sort();
 
 if (listOnly) {

@@ -6,7 +6,7 @@ import { createHarness } from './test-helpers.js';
 // Validates that multi-field messages like "80 kvadrati, tret kat, ima lift"
 // extract all three fields in one pass.
 // ========================================
-import { runGlobalExtraction } from './data-collector.js';
+import { runGlobalExtraction, assessConfidence } from './data-collector.js';
 import { extractTerraceNumber } from './property-extractor.js';
 
 const harness = createHarness();
@@ -371,6 +371,183 @@ result = runGlobalExtraction("300 evra mesecno, 40 m2, garaža", { transactionTy
 assert("RT3: monthlyRent for rent", result.monthlyRent === 300, `got ${result.monthlyRent}`);
 assert("RT3: cleanPrice NOT extracted", result.cleanPrice === undefined, `got ${result.cleanPrice}`);
 
+// Test 33b: THE reported bug — "go izdavam za 350 evra so parking e, klima i parno"
+// (I rent it for 350€ with parking, AC and heating). Two fixes:
+//   1. monthlyRent=350 must be HIGH confidence (0.95) — the rent verb "izdavam"
+//      was NOT in the monthlyRent keyword list, so a clear direct answer scored
+//      MEDIUM (0.60) and triggered an unnecessary "Само да потврдам" re-ask.
+//   2. parkingType must be 'private' — "so parking" (parking comes WITH the
+//      unit/rent, i.e. a dedicated spot for the apartment, not street parking)
+//      previously defaulted to public.
+result = runGlobalExtraction("go izdavam za 350 evra so parking e, klima i parno", { transactionType: 'rent' }, "go izdavam za 350 evra so parking e, klima i parno");
+assert("RT3b: monthlyRent=350 (izdavam verb)", result.monthlyRent === 350, `got ${result.monthlyRent}`);
+assert("RT3b: cleanPrice NOT extracted for rent", result.cleanPrice === undefined, `got ${result.cleanPrice}`);
+assert("RT3b: parking=true (so parking)", result.parking === true, `got ${JSON.stringify(result.parking)}`);
+assert("RT3b: parkingType='private' (parking comes with the unit)", result.parkingType === 'private', `got ${result.parkingType}`);
+assert("RT3b: ac=true (klima)", result.ac === true, `got ${JSON.stringify(result.ac)}`);
+// Confidence fixes:
+assert("RT3b: monthlyRent confidence HIGH (izdavam = clear rent verb)",
+  assessConfidence('monthlyRent', 350, 'go izdavam za 350 evra so parking e, klima i parno') === 'HIGH',
+  `got ${assessConfidence('monthlyRent', 350, 'go izdavam za 350 evra so parking e, klima i parno')}`);
+assert("RT3b: parkingType confidence HIGH (derived sub-key)",
+  assessConfidence('parkingType', 'private', 'go izdavam za 350 evra so parking e') === 'HIGH',
+  `got ${assessConfidence('parkingType', 'private', 'go izdavam za 350 evra so parking e')}`);
+
+// Cyrillic variants of the same rent-verb + with-parking fix
+result = runGlobalExtraction("го издавам за 350 евра со паркинг, клима и парно", { transactionType: 'rent' }, "го издавам за 350 евра со паркинг, клима и парно");
+assert("RT3c: Cyrillic monthlyRent=350 (издавам)", result.monthlyRent === 350, `got ${result.monthlyRent}`);
+assert("RT3c: Cyrillic parkingType='private' (со паркинг)", result.parkingType === 'private', `got ${result.parkingType}`);
+assert("RT3c: Cyrillic ac=true (клима)", result.ac === true, `got ${JSON.stringify(result.ac)}`);
+assert("RT3c: Cyrillic monthlyRent confidence HIGH",
+  assessConfidence('monthlyRent', 350, 'го издавам за 350 евра со паркинг') === 'HIGH',
+  `got ${assessConfidence('monthlyRent', 350, 'го издавам за 350 евра со паркинг')}`);
+
+// Test 33d: THE reported message — "350 evra + reziski trosoci" (350€ + utility
+// bills) is a CLEAR direct answer to "Која е месечната кирија?", but scored
+// MEDIUM (0.60) because "evra"/"reziski" were NOT in the monthlyRent keyword
+// list → Ana asked "Дали точната вредност е 350?" despite the clear answer.
+// Fix: currency (evra/евра/evro/евро/eur) and utilities (reziski/режиски)
+// words are unambiguous rent markers → HIGH (0.95), stored immediately.
+result = runGlobalExtraction("350 evra + reziski trosoci", { transactionType: 'rent' }, 'monthlyRent');
+assert("RT3d: monthlyRent=350 from '350 evra + reziski trosoci'", result.monthlyRent === 350, `got ${result.monthlyRent}`);
+assert("RT3d: cleanPrice NOT extracted for rent", result.cleanPrice === undefined, `got ${result.cleanPrice}`);
+assert("RT3d: monthlyRent confidence HIGH (evra = clear currency marker)",
+  assessConfidence('monthlyRent', 350, '350 evra + reziski trosoci') === 'HIGH',
+  `got ${assessConfidence('monthlyRent', 350, '350 evra + reziski trosoci')}`);
+// Cyrillic: "350 евра + режиски трошоци"
+result = runGlobalExtraction("350 евра + режиски трошоци", { transactionType: 'rent' }, 'monthlyRent');
+assert("RT3d2: Cyrillic monthlyRent=350", result.monthlyRent === 350, `got ${result.monthlyRent}`);
+assert("RT3d2: Cyrillic monthlyRent confidence HIGH",
+  assessConfidence('monthlyRent', 350, '350 евра + режиски трошоци') === 'HIGH',
+  `got ${assessConfidence('monthlyRent', 350, '350 евра + режиски трошоци')}`);
+// Utilities-only variant (no currency word): "350 reziski" is still a rent answer
+assert("RT3d3: '350 reziski' confidence HIGH (reziski = utilities)",
+  assessConfidence('monthlyRent', 350, '350 reziski') === 'HIGH',
+  `got ${assessConfidence('monthlyRent', 350, '350 reziski')}`);
+// CONTROL: a bare number without currency stays MEDIUM → confirmation re-ask preserved
+assert("RT3d4: bare '350' stays MEDIUM (confirmation preserved)",
+  assessConfidence('monthlyRent', 350, '350') === 'MEDIUM',
+  `got ${assessConfidence('monthlyRent', 350, '350')}`);
+
+// Test 33e: UTILITIES-FIRST GUARD — "reziski se 50 evra, kirijata 350"
+// (utilities are 50€, the rent is 350). extractPrice grabs the FIRST number,
+// and "evra" now scores the result HIGH — without a strip, monthlyRent=50
+// would be stored at 0.95 with no confirmation net. extractMonthlyRent must
+// remove the utilities clause before extracting so the RENT number wins.
+result = runGlobalExtraction("reziski se 50 evra, kirijata 350", { transactionType: 'rent' }, 'monthlyRent');
+assert("RT3e: monthlyRent=350 (utilities 50 NOT grabbed as rent)", result.monthlyRent === 350, `got ${result.monthlyRent}`);
+assert("RT3e: monthlyRent confidence HIGH (evra present)",
+  assessConfidence('monthlyRent', 350, 'reziski se 50 evra, kirijata 350') === 'HIGH',
+  `got ${assessConfidence('monthlyRent', 350, 'reziski se 50 evra, kirijata 350')}`);
+// Cyrillic: "режиски се 50 евра, киријата 350"
+result = runGlobalExtraction("режиски се 50 евра, киријата 350", { transactionType: 'rent' }, 'monthlyRent');
+assert("RT3e2: Cyrillic monthlyRent=350 (utilities 50 NOT grabbed)", result.monthlyRent === 350, `got ${result.monthlyRent}`);
+// Number-before-utilities: "350 + reziski 50 evra" → rent 350, utilities 50 stripped
+result = runGlobalExtraction("350 + reziski 50 evra", { transactionType: 'rent' }, 'monthlyRent');
+assert("RT3e3: monthlyRent=350 ('+ reziski 50 evra' stripped)", result.monthlyRent === 350, `got ${result.monthlyRent}`);
+
+// ========================================
+// TEST GROUP: Rent "IMA I PARKING" — the parking comes WITH the apartment
+// ========================================
+// Reported: in a RENT conversation, when the owner answers the parking
+// question with "IMA I PARKING" ("there's also parking"), that spot belongs
+// to the apartment in question — the tenant's private spot, NOT public
+// street parking. Previously the bare "parking" keyword fell through to the
+// "public" default. Same "comes with the unit" semantics as "so parking"
+// (RT3b), expressed with the "i" ("also") construction. Rent-gated: in a
+// SALE listing a bare "ima i parking" may describe the area, so the
+// conservative public default stays there.
+console.log(`\n📦 GROUP: Rent "IMA I PARKING" → parkingType=private`);
+
+result = runGlobalExtraction("IMA I PARKING", { transactionType: 'rent' }, "IMA I PARKING");
+assert("PK1: rent 'IMA I PARKING' → parking=true", result.parking === true, `got ${JSON.stringify(result.parking)}`);
+assert("PK1: rent 'IMA I PARKING' → parkingType='private' (the spot belongs to the apartment)", result.parkingType === 'private', `got ${result.parkingType}`);
+
+// Cyrillic + parkiranje variants
+result = runGlobalExtraction("ИМА И ПАРКИНГ", { transactionType: 'rent' }, "ИМА И ПАРКИНГ");
+assert("PK2: Cyrillic 'ИМА И ПАРКИНГ' → parkingType='private'", result.parkingType === 'private', `got ${result.parkingType}`);
+result = runGlobalExtraction("ima i parkiranje", { transactionType: 'rent' }, "ima i parkiranje");
+assert("PK2b: 'ima i parkiranje' → parkingType='private'", result.parkingType === 'private', `got ${result.parkingType}`);
+
+// Definite-article form: "ima i parkingot" (there's also THE parking)
+result = runGlobalExtraction("IMA I PARKINGOT", { transactionType: 'rent' }, "IMA I PARKINGOT");
+assert("PK2c: 'IMA I PARKINGOT' (definite) → parkingType='private'", result.parkingType === 'private', `got ${result.parkingType}`);
+
+// CONTROL: the SAME phrase in a SALE listing keeps the conservative public
+// default (the rent-gated rule must NOT leak into sale).
+result = runGlobalExtraction("IMA I PARKING", { transactionType: 'sale' }, "IMA I PARKING");
+assert("PK3: sale 'IMA I PARKING' stays parkingType='public' (rent-gated)", result.parkingType === 'public', `got ${result.parkingType}`);
+
+// CONTROL: no transaction type known → conservative public default preserved.
+result = runGlobalExtraction("IMA I PARKING", {}, "IMA I PARKING");
+assert("PK3b: unknown-type 'IMA I PARKING' stays 'public'", result.parkingType === 'public', `got ${result.parkingType}`);
+
+// CONTROL: the pinned free/street-parking phrase stays public even in rent.
+result = runGlobalExtraction("slobodno parkiranje", { transactionType: 'rent' }, "slobodno parkiranje");
+assert("PK4: 'slobodno parkiranje' stays public even in rent", result.parkingType === 'public', `got ${result.parkingType}`);
+
+// CONTROL (reviewer): the "nema i parking" negative construction contains
+// " i parking" but NOT the "ima i parking" substring — the private rule must
+// never fire on it (parking stays untyped-public, never 'private').
+result = runGlobalExtraction("nema i parking", { transactionType: 'rent' }, "nema i parking");
+assert("PK5: 'nema i parking' NOT classified private (no 'ima' substring)", result.parkingType !== 'private', `got ${result.parkingType}`);
+
+// ========================================
+// TEST GROUP: Decade-year answers — "90TI" / "80TI" (reported)
+// ========================================
+// Owner answers "Која година е граден?" with a DECADE: "90TI E ZGRADATA
+// TOCNO NEZNAM" (it's from the 90s, I don't know exactly). parseYearBuilt
+// maps the decade to a memorized mid-decade year (90ti → 1995), but the
+// "neznam" uncertainty word scored it MEDIUM (0.60) → Ana re-asked "Дали
+// точната вредност е 1995?" — redundant, because a decade answer already
+// means the owner does NOT know the exact year. Decade answers must score
+// HIGH and be stored without confirmation.
+console.log(`\n📦 GROUP: Decade-year answers (90TI/80TI — no confirmation re-ask)`);
+
+result = runGlobalExtraction("90TI E ZGRADATA TOCNO NEZNAM", {}, 'yearBuilt');
+assert("DEC1: '90TI ... TOCNO NEZNAM' → yearBuilt=1995 (decade → mid-decade)", result.yearBuilt === 1995, `got ${result.yearBuilt}`);
+assert("DEC1: decade answer scores HIGH (no confirmation re-ask)",
+  assessConfidence('yearBuilt', 1995, '90ti e zgradata tocno neznam') === 'HIGH',
+  `got ${assessConfidence('yearBuilt', 1995, '90ti e zgradata tocno neznam')}`);
+
+// The user's second example — 80ti → 1985
+result = runGlobalExtraction("80TI E ZGRADATA TOCNO NEZNAM", {}, 'yearBuilt');
+assert("DEC2: '80TI ... TOCNO NEZNAM' → yearBuilt=1985", result.yearBuilt === 1985, `got ${result.yearBuilt}`);
+assert("DEC2: 80ti decade answer scores HIGH",
+  assessConfidence('yearBuilt', 1985, '80ti e zgradata tocno neznam') === 'HIGH',
+  `got ${assessConfidence('yearBuilt', 1985, '80ti e zgradata tocno neznam')}`);
+
+// Cyrillic word forms and the -ta decade family
+assert("DEC3: 'осумдесетти ... ne znam' scores HIGH (Cyrillic word form)",
+  assessConfidence('yearBuilt', 1985, 'осумдесетти e zgradata, tocno ne znam') === 'HIGH',
+  `got ${assessConfidence('yearBuilt', 1985, 'осумдесетти e zgradata, tocno ne znam')}`);
+assert("DEC3b: '90-ти ... ne znam' scores HIGH (-ти spaced form)",
+  assessConfidence('yearBuilt', 1995, '90-ти e zgradata, ne znam tocno') === 'HIGH',
+  `got ${assessConfidence('yearBuilt', 1995, '90-ти e zgradata, ne znam tocno')}`);
+assert("DEC3c: '2000ta ... ne znam' scores HIGH (2000s decade)",
+  assessConfidence('yearBuilt', 2000, '2000ta e zgradata, ne znam tocno') === 'HIGH',
+  `got ${assessConfidence('yearBuilt', 2000, '2000ta e zgradata, ne znam tocno')}`);
+
+// CONTROL: an EXACT 2-digit year ("92") is NOT a decade answer → uncertainty
+// words still downgrade to MEDIUM → confirmation preserved.
+assert("DEC4: exact '92 ... ne znam' stays MEDIUM (not a decade answer)",
+  assessConfidence('yearBuilt', 1992, '92 e graden, tocno ne znam') === 'MEDIUM',
+  `got ${assessConfidence('yearBuilt', 1992, '92 e graden, tocno ne znam')}`);
+
+// renovationYear decade path — same semantics: renovated in the 90s, doesn't
+// know exactly → 1995 is the memorized year, no confirmation.
+assert("DEC5: 'renoviran vo 90tite, tocno ne znam' → renovationYear HIGH",
+  assessConfidence('renovationYear', 1995, 'renoviran vo 90tite, tocno ne znam') === 'HIGH',
+  `got ${assessConfidence('renovationYear', 1995, 'renoviran vo 90tite, tocno ne znam')}`);
+
+// NEGATIVE CONTROL (reviewer gap): "50-iljadi evra" is a PRICE — parseYearBuilt's
+// bare "50-i" substring maps it to 1955, so with uncertainty present it must
+// STAY MEDIUM (confirmation net preserved). The letter-boundary anchored digit
+// pattern blocks the "50-i" false match — only the word-form check could fire.
+assert("DEC6: '50-iljadi evra, tocno ne znam' NOT a decade → stays MEDIUM",
+  assessConfidence('yearBuilt', 1955, '50-iljadi evra, tocno ne znam') === 'MEDIUM',
+  `got ${assessConfidence('yearBuilt', 1955, '50-iljadi evra, tocno ne znam')}`);
+
 // ========================================
 // TEST GROUP: Edge-case multi-field (ambiguous numbers)
 // ========================================
@@ -656,6 +833,273 @@ assert("BUG5b: Cyrillic totalSqm=64 (шеесет и четири)", result.tota
 assert("BUG5b: Cyrillic bedrooms NOT extracted", result.bedrooms === undefined, `got ${JSON.stringify(result.bedrooms)}`);
 result = runGlobalExtraction("вкупно има шеесет и четири квадрата", {});
 assert("BUG5c: Cyrillic 'квадрата' totalSqm=64", result.totalSqm === 64, `got ${result.totalSqm}`);
+
+// ========================================
+// TEST GROUP: Reported production bugs (238k price, CENTRALNO heating, parking type)
+// ========================================
+// The user's real Viber session exposed THREE extraction bugs:
+//   1. "DVESTA TRIESET I OSUM ILJADI EVRA" = 238000 — parser stopped at
+//      "dvesta" (200) because the Viber spelling "trieset" (30) wasn't in
+//      the tens vocabulary → 200000.
+//   2. Owner answered the heating follow-up with "CENTRALNO" — централно
+//      парно = градско (district), but the follow-up handler mapped it to
+//      private_central (the extractor and the handler disagreed).
+//   3. "PARKING MESTO VO CENATA" (parking spot included in the price) is
+//      PRIVATE parking, but defaulted to public. "SLOBODNO PARKIRANJE"
+//      (street/free parking) is PUBLIC.
+// ========================================
+console.log(`\n📦 GROUP: Reported production bugs (238k price / CENTRALNO / parking type)`);
+
+// ── 1. Price: "dvesta trieset i osum iljadi" = 238,000 ──
+result = runGlobalExtraction("DVESTA TRIESET I OSUM ILJADI EVRA. TOA STAN VO ZGRADA OD 2025, SO LIFT I PARKING MESTO VO CENATA. SEVERNA ORIENTACIJA, SO PARNO I KLIMA", {});
+assert("R238: cleanPrice=238000 (dvesta=200 + trieset=30 + osum=8)", result.cleanPrice === 238000, `got ${result.cleanPrice}`);
+result = runGlobalExtraction("dvesta trieset i osum iljadi", {});
+assert("R238b: cleanPrice=238000 (lowercase variant)", result.cleanPrice === 238000, `got ${result.cleanPrice}`);
+result = runGlobalExtraction("dvesta trieset iljadi", {});
+assert("R238c: cleanPrice=230000 (dvesta + trieset, no units)", result.cleanPrice === 230000, `got ${result.cleanPrice}`);
+result = runGlobalExtraction("trieset i osum iljadi", {});
+assert("R238d: cleanPrice=38000 (trieset=30 + osum=8, no hundreds)", result.cleanPrice === 38000, `got ${result.cleanPrice}`);
+
+// ── 2. Heating: centralno / централно = district (gradsko) ──
+result = runGlobalExtraction("parno centralno", {});
+assert("RH1: 'parno centralno' → heating=district", result.heating === 'district', `got ${JSON.stringify(result.heating)}`);
+result = runGlobalExtraction("централно парно", {});
+assert("RH2: 'централно парно' → heating=district (Cyrillic)", result.heating === 'district', `got ${JSON.stringify(result.heating)}`);
+result = runGlobalExtraction("sopstveno parno", {});
+assert("RH3: 'sopstveno parno' → heating=private (own boiler, unchanged)", result.heating === 'private', `got ${JSON.stringify(result.heating)}`);
+
+// ── 3. Parking: "vo cenata" = private, "slobodno parkiranje" = public ──
+result = runGlobalExtraction("PARKING MESTO VO CENATA", {});
+assert("RP1: 'parking mesto vo cenata' → parking=true, type=private", result.parking === true && result.parkingType === 'private', `got ${JSON.stringify(result.parking)}/${result.parkingType}`);
+result = runGlobalExtraction("ima parkiranje vo cenata", {});
+assert("RP1b: 'parkiranje vo cenata' → parking=true, type=private", result.parking === true && result.parkingType === 'private', `got ${JSON.stringify(result.parking)}/${result.parkingType}`);
+result = runGlobalExtraction("slobodno parkiranje", {});
+assert("RP2: 'slobodno parkiranje' → parking=true, type=public", result.parking === true && result.parkingType === 'public', `got ${JSON.stringify(result.parking)}/${result.parkingType}`);
+result = runGlobalExtraction("слободно паркирање", {});
+assert("RP2b: 'слободно паркирање' → parking=true, type=public (Cyrillic)", result.parking === true && result.parkingType === 'public', `got ${JSON.stringify(result.parking)}/${result.parkingType}`);
+result = runGlobalExtraction("nema parkiranje", {});
+assert("RP3: 'nema parkiranje' → parking=false", result.parking === false, `got ${JSON.stringify(result.parking)}`);
+// Negative "not included in price" → sold separately, NOT folded into the price
+result = runGlobalExtraction("parking mestoto ne e vkluceno vo cena", {});
+assert("RP3b: 'ne e vkluceno vo cena' → parkingSeparate=true (not folded in)", result.parking === true && result.parkingSeparate === true, `got ${JSON.stringify(result.parking)}/${result.parkingSeparate}`);
+// Genuine garage/private/street distinctions preserved
+result = runGlobalExtraction("garaza na -1", {});
+assert("RP4: 'garaza' → parkingType=garage (unchanged)", result.parkingType === 'garage', `got ${result.parkingType}`);
+result = runGlobalExtraction("ima parking", {});
+assert("RP5: bare 'ima parking' → parkingType=public (unchanged)", result.parkingType === 'public', `got ${result.parkingType}`);
+
+// ========================================
+// TEST GROUP: Reported production bugs (renovation flow)
+// ========================================
+// The user's real Viber session exposed THREE renovation-flow bugs:
+//   1. "NOV E 2025" (it's new, built 2025) — a new-build/first-hand apartment
+//      is NOT renovated, but nothing was extracted → Ana re-asked twice and
+//      then SKIPPED the field.
+//   2. Bare answers to the current question ("NE E", "da", "nema") weren't
+//      mapped to the boolean field being asked → same re-ask loop.
+//   3. After "renovated=false" Ana still asked "Која година е реновиран?"
+//      (workflow guard exists but never fired — renovated was never false).
+// ========================================
+console.log(`\n📦 GROUP: Reported production bugs (renovation flow)`);
+
+// ── 1. New-build / first-hand → renovated=false ──
+result = runGlobalExtraction("NOV E 2025", {}, 'renovated');
+assert("RN1: 'NOV E 2025' → renovated=false (new build, not renovated)", result.renovated === false, `got ${JSON.stringify(result.renovated)}`);
+result = runGlobalExtraction("НОВ Е 2025", {}, 'renovated');
+assert("RN1b: 'НОВ Е 2025' → renovated=false (Cyrillic)", result.renovated === false, `got ${JSON.stringify(result.renovated)}`);
+result = runGlobalExtraction("nova gradba", {}, 'renovated');
+assert("RN2: 'nova gradba' → renovated=false", result.renovated === false, `got ${JSON.stringify(result.renovated)}`);
+result = runGlobalExtraction("novogradba", {}, 'renovated');
+assert("RN2b: 'novogradba' → renovated=false (merged)", result.renovated === false, `got ${JSON.stringify(result.renovated)}`);
+result = runGlobalExtraction("новоградба", {}, 'renovated');
+assert("RN2c: 'новоградба' → renovated=false (Cyrillic merged)", result.renovated === false, `got ${JSON.stringify(result.renovated)}`);
+result = runGlobalExtraction("prva raka", {}, 'renovated');
+assert("RN3: 'prva raka' → renovated=false (first hand)", result.renovated === false, `got ${JSON.stringify(result.renovated)}`);
+
+// ── 2. Bare yes/no answers to the CURRENT question ──
+result = runGlobalExtraction("NE E", {}, 'renovated');
+assert("RN4: bare 'NE E' to renovated question → renovated=false", result.renovated === false, `got ${JSON.stringify(result.renovated)}`);
+result = runGlobalExtraction("ne", {}, 'renovated');
+assert("RN4b: bare 'ne' to renovated question → renovated=false", result.renovated === false, `got ${JSON.stringify(result.renovated)}`);
+result = runGlobalExtraction("da", {}, 'renovated');
+assert("RN4c: bare 'da' to renovated question → renovated=true", result.renovated === true, `got ${JSON.stringify(result.renovated)}`);
+result = runGlobalExtraction("nema", {}, 'renovated');
+assert("RN4d: bare 'nema' to renovated question → renovated=false", result.renovated === false, `got ${JSON.stringify(result.renovated)}`);
+result = runGlobalExtraction("ne", {}, 'elevator');
+assert("RN4e: bare 'ne' to elevator question → elevator=false", result.elevator === false, `got ${JSON.stringify(result.elevator)}`);
+result = runGlobalExtraction("ne", {}, 'furnished');
+assert("RN4f: bare 'ne' to furnished question → furnished=false", result.furnished === false, `got ${JSON.stringify(result.furnished)}`);
+result = runGlobalExtraction("da", {}, 'parking');
+assert("RN4g: bare 'da' to parking question → parking=true", result.parking === true, `got ${JSON.stringify(result.parking)}`);
+
+// ── 1b. NEW-BUILD NEGATION GUARD (reviewer gap) ──
+// A negated new-build claim is NOT a "renovated=false" answer.
+// "NE E NOVOGRADBA, NO E RENOVIRAN 2019" (it's NOT new construction, but it
+// IS renovated in 2019) previously matched the bare "novogradba" keyword
+// first → renovated=false, clobbering the owner's explicit positive. The
+// branch must be skipped so the renovation answer falls through. And "ne e
+// nova zgrada" (it's not a new building) tells us nothing about renovation
+// → null (Ana re-asks), never a false negative.
+result = runGlobalExtraction("NE E NOVOGRADBA, NO E RENOVIRAN 2019", {}, 'renovated');
+assert("RN5a: 'NE E NOVOGRADBA, NO E RENOVIRAN 2019' → renovated=true (negated new-build must not clobber)", result.renovated === true, `got ${JSON.stringify(result.renovated)}`);
+assert("RN5a: renovationYear=2019 kept", result.renovationYear === 2019, `got ${JSON.stringify(result.renovationYear)}`);
+result = runGlobalExtraction("ne e novogradba, no e renoviran 2019", {}, 'renovated');
+assert("RN5b: lowercase variant → renovated=true, 2019", result.renovated === true && result.renovationYear === 2019, `got ${JSON.stringify(result.renovated)}/${result.renovationYear}`);
+result = runGlobalExtraction("не е новоградба, ама е реновиран 2019", {}, 'renovated');
+assert("RN5c: Cyrillic 'не е новоградба' → renovated=true, 2019", result.renovated === true && result.renovationYear === 2019, `got ${JSON.stringify(result.renovated)}/${result.renovationYear}`);
+result = runGlobalExtraction("ne e nova zgrada", {}, 'renovated');
+assert("RN5d: 'ne e nova zgrada' → renovated NOT set (unknown, re-ask)", result.renovated === undefined, `got ${JSON.stringify(result.renovated)}`);
+result = runGlobalExtraction("NE E NOVOGRADBA", {}, 'renovated');
+assert("RN5e: bare 'NE E NOVOGRADBA' → renovated NOT set (unknown, re-ask)", result.renovated === undefined, `got ${JSON.stringify(result.renovated)}`);
+// Existing new-build positives MUST still fire (no regression)
+result = runGlobalExtraction("novogradba", {}, 'renovated');
+assert("RN5f: bare 'novogradba' still → renovated=false", result.renovated === false, `got ${JSON.stringify(result.renovated)}`);
+
+// ── 2b. Documentation direct answers — "SE E CISTO" (reported) ──
+// The global extractor refuses bare "cist"/"cisto" (matches "cist vozduh",
+// "cista cena" — never documentation), so a DIRECT answer to the current
+// documentationClean question needs its own field-specific bare-yes mapping.
+// Reported: "SE E CISTO" was not registered as positive → Ana re-asked with
+// confirmatory phrasing ("Само да потврдам, дали имате чист имотен лист?").
+result = runGlobalExtraction("SE E CISTO", {}, 'documentationClean');
+assert("RN4h: 'SE E CISTO' to documentationClean question → documentationClean=true", result.documentationClean === true, `got ${JSON.stringify(result.documentationClean)}`);
+result = runGlobalExtraction("cisto e", {}, 'documentationClean');
+assert("RN4i: 'cisto e' → documentationClean=true", result.documentationClean === true, `got ${JSON.stringify(result.documentationClean)}`);
+result = runGlobalExtraction("се е чисто", {}, 'documentationClean');
+assert("RN4j: 'се е чисто' (Cyrillic) → documentationClean=true", result.documentationClean === true, `got ${JSON.stringify(result.documentationClean)}`);
+result = runGlobalExtraction("CISTO", {}, 'documentationClean');
+assert("RN4k: bare 'CISTO' to documentationClean question → documentationClean=true", result.documentationClean === true, `got ${JSON.stringify(result.documentationClean)}`);
+result = runGlobalExtraction("ne e cisto", {}, 'documentationClean');
+assert("RN4l: 'ne e cisto' → documentationClean=false (extractor negative branch)", result.documentationClean === false, `got ${JSON.stringify(result.documentationClean)}`);
+// Direct-answer boolean scores HIGH → stored immediately, no confirmation re-ask
+assert("RN4m: documentationClean direct answer scores HIGH",
+  assessConfidence('documentationClean', true, 'SE E CISTO') === 'HIGH',
+  `got ${assessConfidence('documentationClean', true, 'SE E CISTO')}`);
+
+// ── 2c. "NEMA PROBLEMI" — positive idiom (reported) ──
+// The negative branch's bare "problem"/"komplikacii" used to swallow
+// "NEMA PROBLEMI" / "nema komplikacii" (no problems — docs are fine) and
+// store documentationClean=false. Fixed with nema/nemam/bez lookbehinds;
+// the positive answer maps via the field-specific bare-yes idioms.
+result = runGlobalExtraction("NEMA PROBLEMI", {}, 'documentationClean');
+assert("RN4n: 'NEMA PROBLEMI' → documentationClean=true (was wrongly false)", result.documentationClean === true, `got ${JSON.stringify(result.documentationClean)}`);
+result = runGlobalExtraction("nemam problemi", {}, 'documentationClean');
+assert("RN4o: 'nemam problemi' → documentationClean=true", result.documentationClean === true, `got ${JSON.stringify(result.documentationClean)}`);
+result = runGlobalExtraction("СЕ Е ВО РЕД", {}, 'documentationClean');
+assert("RN4p: 'СЕ Е ВО РЕД' → documentationClean=true", result.documentationClean === true, `got ${JSON.stringify(result.documentationClean)}`);
+result = runGlobalExtraction("IMA PROBLEM SO DOKUMENTITE", {}, 'documentationClean');
+assert("RN4q: 'IMA PROBLEM SO DOKUMENTITE' → documentationClean=false (still negative)", result.documentationClean === false, `got ${JSON.stringify(result.documentationClean)}`);
+// Past-tense positives ("I've never had problems") — the lookbehind must
+// block "ne sum imal"/"не сум имал" before "problem". Reviewer gap: without
+// it "NE SUM IMAL PROBLEMI" wrongly set documentationClean=false. The answer
+// is left unknown (re-ask) rather than misread as a docs issue.
+result = runGlobalExtraction("NE SUM IMAL PROBLEMI", {}, 'documentationClean');
+assert("RN4q2: 'NE SUM IMAL PROBLEMI' → NOT set (past-tense positive, was wrongly false)", result.documentationClean === undefined, `got ${JSON.stringify(result.documentationClean)}`);
+result = runGlobalExtraction("не сум имал проблеми", {}, 'documentationClean');
+assert("RN4q3: Cyrillic 'не сум имал проблеми' → NOT set", result.documentationClean === undefined, `got ${JSON.stringify(result.documentationClean)}`);
+// Intensifier forms ("no problems AT ALL") — the lookbehind must block
+// "nikakvi"/"vekje" between the negation and "problem" (was wrongly false).
+result = runGlobalExtraction("NEMA NIKAKVI PROBLEMI", {}, 'documentationClean');
+assert("RN4r: 'NEMA NIKAKVI PROBLEMI' → documentationClean=true (intensifier, was false)", result.documentationClean === true, `got ${JSON.stringify(result.documentationClean)}`);
+result = runGlobalExtraction("NEMAM NIKAKVI PROBLEMI", {}, 'documentationClean');
+assert("RN4s: 'NEMAM NIKAKVI PROBLEMI' → documentationClean=true", result.documentationClean === true, `got ${JSON.stringify(result.documentationClean)}`);
+// Combined/qualified positive answers (common real phrasings)
+result = runGlobalExtraction("SE E CISTO, NEMA PROBLEMI", {}, 'documentationClean');
+assert("RN4t: 'SE E CISTO, NEMA PROBLEMI' → documentationClean=true", result.documentationClean === true, `got ${JSON.stringify(result.documentationClean)}`);
+result = runGlobalExtraction("nema problemi so dokumentite", {}, 'documentationClean');
+assert("RN4u: 'nema problemi so dokumentite' → documentationClean=true", result.documentationClean === true, `got ${JSON.stringify(result.documentationClean)}`);
+// "ne e problem" (it's not a problem) is a POSITIVE idiom elsewhere in the
+// codebase (photos handler, acceptance classifier) — must NOT be negative here.
+result = runGlobalExtraction("NE E PROBLEM", {}, 'documentationClean');
+assert("RN4v: 'NE E PROBLEM' → NOT false (positive idiom, conservative re-ask)", result.documentationClean !== false, `got ${JSON.stringify(result.documentationClean)}`);
+
+// ── 2d. OWNERSHIP/POSSESSION ANSWERS (reported) ──
+// "IMAM NA MOE IME" (I have the deed in my name) and "TI REKOV DEKA IMAM"
+// (I told you I have it) are CLEAR positives to "Дали имате чист имотен
+// лист?", but were NOT memorized → re-asked twice → max-2-attempts SKIP
+// stored null (data lost). The field-specific map now covers ownership
+// assertions when the documentation question is CURRENT.
+result = runGlobalExtraction("IMAM NA MOE IME", {}, 'documentationClean');
+assert("DOC1: 'IMAM NA MOE IME' → documentationClean=true (exact reported)", result.documentationClean === true, `got ${JSON.stringify(result.documentationClean)}`);
+result = runGlobalExtraction("TI REKOV DEKA IMAM", {}, 'documentationClean');
+assert("DOC2: 'TI REKOV DEKA IMAM' → documentationClean=true (exact reported)", result.documentationClean === true, `got ${JSON.stringify(result.documentationClean)}`);
+// Cyrillic + da-prefixed + bare variants
+result = runGlobalExtraction("имам на мое име", {}, 'documentationClean');
+assert("DOC3: Cyrillic 'имам на мое име' → documentationClean=true", result.documentationClean === true, `got ${JSON.stringify(result.documentationClean)}`);
+result = runGlobalExtraction("DA, IMAM NA MOE IME", {}, 'documentationClean');
+assert("DOC4: 'DA, IMAM NA MOE IME' → documentationClean=true (da-prefix stripped)", result.documentationClean === true, `got ${JSON.stringify(result.documentationClean)}`);
+result = runGlobalExtraction("da imam", {}, 'documentationClean');
+assert("DOC5: 'da imam' → documentationClean=true (da-prefix + bare imam)", result.documentationClean === true, `got ${JSON.stringify(result.documentationClean)}`);
+result = runGlobalExtraction("на мое име", {}, 'documentationClean');
+assert("DOC6: 'на мое име' → documentationClean=true (in my name)", result.documentationClean === true, `got ${JSON.stringify(result.documentationClean)}`);
+// Ownership assertions score HIGH (binary field) → stored, no confirmation
+assert("DOC7: 'imam na moe ime' scores HIGH (no confirmation re-ask)",
+  assessConfidence('documentationClean', true, 'imam na moe ime') === 'HIGH',
+  `got ${assessConfidence('documentationClean', true, 'imam na moe ime')}`);
+// CONTROL: multi-content messages stay unmapped (anchor keeps them safe)
+result = runGlobalExtraction("imam dva stana", {}, 'documentationClean');
+assert("DOC8: 'imam dva stana' NOT treated as docs answer (extra content)", result.documentationClean === undefined, `got ${JSON.stringify(result.documentationClean)}`);
+// CONTROL: ownership idioms do NOT fire in global discovery (no preferredField)
+result = runGlobalExtraction("imam na moe ime", {});
+assert("DOC9: 'imam na moe ime' with NO preferredField → NOT extracted (discovery guard)", result.documentationClean === undefined, `got ${JSON.stringify(result.documentationClean)}`);
+// CONTROL: 1st-person imam answers OTHER binary questions too (generic positive)
+result = runGlobalExtraction("imam", {}, 'parking');
+assert("DOC10: bare 'imam' to parking question → parking=true (generic possession)", result.parking === true, `got ${JSON.stringify(result.parking)}`);
+result = runGlobalExtraction("imam", {}, 'elevator');
+assert("DOC11: bare 'imam' to elevator question → elevator=true", result.elevator === true, `got ${JSON.stringify(result.elevator)}`);
+
+// ── 2e. NEGATIVE MIRROR (reviewer gap) — "NEMAM" must map to false ──
+// "imam" was added to the bare-yes map, so its 1st-person negation
+// "nemam" (I don't have) must map to false — otherwise "Дали имате чист
+// имотен лист?" → "NEMAM" → re-ask twice → max-2-attempts SKIP stores
+// null (data lost), the exact mirror of the reported "IMAM NA MOE IME" bug.
+result = runGlobalExtraction("NEMAM", {}, 'documentationClean');
+assert("NEG1: 'NEMAM' → documentationClean=false", result.documentationClean === false, `got ${JSON.stringify(result.documentationClean)}`);
+result = runGlobalExtraction("NEMAM NA MOE IME", {}, 'documentationClean');
+assert("NEG2: 'NEMAM NA MOE IME' → documentationClean=false", result.documentationClean === false, `got ${JSON.stringify(result.documentationClean)}`);
+result = runGlobalExtraction("NE E NA MOE IME", {}, 'documentationClean');
+assert("NEG3: 'NE E NA MOE IME' → documentationClean=false", result.documentationClean === false, `got ${JSON.stringify(result.documentationClean)}`);
+result = runGlobalExtraction("немам на мое име", {}, 'documentationClean');
+assert("NEG4: Cyrillic 'немам на мое име' → documentationClean=false", result.documentationClean === false, `got ${JSON.stringify(result.documentationClean)}`);
+result = runGlobalExtraction("NEMA IMOTEN LIST", {}, 'documentationClean');
+assert("NEG5: 'NEMA IMOTEN LIST' → documentationClean=false", result.documentationClean === false, `got ${JSON.stringify(result.documentationClean)}`);
+assert("NEG5b: 'nemam' scores HIGH (no confirmation re-ask)",
+  assessConfidence('documentationClean', false, 'nemam') === 'HIGH',
+  `got ${assessConfidence('documentationClean', false, 'nemam')}`);
+// CONTROL: bare 'nemam' answers other binary questions negatively too
+result = runGlobalExtraction("nemam", {}, 'parking');
+assert("NEG6: bare 'nemam' to parking question → parking=false", result.parking === false, `got ${JSON.stringify(result.parking)}`);
+// CONTROL: negation idioms do NOT fire in global discovery (no preferredField)
+result = runGlobalExtraction("nemam na moe ime", {});
+assert("NEG7: 'nemam na moe ime' with NO preferredField → NOT extracted", result.documentationClean === undefined, `got ${JSON.stringify(result.documentationClean)}`);
+
+// ── Bare answers ONLY work when the field is being asked (discovery guard) ──
+result = runGlobalExtraction("ne", {});
+assert("RN5: bare 'ne' with NO preferredField extracts nothing", Object.keys(result).length === 0, `got ${Object.keys(result).join(', ')}`);
+// The field-specific idiom is guarded the same way: only fires for its OWN
+// question, never in discovery mode or for a different field.
+result = runGlobalExtraction("SE E CISTO", {});
+assert("RN5d: 'SE E CISTO' with NO preferredField → NOT extracted (discovery guard)", result.documentationClean === undefined, `got ${JSON.stringify(result.documentationClean)}`);
+result = runGlobalExtraction("SE E CISTO", {}, 'elevator');
+assert("RN5e: 'SE E CISTO' during elevator question → documentationClean NOT set (field-specific)", result.documentationClean === undefined, `got ${JSON.stringify(result.documentationClean)}`);
+result = runGlobalExtraction("NEMA PROBLEMI", {});
+assert("RN5f: 'NEMA PROBLEMI' with NO preferredField → NOT extracted (cooperation-speak must not leak)", result.documentationClean === undefined, `got ${JSON.stringify(result.documentationClean)}`);
+result = runGlobalExtraction("ne, 55 kvadrati", {}, 'renovated');
+assert("RN5b: 'ne, 55 kvadrati' NOT treated as bare answer (extra content)", result.renovated === undefined, `got ${JSON.stringify(result.renovated)}`);
+result = runGlobalExtraction("ne znam", {}, 'renovated');
+assert("RN5c: 'ne znam' NOT treated as bare no (uncertain)", result.renovated === undefined, `got ${JSON.stringify(result.renovated)}`);
+
+// ── No-overwrite contract still holds for bare answers ──
+result = runGlobalExtraction("da", { renovated: false }, 'renovated');
+assert("RN6: bare 'da' does NOT overwrite existing renovated=false", result.renovated === undefined, `got ${JSON.stringify(result.renovated)}`);
+
+// ── renovationYear not leaked (renovated=false) and no cleanPrice from year ──
+result = runGlobalExtraction("renoviran 2020", {}, 'renovated');
+assert("RN7: 'renoviran 2020' → renovated=true", result.renovated === true, `got ${JSON.stringify(result.renovated)}`);
+assert("RN7: 'renoviran 2020' → renovationYear=2020", result.renovationYear === 2020, `got ${JSON.stringify(result.renovationYear)}`);
+assert("RN7: 'renoviran 2020' → cleanPrice NOT extracted from year", result.cleanPrice === undefined, `got ${JSON.stringify(result.cleanPrice)}`);
+result = runGlobalExtraction("2000ta", { renovated: false, renovationYear: null });
+assert("RN8: renovationYear not extracted when renovated=false", !('renovationYear' in result), `got ${JSON.stringify(result.renovationYear)}`);
 
 // ========================================
 // TEST SUMMARY

@@ -230,6 +230,7 @@ const liveNegativeCases = [
   ['mozebi ako e taka', 'hedged "maybe if so" (moze-inside-mozebi trap)'],
   ['mozebi sakam sorabotka', 'hedged "maybe I want cooperation" (commission handler intercepts)'],
   ['mozebi ke probame', 'hedged "maybe we\'ll try"'],
+  ['da jasno mi e', 'clear-understanding acknowledgment (reported: after the commission example)'],
 ];
 
 async function runPartBLive() {
@@ -366,7 +367,94 @@ async function runPartD() {
 }
 
 // ------------------------------------------------------------
-// RUNNER — awaits Parts A, B-LIVE and D (async), runs B and C, then summary
+// PART E — LIVE rent price routing: "250 evra" must land in monthlyRent,
+// NEVER cleanPrice, even before cooperation is accepted.
+//
+// Reported bug: "250 evra not registered as a price for rent". Root cause:
+// transactionType is derived from the ad title into adMemory, but collectedData
+// only gets the copy on cooperation ACCEPT (persuasion-phase.js). The price
+// extractors (data-collector.js) read ONLY collectedData, and extractCleanPrice
+// fires whenever collectedData.transactionType !== 'rent' — so a rent owner's
+// price volunteered during persuasion was stored as cleanPrice (the SALE price
+// field) at 0.95 confidence. Fix: service.js backfills
+// collectedData.transactionType from adMemory at the top of generateResponse.
+//
+// Three live controls:
+//   E1: rent owner volunteers "250 evra" during PERSUASION → monthlyRent=250,
+//       cleanPrice undefined.
+//   E2: rent session in DATA_COLLECTION whose collectedData.transactionType is
+//       missing (e.g. loaded from a stale persisted session) → "250 evra"
+//       still routes to monthlyRent (evra price scores HIGH → stored on the
+//       first turn, no confirmation round-trip).
+//   E3: sale control — "98 iljadi evra" volunteered during persuasion stays
+//       cleanPrice=98000 (backfill must not break the sale path).
+// ------------------------------------------------------------
+console.log('\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+console.log('🎭 PART E: LIVE rent-price routing — "250 evra" → monthlyRent (never cleanPrice)');
+console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+
+async function runPartE() {
+  // E1: rent owner volunteers the price BEFORE accepting cooperation.
+  console.log('\n  === E1: RENT persuasion — owner volunteers "250 evra" before accepting ===');
+  const e1 = freshSession({ transactionType: 'rent' });
+  await sendMessage(e1, '250 evra');
+  assert('E1: transactionType backfilled into collectedData (rent)',
+    e1.collectedData.transactionType === 'rent',
+    `got ${JSON.stringify(e1.collectedData.transactionType)}`);
+  assert('E1: monthlyRent=250 stored (rent price)',
+    e1.collectedData.monthlyRent === 250,
+    `got ${JSON.stringify(e1.collectedData.monthlyRent)}`);
+  assert('E1: cleanPrice NOT set (must never be the SALE field for rent)',
+    e1.collectedData.cleanPrice === undefined,
+    `got ${JSON.stringify(e1.collectedData.cleanPrice)}`);
+
+  // E2: rent DATA_COLLECTION session whose collectedData.transactionType is
+  // missing (stale persisted session) — backfill must repair the routing.
+  console.log('\n  === E2: RENT DATA_COLLECTION — collectedData.transactionType missing (stale session) ===');
+  const e2 = freshSession({ transactionType: 'rent' });
+  e2.collectedData.cooperationAccepted = true;
+  delete e2.collectedData.transactionType; // simulate stale persisted session
+  e2.messages.push({ role: 'user', text: 'DA' });
+  e2.messages.push({ role: 'model', text: 'Која е месечната кирија за станот?' });
+  const e2res1 = await sendMessage(e2, '250 evra');
+  // "250 evra" carries the currency marker "evra" → HIGH (0.95) → stored
+  // immediately, NO confirmation round-trip (was MEDIUM 0.60 → "Дали точната
+  // вредност е 250?" — the reported unnecessary re-ask). The reply is still a
+  // QUESTION — the NEXT field (totalSqm) — proving the flow advanced.
+  assert('E2: first reply advances to the next field (evra price = HIGH, no confirm re-ask)',
+    e2res1.type === 'QUESTION' && e2res1.nextField === 'totalSqm',
+    `got ${e2res1.type} — nextField=${e2res1.nextField} — "${e2res1.text}"`);
+  assert('E2: monthlyRent stored on first turn (no confirmation pending)',
+    e2.collectedData.monthlyRent === 250 && !e2.pendingConfirmation,
+    `got monthlyRent=${JSON.stringify(e2.collectedData.monthlyRent)}, pending=${JSON.stringify(e2.pendingConfirmation)}`);
+  const e2res2 = await sendMessage(e2, 'da');
+  assert('E2: flow advanced after first turn (not stuck)',
+    e2res2.type === 'QUESTION',
+    `got ${e2res2.type}`);
+  assert('E2: monthlyRent=250 stored after confirmation',
+    e2.collectedData.monthlyRent === 250,
+    `got ${JSON.stringify(e2.collectedData.monthlyRent)}`);
+  assert('E2: cleanPrice NOT set for rent',
+    e2.collectedData.cleanPrice === undefined,
+    `got ${JSON.stringify(e2.collectedData.cleanPrice)}`);
+
+  // E3: sale control — backfill must not break the sale path.
+  console.log('\n  === E3: SALE persuasion — owner volunteers "98 iljadi evra" (control) ===');
+  const e3 = freshSession(); // sale
+  await sendMessage(e3, '98 iljadi evra');
+  assert('E3: transactionType backfilled (sale)',
+    e3.collectedData.transactionType === 'sale',
+    `got ${JSON.stringify(e3.collectedData.transactionType)}`);
+  assert('E3: cleanPrice=98000 stored (sale price)',
+    e3.collectedData.cleanPrice === 98000,
+    `got ${JSON.stringify(e3.collectedData.cleanPrice)}`);
+  assert('E3: monthlyRent NOT set (sale)',
+    e3.collectedData.monthlyRent === undefined,
+    `got ${JSON.stringify(e3.collectedData.monthlyRent)}`);
+}
+
+// ------------------------------------------------------------
+// RUNNER — awaits Parts A, B-LIVE, D and E (async), runs B and C, then summary
 // ------------------------------------------------------------
 (async () => {
   try {
@@ -375,6 +463,7 @@ async function runPartD() {
     await runPartBLive();
     runPartC();
     await runPartD();
+    await runPartE();
 
     const summary = harness.summary('🎯 LIVE E2E ACCEPTANCE SIMULATION');
     if (harness.failed > 0) {

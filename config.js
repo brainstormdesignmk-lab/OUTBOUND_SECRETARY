@@ -49,6 +49,28 @@ function envBool(name, fallback) {
   return /^(1|true|yes|on)$/i.test(v.trim());
 }
 
+// Path-style helper where an EXPLICIT empty value means "disabled"
+// (console-only / no file writes — see LOG_PATH, METRICS_PATH). Undefined
+// still falls back to the default, so unset vars behave exactly as before;
+// only a deliberate `VAR=''` opts out. Use this ONLY for paths that support
+// a disabled mode — not for required paths (envStr semantics).
+function envPath(name, fallback) {
+  const v = process.env[name];
+  return v === undefined ? fallback : v;
+}
+
+// Int variant with the same "explicit empty disables" semantics (HEALTH_PORT).
+// Undefined → default; '' → preserved as '' so health.js's falsy check
+// disables the server (matching the documented "0/empty disables"); a valid
+// number string is parsed; anything else → default.
+function envIntOrEmpty(name, fallback) {
+  const v = process.env[name];
+  if (v === undefined) return fallback;
+  if (v === '') return '';
+  const n = parseInt(v, 10);
+  return Number.isNaN(n) ? fallback : n;
+}
+
 export const config = {
   // === LLM ===
   MODEL: envStr('ANA_MODEL', "llama-3.3-70b-versatile"),
@@ -64,6 +86,13 @@ export const config = {
   REPLY_TIMEOUT: envInt('ANA_REPLY_TIMEOUT_MS', 30 * 60 * 1000),
   FOLLOWUP_TIMEOUT: envInt('ANA_FOLLOWUP_TIMEOUT_MS', 2 * 60 * 60 * 1000),
   GAP_BETWEEN_LEADS: envInt('ANA_GAP_BETWEEN_LEADS_MS', 10 * 60 * 1000),
+  // Owner-follow-up grace window (interactive TUI): after an owner message
+  // Ana waits this long for a possible follow-up (or two) before replying —
+  // real owners often type several messages in a row. A new message re-arms
+  // the window; 0 = reply instantly (campaign/tests). 15s gives a real owner
+  // time to fire a 2nd message while keeping the test snappy. Used by the
+  // interactive TUI (engine ownerGraceMs).
+  OWNER_FOLLOWUP_GRACE_MS: envInt('ANA_OWNER_FOLLOWUP_GRACE_MS', 15000),
   TYPING_CHAR_MIN: envInt('ANA_TYPING_CHAR_MIN', 80),
   TYPING_CHAR_MAX: envInt('ANA_TYPING_CHAR_MAX', 250),
   MESSAGE_PAUSE_MIN: envInt('ANA_MESSAGE_PAUSE_MIN_MS', 2000),
@@ -98,14 +127,18 @@ export const config = {
   SESSIONS_PATH: envStr('SESSIONS_PATH', path.join(DATA_DIR, 'sessions.json')),
 
   // Metrics — optional JSONL trail for live counters (metrics.js).
-  METRICS_PATH: envStr('METRICS_PATH', path.join(DATA_DIR, 'metrics.jsonl')),
+  // Set empty to disable the file trail (in-memory only).
+  METRICS_PATH: envPath('METRICS_PATH', path.join(DATA_DIR, 'metrics.jsonl')),
 
   // Structured audit log — JSONL event trail (logger.js, Task 9).
-  // Set empty to run console-only (no file writes).
-  LOG_PATH: envStr('LOG_PATH', path.join(DATA_DIR, 'audit.log.jsonl')),
+  // Set empty to run console-only (no file writes) — envPath preserves
+  // the empty value instead of falling back to the default.
+  LOG_PATH: envPath('LOG_PATH', path.join(DATA_DIR, 'audit.log.jsonl')),
 
   // Health-check HTTP server (health.js, Task 10) — 0/empty disables.
-  HEALTH_PORT: envInt('HEALTH_PORT', 8081),
+  // envIntOrEmpty preserves '' so health.js's falsy check turns the server
+  // off (envInt would have silently forced the default port).
+  HEALTH_PORT: envIntOrEmpty('HEALTH_PORT', 8081),
 
   // Readiness gate for /readyz — allow k8s to see "campaign finished".
   // If the campaign exits naturally this is fine; long-running daemons

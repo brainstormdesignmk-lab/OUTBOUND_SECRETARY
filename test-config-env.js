@@ -120,11 +120,54 @@ function importConfig(envPatch) {
 }
 
 // ========================================
-// 4. Empty env value → fall back to default
+// 4. Empty env value → fall back to default (envStr keys)
 // ========================================
 {
   const { config } = await importConfig({ ANA_MODEL: '' });
   assert('empty string falls back to default', config.MODEL === 'llama-3.3-70b-versatile', `got "${config.MODEL}"`);
+}
+
+// ========================================
+// 4b. Empty LOG_PATH/METRICS_PATH → DISABLED (console-only), NOT the default.
+// envPath (unlike envStr) preserves '' so logger.js/metrics.js see a falsy
+// path and skip file writes — the documented "Set empty to run console-only".
+// ========================================
+{
+  const { config } = await importConfig({ LOG_PATH: '', METRICS_PATH: '' });
+  assert('LOG_PATH empty disables file writes', config.LOG_PATH === '', `got "${config.LOG_PATH}"`);
+  assert('METRICS_PATH empty disables file trail', config.METRICS_PATH === '', `got "${config.METRICS_PATH}"`);
+}
+
+// ========================================
+// 4c. Empty SESSIONS_PATH → still falls back to default (only LOG_PATH,
+// METRICS_PATH and HEALTH_PORT support a disabled mode; session
+// persistence is required).
+// ========================================
+{
+  const { config } = await importConfig({ SESSIONS_PATH: '' });
+  assert('SESSIONS_PATH empty falls back to default', typeof config.SESSIONS_PATH === 'string' && config.SESSIONS_PATH.length > 0, `got "${config.SESSIONS_PATH}"`);
+}
+
+// ========================================
+// 4d. Empty HEALTH_PORT → DISABLED (falsy → health.js skips the server),
+// matching the documented "0/empty disables" — envIntOrEmpty preserves ''
+// instead of envInt's fallback-to-default behavior.
+// ========================================
+{
+  const { config } = await importConfig({ HEALTH_PORT: '' });
+  assert('HEALTH_PORT empty disables server', config.HEALTH_PORT === '', `got "${config.HEALTH_PORT}"`);
+  assert('HEALTH_PORT empty is falsy', !config.HEALTH_PORT, `got "${config.HEALTH_PORT}"`);
+}
+
+// ========================================
+// 4e. HEALTH_PORT='0' → DISABLED too (parseInt('0') → 0 → falsy), matching
+// the documented "0/empty disables". Explicitly locked in so the '0' branch
+// can't silently regress to the default port.
+// ========================================
+{
+  const { config } = await importConfig({ HEALTH_PORT: '0' });
+  assert('HEALTH_PORT 0 disables server', config.HEALTH_PORT === 0, `got "${config.HEALTH_PORT}"`);
+  assert('HEALTH_PORT 0 is falsy', !config.HEALTH_PORT, `got "${config.HEALTH_PORT}"`);
 }
 
 // ========================================

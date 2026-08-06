@@ -115,11 +115,20 @@ export class Campaign {
 
       await this.processLead(session, i);
 
-      // Gap before next lead (except for last one)
+      // Gap before next lead (except for last one). INTERACTIVE SKIP: the
+      // operator runs this campaign interactively (ana-cli TTY); a bare ENTER
+      // during the gap starts the next lead NOW (sleepWithEnterSkip — same
+      // mechanism as the typing-delay skip). Reported: "after the first lead
+      // finished, the others won't start... not manually" — the old plain
+      // sleep ignored ENTER entirely, so the only way forward was waiting out
+      // the full 10-min gap. Non-TTY runs (production daemon, tests) just do
+      // the plain sleep — zero behavior change there.
       if (i < this.sessions.length - 1 && this.running) {
         const gap = antiBan.getLeadGap();
-        console.log(`\n⏳ Waiting ${Math.round(gap / 1000 / 60)} min before next lead...\n`);
-        await this.sleep(gap);
+        console.log(`\n⏳ Waiting ${Math.round(gap / 1000 / 60)} min before next lead... (ENTER = start now)\n`);
+        if (await this.sleepWithEnterSkip(gap)) {
+          console.log(`   ⏩ gap skipped — starting next lead now`);
+        }
       }
     }
 
@@ -162,6 +171,8 @@ export class Campaign {
    * Process a single lead through its lifecycle
    */
   async processLead(session, index) {
+    // Never leak an early-typed reply (ENTER-skip stash) across leads.
+    this._earlyReply = null;
     console.log(`\n--- Lead ${index + 1}: ${session.phone || 'unknown'} ---`);
     logger.info('lead_started', `Processing lead ${index + 1}`, { phone: session.phone, index });
     setHealthState({ currentIndex: index });
@@ -194,10 +205,13 @@ export class Campaign {
 
     antiBan.recordSent(session.phone);
 
-    // Wait for typing simulation
+    // Wait for typing simulation — a bare ENTER skips it (see
+    // sleepWithEnterSkip; the old sim's "Thinking delay" you had to wait out).
     const typingDelay = antiBan.getTypingDelay(firstMsg.text);
-    console.log(`   💬 Typing delay: ${Math.round(typingDelay / 1000)}s`);
-    await this.sleep(typingDelay);
+    console.log(`   💬 Typing delay: ${Math.round(typingDelay / 1000)}s (ENTER = skip)`);
+    if (await this.sleepWithEnterSkip(typingDelay)) {
+      console.log(`   ⏩ typing delay skipped — Ana types now`);
+    }
 
     // === STEP 2: Wait for reply (30 min) ===
     console.log(`   ⏳ Waiting up to ${config.REPLY_TIMEOUT / 1000 / 60} min for reply...`);
@@ -209,14 +223,14 @@ export class Campaign {
       await this.handleReply(session, reply1);
     } else {
       // === STEP 3: Send follow-up ===
-      const followUp = getFollowUpMessage();
+      const followUp = getFollowUpMessage(session.adMemory?.transactionType || session.collectedData?.transactionType);
       session.addSentMessage(followUp);
       session.followUpSent = true;
       antiBan.recordSent(session.phone);
 
       const typingDelay2 = antiBan.getTypingDelay(followUp);
       console.log(`   📤 Follow-up: "${followUp}"`);
-      await this.sleep(typingDelay2);
+      await this.sleepWithEnterSkip(typingDelay2);
 
       // === STEP 4: Wait 2 hours ===
       console.log(`   ⏳ Waiting ${config.FOLLOWUP_TIMEOUT / 1000 / 60} min for reply after follow-up...`);
@@ -241,6 +255,16 @@ export class Campaign {
    * For test mode, reads from stdin with timeout
    */
   async waitForReply(session, timeoutMs) {
+    // The operator may have typed their reply DURING the previous typing
+    // delay (the ENTER-skip listener stashed it). Serve it immediately,
+    // exactly as if it had arrived at this prompt.
+    if (this._earlyReply) {
+      const input = this._earlyReply;
+      this._earlyReply = null;
+      session.addReply(input);
+      console.log(`   ⌨️  (reply typed during typing delay: "${input}")`);
+      return input;
+    }
     return new Promise((resolve) => {
       let resolved = false;
 
@@ -313,8 +337,10 @@ export class Campaign {
       }
 
       const delay = antiBan.getTypingDelay(response.text);
-      console.log(`   💬 Thinking delay: ${Math.round(delay / 1000)}s`);
-      await this.sleep(delay);
+      console.log(`   💬 Thinking delay: ${Math.round(delay / 1000)}s (ENTER = skip)`);
+      if (await this.sleepWithEnterSkip(delay)) {
+        console.log(`   ⏩ thinking delay skipped — Ana types now`);
+      }
 
       // TERMINATE responses should NOT be sent to the owner (strike 3 protocol)
       if (response.type === 'TERMINATE') {
@@ -343,7 +369,7 @@ export class Campaign {
           console.log(`   📩 Reply: "${nextReply.substring(0, 80)}..."`);
           await this.handleReply(session, nextReply);
         } else {
-          const followUp = getFollowUpMessage();
+          const followUp = getFollowUpMessage(session.adMemory?.transactionType || session.collectedData?.transactionType);
           session.addSentMessage(followUp);
           session.followUpSent = true;
           antiBan.recordSent(session.phone);
@@ -437,7 +463,7 @@ export class Campaign {
           console.log(`   📩 Reply: "${termsReply.substring(0, 80)}..."`);
           await this.handleReply(session, termsReply);
         } else {
-          const followUp = getFollowUpMessage();
+          const followUp = getFollowUpMessage(session.adMemory?.transactionType || session.collectedData?.transactionType);
           session.addSentMessage(followUp);
           console.log(`   📤 Follow-up: "${followUp}"`);
           const termsReply2 = await this.waitForReply(session, 60000 * 10);
@@ -604,5 +630,51 @@ export class Campaign {
 
   sleep(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
+  }
+
+  /**
+   * Typing-delay sleep that the OPERATOR can skip with a bare ENTER — the
+   * old sim made you wait out the full anti-ban typing delay ("💬 Thinking
+   * delay: Ns"); now a bare ENTER during the countdown makes Ana type
+   * instantly, and typing a REAL reply during the delay stashes it so the
+   * next waitForReply() returns it immediately (you can pre-type your next
+   * answer while Ana "thinks"). The skipped ENTER is CONSUMED — it must
+   * NOT fall through to waitForReply as an empty reply (which would be read
+   * as "no reply" → follow-up). NOTE: cooked-mode stdin delivers per line,
+   * so only the FIRST line of a multi-line paste is stashed; later lines
+   * arrive as separate messages to the next waitForReply. Non-interactive
+   * runs (piped stdin, tests) just do the plain sleep; this.sleep stays
+   * the single override point.
+   *
+   * @param {number} ms — real anti-ban typing delay
+   * @returns {Promise<boolean>} true when the delay was skipped via stdin
+   */
+  async sleepWithEnterSkip(ms) {
+    if (!process.stdin.isTTY) return this.sleep(ms);
+    return new Promise((resolve) => {
+      let done = false;
+      const finish = (skipped) => {
+        if (done) return;
+        done = true;
+        process.stdin.removeListener('data', onData);
+        resolve(skipped);
+      };
+      const onData = (chunk) => {
+        // Cooked-mode stdin delivers per line, but a PASTED multi-line block
+        // can arrive as ONE chunk — only the first line is stashed (the rest
+        // arrive as separate messages to the next waitForReply).
+        const text = chunk.toString().split('\n')[0].trim();
+        if (text === '') {
+          finish(true);                        // bare ENTER → skip the delay
+        } else {
+          this._earlyReply = text;             // pre-typed reply → stash
+          finish(true);
+        }
+      };
+      process.stdin.on('data', onData);
+      // this.sleep honors test stubs and the real delay in production.
+      // .catch: a hostile stub could reject — never leak the listener.
+      this.sleep(ms).then(() => finish(false)).catch(() => finish(false));
+    });
   }
 }

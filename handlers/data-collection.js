@@ -62,21 +62,52 @@ export function runPendingConfirmation({ u, session }) {
 
   const pField = session.pendingConfirmation.field;
   const pValue = session.pendingConfirmation.value;
+  // REJECT CHECK MUST RUN BEFORE CONFIRM. The confirm regex has bare
+  // unanchored words (tocno, taka, tok, se, moze, ok), so a rejection like
+  // "ne e tocno" / "350 ne e taka" / "ne tok" would otherwise match the
+  // confirm branch first and WRONGLY confirm the pending value — the reject
+  // branch below would never get a chance (reported "350 ne e tocno" stuck
+  // as a false confirm). The two phrase sets are disjoint (ne*/greska vs
+  // da/tocno/moze/taka/ok), so checking reject first is safe: any reply
+  // starting with "ne" or containing a negation marker is a rejection or
+  // correction, never a confirmation. Extended with "ne e" (not it —
+  // "ne e 350", "350 ne e tocno") and leading "ne"/"не" ("ne, 400 e").
+  if (/^ne$|^не$|ne e tocno|не е точно|greska|грешка|pogresno|погрешно|ne e taka|не е така|ne tok|не ток|ne e|не е|^\s*ne\b|^\s*не\b/i.test(u)) {
+    session.pendingConfirmation = null;
+    console.log(`[REJECTED: ${pField} = ${JSON.stringify(pValue)} — ask again]`);
+    const propertyLabel = session.adMemory?.propertyType === 'apartment' ? 'станот' :
+                          session.adMemory?.propertyType === 'house' ? 'куќата' :
+                          session.adMemory?.propertyType === 'land' ? 'плацот' :
+                          session.adMemory?.propertyType === 'commercial' ? 'локалот' : 'имотот';
+    const confirmQuestion = getQuestion(pField, session.adMemory?.propertyType || 'apartment');
+    return { text: `Разбирам, да прашам повторно. ${confirmQuestion}`, type: "QUESTION", nextField: pField };
+  }
   // User confirms
   if (/^da$|^да$|tocno|точно|ok|океј|moze|може|se|се|potvrd|потврд|tocno e|точно е|taka e|така е|da taka e|да така е|potvrduvam|потврдувам|potvrdi|потврди|da e|да е|tocno e taka|точно е така|upravo|управо|tok|ток|taka|така/i.test(u)) {
     session.collectedData[pField] = pValue;
     session.collectedData[pField + 'Confidence'] = 0.95;
     session.pendingConfirmation = null;
+    // Confirmed value replaces any earlier skip marker
+    delete session.collectedData[pField + 'Skipped'];
     console.log(`[CONFIRMED: ${pField} = ${JSON.stringify(pValue)}]`);
     // Fall through to normal flow — field is now filled
   }
-  // User rejects — ask same question again
-  else if (/^ne$|^не$|ne e tocno|не е точно|greska|грешка|pogresno|погрешно|ne e taka|не е така|ne tok|не ток/i.test(u)) {
+  // OWNER REPEATS THE PENDING VALUE — that IS a confirmation, even without a
+  // "da". "350 TI REKOV DA", "KAZAV 350", "350 e", bare "350" in reply to
+  // "Дали точната вредност е 350?" previously fell into the digit branch
+  // below → pending was cleared → re-extraction scored MEDIUM again (no
+  // confidence keyword in "350 TI REKOV DA") → re-pended → the SAME
+  // confirmation question forever (reported stuck loop). A negation marker
+  // (word-boundary ne/не, ne e, greska...) blocks this so "ne, 400 e" or
+  // "350 ne e tocno" never confirm the pending value.
+  else if (typeof pValue === 'number' &&
+           !/(?:^|[^a-zа-я])(?:ne|не)(?:$|[^a-zа-я])|ne e|не е|greska|грешка|pogresno|погрешно|ne tocno|не точно|promeni|промени|izmeni|измени/i.test(u) &&
+           messageRepeatsValue(u, pValue)) {
+    session.collectedData[pField] = pValue;
+    session.collectedData[pField + 'Confidence'] = 0.95;
     session.pendingConfirmation = null;
-    console.log(`[REJECTED: ${pField} = ${JSON.stringify(pValue)} — ask again]`);
-    const propertyLabel = session.adMemory?.propertyType === 'apartment' ? 'станот' : 'имотот';
-    const confirmQuestion = getQuestion(pField, session.adMemory?.propertyType || 'apartment');
-    return { text: `Разбирам, да прашам повторно. ${confirmQuestion}`, type: "QUESTION", nextField: pField };
+    delete session.collectedData[pField + 'Skipped'];
+    console.log(`[CONFIRMED: ${pField} = ${JSON.stringify(pValue)} (owner repeated the value)]`);
   }
   // User provides a different number — let extraction handle it
   else if (/\d/.test(u) || /promeni|измени|izmeni|измени|cetiri|pet|sest|sedum|osum|devet|deset|stoti|iljadi|илјади|edna|dve|tri/i.test(u)) {
@@ -91,6 +122,19 @@ export function runPendingConfirmation({ u, session }) {
   }
 
   return null;
+}
+
+// ========================================
+// REPEAT-VALUE CONFIRMATION HELPER
+// The pending-confirmation question always names the value ("Дали точната
+// вредност е 350?"). An owner who repeats that same number back — "350",
+// "350 e", "350 TI REKOV DA", "KAZAV 350" — IS confirming, even without a
+// "da"/"tocno". Digit runs are compared numerically with separators (spaces,
+// commas, dots) stripped so "350" never matches inside "1350" or "3500".
+// ========================================
+function messageRepeatsValue(u, pValue) {
+  const digits = u.replace(/\s+/g, '').match(/\d+(?:[.,]\d+)?/g) || [];
+  return digits.some(d => Math.abs(parseFloat(d.replace(',', '.')) - pValue) < 0.01);
 }
 
 /**
@@ -125,7 +169,15 @@ export function runGlobalExtractionPass({ u, userInput, session, nextField }) {
       toStore[key] = value;
       toScores[key] = score;
       extractedLog.push({ key, value, score });
-    } else if (confidence === 'MEDIUM' && key === nextField) {
+    } else if (confidence === 'MEDIUM' && key === nextField &&
+               // NEVER re-pend a field that already has a value. nextField is
+               // computed in service.js BEFORE runPendingConfirmation runs, so
+               // after a just-confirmed value (e.g. monthlyRent=350 via "350 TI
+               // REKOV DA") it is stale and still points at the confirmed
+               // field. Without this guard the same message would be re-scored
+               // MEDIUM → re-pended → the identical confirmation question
+               // (reported stuck price loop).
+               (session.collectedData[key] === undefined || session.collectedData[key] === null)) {
       provisionalValue = { field: key, value };
       extractedLog.push({ key, value, score: 0.60, pending: true });
     } else if (confidence === 'MEDIUM') {
@@ -156,6 +208,10 @@ export function runGlobalExtractionPass({ u, userInput, session, nextField }) {
     if (session.collectedData[key] === undefined || session.collectedData[key] === null) {
       session.collectedData[key] = value;
       session.collectedData[key + 'Confidence'] = toScores[key] || 0.95;
+      // A real value just arrived — clear any stale skip marker from an earlier
+      // max-2-attempts skip (e.g. renovated was skipped as null, then the owner
+      // finally answered "NE E RENOVIRAN" → renovated=false at 0.95).
+      delete session.collectedData[key + 'Skipped'];
     }
   }
 
@@ -171,6 +227,126 @@ export function runGlobalExtractionPass({ u, userInput, session, nextField }) {
   return null;
 }
 
+// ========================================
+// PURE PHOTO-TALK DETECTION — used by the ownerName/address handlers.
+// When Ana asks "Како да ве запишам?" / "Која е адресата?" and the owner
+// instead replies about arranging photo delivery — "NA OVOJ BROJ TREBA"
+// ("[I'll send them] to this number"), "IMAM KE VI ISPRATAM", a bare phone
+// number, "KE VI PRATAM NA VIBER" — that is NOT a name/address and must
+// never be stored as one (reported bug: "NA OVOJ TREBA" was stored as the
+// owner name). Leading anchors keep real names safe: "ZORAN ATANASOV" or
+// "GORAN KE VI ISPRATAM SLIKI" (name + photo-talk) never match here — the
+// latter is handled by the ownerName tail-strip instead.
+// ========================================
+function isPurePhotoTalk(u) {
+  const t = u.trim();
+  const low = t.toLowerCase();
+  // 1. Strip leading photo-affirmative chatter ("imam", "imam sliki",
+  //    "da imam", "ima", "se" + separators) — that content is ABOUT the
+  //    photos, not a name. Repeated so "IMAM SLIKI / IMAM KE VI ISPRATAM"
+  //    and "DA, IMAM SLIKI, KE VI PRATAM" all reduce to the delivery talk.
+  //    A name like "DAVID"/"IMAN"/"IMAMOV" is never emptied (strip only
+  //    consumes exact affirmative tokens + separators), so real names stay
+  //    intact and fall through to normal storage.
+  const stripped = low.replace(/^(?:(?:imam|имам|ima|има|da|да|se|се)\s*(?:(?:sliki|слики|fotografii|фотографии)\s*)?[,/:\s]*)+/, '');
+  const s = stripped.trim();
+  // The message was ONLY photo affirmatives ("DA IMAM SLIKI") → photo-talk.
+  if (s === '') return true;
+  // 2. Delivery-target phrases: "na ovoj broj" (to this number), "na ovoj",
+  //    "na brojot" / "на бројот" (to the number), "na viber" / "на вајбер",
+  //    "na viberot" / "на вајберот", "tuka" (here). Letter-boundary matching
+  //    (not \b — Cyrillic) so "ovoj"/"viber" must be followed by a
+  //    non-letter — "NA VIBEROVA ULICA" (a street name) never matches.
+  if (/^(?:na|на)\s+(?:ovoj|овој|ovaa|оваа|ova|ova|brojot|бројот)(?:$|[^a-zа-я])/.test(s)) return true;
+  if (/^(?:na|на)\s+(?:viber|vajber|вајбер|viberot|вајберот)(?:$|[^a-zа-я])/.test(s)) return true;
+  if (/^(?:tuka|тука)(?:$|[^a-zа-я])/.test(s)) return true;
+  // 2b. "zemi mi na viber" / "земи ги на вајбер" — the owner tells Ana to
+  //     TAKE the photos from them on Viber (a delivery arrangement, same
+  //     class as "ke vi ispratam na viber"). Requires a pronoun and/or
+  //     target after "zemi" so a word like "ZEMIROV" (no space after
+  //     "zemi") can never match.
+  if (/^zemi\s+(?:(?:mi|ми|gi|ги)\s+){0,2}(?:na\s+)?(?:viber|vajber|вајбер|brojot|бројот|broj|број)?(?:$|[^a-zа-я])/.test(s)) return true;
+  // 3. Delivery commitments: "ke vi ispratam", "ke gi pratam", bare
+  //    "ispratam"/"pratam" — with a letter-boundary guard so a surname like
+  //    "PRATAMOV" never matches ("pratam" + "ov"). Pronouns are bilingual
+  //    AND repeatable (1-2): "ќе ви испратам", "ќе ги пратам",
+  //    "ќе ви ги испратам" all reduce to the commitment verb.
+  if (/^(?:(?:ke|ќе)\s+(?:(?:vi|ви|ти|ti|gi|ги|gu|гу)\s+){0,2})?(?:ispratam|испратам|pratam|пратам|prakj|праќам|pushtam|пуштам)(?:$|[^a-zа-я])/.test(s)) return true;
+  // 4. Bare phone number — the delivery target, never a name/address
+  if (/^\+?[0-9][0-9\s\-–/]{6,15}$/.test(t) && t.replace(/\D/g, '').length >= 7) return true;
+  return false;
+}
+
+// ========================================
+// NON-NAME STOPLIST — words that commonly follow "jas sum" / "ja sum" but
+// are NOT names ("jas sum zainteresiran" = "I am interested"). Used by the
+// ownerName name-marker extraction to refuse storing a continuation word as
+// the owner's name. Keep domain-relevant (cooperation/status vocabulary), so
+// genuine "jas sum Goran" answers still pass.
+// ========================================
+const NON_NAME_STOPLIST = /^(?:zainteresiran|zainteresirana|zainteresirani|zainteresiran?|siguren|sigurna|sigureni|klient|klientka|klienti|zaposlen|zaposlena|vraboten|vrabotena|sloboden|slobodna|dostapen|dostapna|pensioner|pensionerka|sopstvenik|sopstvenicka)$/i;
+
+// ========================================
+// OWNER-NAME PREFIX LEXICON — conversational naming words that must be
+// stripped so ONLY the name is stored ("PISI GORAN" → "Goran", never "Pisi
+// Goran"). Both scripts + the common Viber spellings WITHOUT the "h"
+// ("pisi", "zapisi", "zapisete") and the 1st-person copula ("jas sum" /
+// "јас сум"). IMPORTANT: longest patterns FIRST — "пиши ме како " before
+// "пиши ме " before "пиши ". Reported: only "pishi" (with h) was in the
+// list, so "PISI GORAN" kept its prefix and stored "Pisi Goran". Applied
+// twice (with a separator strip between) in the ownerName handler so CHAINED
+// prefixes like "jas sum, pisi goran" reduce fully.
+//
+// Every pattern ends with (?:[\s,;:]+|$) — a separator OR end-of-string —
+// for three reasons: (1) chained prefixes separated by punctuation
+// ("JAS SUM, PISI GORAN") still reduce, (2) a BARE prefix word ("PISI" —
+// the owner typed only the instruction, no name) consumes the whole message
+// so nothing is stored and Ana re-asks instead of writing "Pisi" as a name,
+// and (3) a surname that merely CONTAINS a prefix word ("PISIMOV") never
+// matches (no separator after "pisi"). The "како"/"kako" ("as") clause is
+// ONLY stripped when a naming verb precedes it — it's folded into the
+// "може да ... запишете" patterns as an optional group, so "МОЖЕ ДА МЕ
+// ЗАПИШЕТЕ КАКО ГОРАН" reduces in ONE pass. There is deliberately NO
+// standalone "kako" pattern: a bare leading "како" without a naming verb
+// ("KAKO BILO" = "however", or an owner echoing "КАКО ДА МЕ ЗАПИШЕТЕ?") is
+// not a naming answer and must never be consumed — that would store
+// "Bilo"/"Da Me Zapishete" as a name (reviewer-flagged over-match).
+// ========================================
+const OWNER_NAME_PREFIX_RE = /^(?:може\s+да\s+ме\s+запишете(?:\s+како)?(?:[\s,;:]+|$)|може\s+да\s+ме\s+запишеш(?:\s+како)?(?:[\s,;:]+|$)|пиши\s+ме\s+како(?:[\s,;:]+|$)|запиши\s+ме\s+како(?:[\s,;:]+|$)|стави\s+ме\s+како(?:[\s,;:]+|$)|внеси\s+ме\s+како(?:[\s,;:]+|$)|запишете\s+ме\s+како(?:[\s,;:]+|$)|запишете\s+ме(?:[\s,;:]+|$)|пиши\s+ме(?:[\s,;:]+|$)|запиши\s+ме(?:[\s,;:]+|$)|стави\s+ме(?:[\s,;:]+|$)|внеси\s+ме(?:[\s,;:]+|$)|може\s+да\s+запишеш(?:\s+како)?(?:[\s,;:]+|$)|може\s+да\s+запишете(?:\s+како)?(?:[\s,;:]+|$)|пиши[й]?(?:[\s,;:]+|$)|запиши[й]?(?:[\s,;:]+|$)|стави(?:[\s,;:]+|$)|внеси(?:[\s,;:]+|$)|запишете(?:[\s,;:]+|$)|јас\s+сум(?:[\s,;:]+|$)|ја\s+сум(?:[\s,;:]+|$)|moze\s+da\s+me\s+zapishete(?:\s+kako)?(?:[\s,;:]+|$)|moze\s+da\s+me\s+zapisete(?:\s+kako)?(?:[\s,;:]+|$)|moze\s+da\s+me\s+zapishesh(?:\s+kako)?(?:[\s,;:]+|$)|moze\s+da\s+me\s+zapisesh(?:\s+kako)?(?:[\s,;:]+|$)|pishi\s+me\s+kako(?:[\s,;:]+|$)|pisi\s+me\s+kako(?:[\s,;:]+|$)|zapishi\s+me\s+kako(?:[\s,;:]+|$)|zapisi\s+me\s+kako(?:[\s,;:]+|$)|stavi\s+me\s+kako(?:[\s,;:]+|$)|vnesi\s+me\s+kako(?:[\s,;:]+|$)|zapishete\s+me\s+kako(?:[\s,;:]+|$)|zapisete\s+me\s+kako(?:[\s,;:]+|$)|zapishete\s+me(?:[\s,;:]+|$)|zapisete\s+me(?:[\s,;:]+|$)|pishi\s+me(?:[\s,;:]+|$)|pisi\s+me(?:[\s,;:]+|$)|zapishi\s+me(?:[\s,;:]+|$)|zapisi\s+me(?:[\s,;:]+|$)|stavi\s+me(?:[\s,;:]+|$)|vnesi\s+me(?:[\s,;:]+|$)|moze\s+da\s+zapishesh(?:\s+kako)?(?:[\s,;:]+|$)|moze\s+da\s+zapisesh(?:\s+kako)?(?:[\s,;:]+|$)|moze\s+da\s+zapishete(?:\s+kako)?(?:[\s,;:]+|$)|moze\s+da\s+zapisete(?:\s+kako)?(?:[\s,;:]+|$)|pishi(?:[\s,;:]+|$)|pisi(?:[\s,;:]+|$)|zapishi(?:[\s,;:]+|$)|zapisi(?:[\s,;:]+|$)|stavi(?:[\s,;:]+|$)|vnesi(?:[\s,;:]+|$)|zapishete(?:[\s,;:]+|$)|zapisete(?:[\s,;:]+|$)|jas\s+sum(?:[\s,;:]+|$)|ja\s+sum(?:[\s,;:]+|$))/i;
+
+// ========================================
+// ENSURE PHOTO DELIVERY PENDING — the owner just promised to send photos
+// ("I'll send them to this number"). Mark VIBER_PENDING if not already in
+// a delivery/resolved state, and clear any earlier photos-skip marker.
+// ========================================
+function ensurePhotoDeliveryPending(session) {
+  const d = session.collectedData;
+  if (d.photosStatus === 'VIBER_PENDING' || d.photosStatus === 'VIBER_RECEIVED') return;
+  d.photosPermission = true;
+  d.photosSource = 'VIBER_PENDING';
+  d.photosStatus = 'VIBER_PENDING';
+  d.photos = true;
+  d.photosPending = false;
+  delete d.photosSkipped;
+  console.log(`[PHOTOS: VIBER_PENDING — owner is arranging photo delivery]`);
+}
+
+// ========================================
+// PHOTO-TALK MENTION — loose check used ONLY by the composite paths: a name
+// or address answer that ALSO mentions photo delivery ("IMAM SLIKI, ... IME:
+// GORAN") should acknowledge the photos promise (VIBER_PENDING) while still
+// storing the name/address. Negated photos ("NEMA SLIKI") are NOT a delivery
+// promise. Letter-boundary guarded so surnames like "Zemirov"/"Viberova" or
+// the word "fotograf" (photographer) never count as photo-talk.
+// ========================================
+function mentionsPhotoTalk(u) {
+  if (/(?:nema|нема|nemam|немам|bez|без)\s+(?:sliki|слики|slikite|сликите|fotografii|фотографии|fotografite|фотографиите)/i.test(u)) return false;
+  // Definite-article forms ("slikite", "фотографиите", "viberot") included
+  // so "GORAN, SLIKITE KE VI GI PRATAM" acks delivery — the pure guard
+  // already recognizes "viberot|вајберот".
+  return /(?:^|[^a-zа-я])(?:sliki|слики|slikite|сликите|fotografii|фотографии|fotografite|фотографиите|ispratam|испратам|pratam|пратам|prakj|праќам|pushtam|пуштам|zemi|земи|viber|вајбер|vajber|viberot|вајберот)(?:$|[^a-zа-я])/i.test(u);
+}
+
 /**
  * COMPLEX STATEFUL HANDLERS (Data Collection only).
  * These have early returns (follow-up questions) or complex state machine
@@ -179,8 +355,28 @@ export function runGlobalExtractionPass({ u, userInput, session, nextField }) {
  * @returns {Object|null} — { text, type } response, or null to continue
  */
 export function runComplexStatefulHandlers({ u, userInput, session, nextField, hasScraperPhotos }) {
+  // LAND GUARD — land properties (plac/niva/parcela/земјиште...) have NO
+  // building features. The workflow whitelist never ASKS terrace/heating for
+  // land, but the extraction branches below are NOT nextField-gated: without
+  // this guard a land owner answering the sqm question with a bare number
+  // ("60") and no price/sqm context would store a phantom
+  // hasTerrace=true/terraceSqm=60, and a stray "parno" mention would start a
+  // heating follow-up — building data on a plot. Skip the terrace and heating
+  // sections entirely for land leads (photos/ownerName/address are already
+  // nextField-gated, so they stay untouched).
+  const isLandLead = session.adMemory?.propertyType === 'land' || session.collectedData?.propertyType === 'land';
+  // COMMERCIAL GUARD (terrace only) — business properties (локал/офис/магацин...)
+  // have NO terrace in their whitelist (and no bedrooms/elevator), but the
+  // terrace extraction branch is NOT nextField-gated: a commercial owner
+  // answering the sqm question with a bare number ("80") and no price/sqm
+  // context would store a phantom hasTerrace=true/terraceSqm=80 — residential
+  // data on a business unit. Heating is NOT skipped here: the workflow ASKS
+  // heating for commercial, and the parno-follow-up is legitimately part of
+  // that flow (a business space has heating too).
+  const isCommercialLead = session.adMemory?.propertyType === 'commercial' || session.collectedData?.propertyType === 'commercial';
+
   // === terraceSqm (Handles ALL cases) ===
-  if (session.collectedData.terraceSqm === undefined && session.collectedData.hasTerrace === undefined) {
+  if (!isLandLead && !isCommercialLead && session.collectedData.terraceSqm === undefined && session.collectedData.hasTerrace === undefined) {
 
     // PENDING FOLLOW-UP: When we just asked "kolku kvadrati?", process the
     // reply with "ne znam" and "nema" checks FIRST, before number extraction.
@@ -209,6 +405,19 @@ export function runComplexStatefulHandlers({ u, userInput, session, nextField, h
           session.collectedData.terraceSqm = firstNum;
           session.pendingFollowUp = null;
           console.log(`[TERRACE: ${firstNum}m2]`);
+        }
+        // TERRACE-COUNT ANSWER (reported): "imaima terasi 2" / "ima 2 terasi"
+        // — the owner answered the follow-up with the NUMBER OF TERRACES, not
+        // the m² size (extractTerraceNumber refuses bare counts next to the
+        // plural forms). The terrace EXISTS but its size stays unknown —
+        // resolve exactly like "ne znam" instead of clearing pending and
+        // re-asking forever (the normal-flow branch below would otherwise
+        // re-arm the follow-up on the terrace/ima context and loop).
+        else if (/terasa|тераса|terrace|teras|терас|(?:^|[^a-zа-я])ima(?:$|[^a-zа-я])|(?:^|[^a-zа-я])има(?:$|[^a-zа-я])/i.test(u)) {
+          session.collectedData.hasTerrace = true;
+          session.collectedData.terraceSqm = null;
+          session.pendingFollowUp = null;
+          console.log(`[TERRACE: yes, count given (not m²) — size unknown]`);
         } else {
           // Nothing matched — clear pending so normal flow resumes
           session.pendingFollowUp = null;
@@ -276,16 +485,25 @@ export function runComplexStatefulHandlers({ u, userInput, session, nextField, h
   // is the current question (e.g. "IMA LIFT,KLIMA , PARNO , NAMESTEN").
   // Previously bare "parno" was silently lost because this handler only ran
   // when nextField==='heating' or a follow-up was already pending.
+  // EXPLICIT NON-ANSWER to the "Какво парно?" follow-up — the ONLY case that
+  // may default heating to parno_unknown. Reported bug: bare "parno" was
+  // mentioned as BONUS info, the follow-up got pending, and then an UNRELATED
+  // message (e.g. "parking mesto na -1 vo centar") was consumed as a heating
+  // non-answer → heating wrongly stored as parno_unknown/unknown with no
+  // clarification. Only an explicit "не знам"-family reply defaults; anything
+  // else while the follow-up is pending re-asks the question.
+  const heatingNonAnswer = /(?:^|[^a-zа-я])(?:ne|не)\s+(?:znam|знам)(?:\s+(?:tocno|tochno|точно|sigurno|сигурно))?(?:$|[^a-zа-я])|(?:^|[^a-zа-я])(?:ne|не)\s+sum\s+(?:siguren|сигурен|sigurna|сигурна)(?:$|[^a-zа-я])|(?:^|[^a-zа-я])(?:ne|не)\s+(?:mozam|можам)\s+da\s+(?:kazam|кажам)(?:$|[^a-zа-я])|(?:^|[^a-zа-я])(?:ne|не)\s+se\s+(?:secavam|сеќавам)(?:$|[^a-zа-я])|(?:^|[^a-zа-я])(?:nema|нема|nemam|немам)\s+(?:poim|поим)(?:$|[^a-zа-я])/i;
   const parnoMentioned = /parno|парно/i.test(u) && !/nema parno|нема парно|nemame parno|немаме парно|nemaat parno|немаат парно|bez parno|без парно|ne e parno|не е парно/i.test(u);
-  if (nextField === 'heating' || session.collectedData.heatingFollowUp ||
-      (parnoMentioned && !session.collectedData.heating)) {
-    if (/gradsko|градско|граѓско|dalinsko|dalecno|далечно|toplovod|beg/i.test(u)) {
+  // (isLandLead skips this entire branch — see the LAND GUARD at the top.)
+  if (!isLandLead && (nextField === 'heating' || session.collectedData.heatingFollowUp ||
+      (parnoMentioned && !session.collectedData.heating))) {
+    if (/gradsko|градско|граѓско|dalinsko|dalecno|далечно|toplovod|beg|centralno|централно|central/i.test(u)) {
       session.collectedData.heating = "district";
       session.collectedData.heatingType = "district";
       session.collectedData.heatingFollowUp = false;
       session.pendingFollowUp = null;
       console.log(`[HEATING: district]`);
-    } else if (/centralno|централно|central|sopstveno|сопствено|individualno|индивидуално|svoja|своја|kotel|kotlarnica|котларница|сопствена|sopstvena|moe|мое|nase|наше|licno|лично|zgradata|зградата|na zgradata|на зградата|sopstveno parno|сопствено парно|moe parno|мое парно|nase parno|наше парно|licno parno|лично парно|parno moe|парно мое|parno nase|парно наше|parno licno|парно лично|parno na zgradata|парно на зградата|sopstveno|сопствено|sopstveno parno|сопствено парно/i.test(u)) {
+    } else if (/sopstveno|сопствено|individualno|индивидуално|svoja|своја|kotel|kotlarnica|котларница|сопствена|sopstvena|moe|мое|nase|наше|licno|лично|zgradata|зградата|na zgradata|на зградата|sopstveno parno|сопствено парно|moe parno|мое парно|nase parno|наше парно|licno parno|лично парно|parno moe|парно мое|parno nase|парно наше|parno licno|парно лично|parno na zgradata|парно на зградата|sopstveno|сопствено|sopstveno parno|сопствено парно/i.test(u)) {
       session.collectedData.heating = "central";
       session.collectedData.heatingType = "private_central";
       session.collectedData.heatingFollowUp = false;
@@ -325,12 +543,48 @@ export function runComplexStatefulHandlers({ u, userInput, session, nextField, h
       session.pendingFollowUp = null;
       console.log(`[HEATING: ${session.collectedData.heatingType}]`);
     }
+    // The follow-up is pending but this message did NOT resolve it. Only an
+    // explicit non-answer ("ne znam" family — the owner actually saw the
+    // question and can't answer) defaults to parno_unknown. An unrelated
+    // message (bonus info about ANOTHER field — the reported bug) or a
+    // repeated bare "parno" is NOT an answer to "Какво парно?" — re-ask the
+    // follow-up so the owner actually gets asked, keeping heating unset until
+    // then (a message must never silently default heating to unknown).
     if (session.collectedData.heatingFollowUp) {
-      session.collectedData.heating = "parno_unknown";
-      session.collectedData.heatingType = "unknown";
-      session.collectedData.heatingFollowUp = false;
-      session.pendingFollowUp = null;
-      console.log(`[HEATING: parno_unknown (defaulted)]`);
+      if (heatingNonAnswer.test(u)) {
+        session.collectedData.heating = "parno_unknown";
+        session.collectedData.heatingType = "unknown";
+        session.collectedData.heatingFollowUp = false;
+        session.pendingFollowUp = null;
+        console.log(`[HEATING: parno_unknown (owner doesn't know — defaulted)]`);
+      } else {
+        // RE-ASK — with a max-2 re-ask cap (mirrors the max-2-attempts skip
+        // for regular fields): an owner who keeps sending unrelated messages
+        // without answering must not pin the conversation on the heating
+        // question forever. After 2 unanswered re-asks, default to unknown.
+        // NOTE: while the follow-up is pending, global extraction is skipped
+        // (runGlobalExtractionPass early-returns on pendingFollowUp), so
+        // unrelated bonus info in these messages is not extracted — a
+        // pre-existing follow-up design property, accepted here to preserve
+        // the reported requirement (bare parno must be clarified, not
+        // silently defaulted).
+        const reAskCount = session.collectedData.heatingFollowUpAttempts || 0;
+        if (reAskCount >= 2) {
+          session.collectedData.heating = "parno_unknown";
+          session.collectedData.heatingType = "unknown";
+          session.collectedData.heatingFollowUp = false;
+          session.pendingFollowUp = null;
+          delete session.collectedData.heatingFollowUpAttempts;
+          console.log(`[HEATING: parno_unknown (max re-asks reached)]`);
+        } else {
+          session.collectedData.heatingFollowUpAttempts = reAskCount + 1;
+          console.log(`[HEATING: follow-up re-asked (${reAskCount + 1}/2) — message is not a heating answer]`);
+          return {
+            text: "Какво парно? Градско или сопствено?",
+            type: "QUESTION"
+          };
+        }
+      }
     }
   }
 
@@ -422,15 +676,68 @@ export function runComplexStatefulHandlers({ u, userInput, session, nextField, h
   // "пиши ме како" (write me as), "може да запишеш" (you can write).
   // Never store instruction words as part of the name.
   if (nextField === 'ownerName') {
+    // EXPLICIT NAME MARKER — the owner LABELS their name inside a multi-part
+    // message: "IME: GORAN", "ИМЕТО МИ Е ГОРАН", "SE VIKAM GORAN",
+    // "ЗОВИ МЕ ГОРАН", "JAS SUM GORAN". The label wins over both the
+    // tail-strip (which would mangle it) and the pure guard (which would
+    // re-ask despite the name being present). Any photo-talk in the same
+    // message is acknowledged as VIBER_PENDING. Letter-boundary anchored so
+    // words containing "ime" ("vreme", surname "Dimev") never match.
+    const nameLabelMatch = userInput.match(
+      /(?:^|[^a-zа-я])(?:(?:името|imeto|име|ime)\s+(?:ми\s+|mi\s+)?е\s+|(?:името|imeto|име|ime)\s*:?\s*|se\s+vikam\s+|се\s+викам\s+|zovi\s+me\s+|зови\s+ме\s+|jas\s+sum\s+|јас\s+сум\s+|ja\s+sum\s+|ја\s+сум\s+)([A-Za-zА-Яа-я][A-Za-zА-Яа-я'’\-]*(?:\s+[A-Za-zА-Яа-я][A-Za-zА-Яа-я'’\-]*)?)/i
+    );
+    if (nameLabelMatch) {
+      // Cut at a standalone "и"/"i" (and) — "ИМЕ Е ГОРАН И САКАМ..." keeps
+      // only the name, not the conjunction + conversational tail.
+      const labeled = nameLabelMatch[1].trim()
+        // Cut at a standalone "и"/"i" (and) — "ГОРАН И САКАМ..." keeps only
+        // the name, not the conjunction + conversational tail. Letter-boundary
+        // so surnames like "Ilievska" (and-prefixed inside a word) survive.
+        .split(/\s+(?:i|и)(?:$|[^a-zа-я])/i)[0]
+        .replace(/^[,;:\s]+|[,;:.\s]+$/g, '');
+      // NON-NAME STOPLIST — "JAS SUM ZAINTERESIRAN" (I am interested) at the
+      // name prompt must never store "Zainteresiran" as the owner name. The
+      // "jas sum" marker is ambiguous (often followed by a statement, not a
+      // name); a stoplisted capture is a non-answer → re-ask, never store.
+      if (labeled.length > 0 && !NON_NAME_STOPLIST.test(labeled)) {
+        if (mentionsPhotoTalk(userInput)) ensurePhotoDeliveryPending(session);
+        const labeledName = labeled.replace(/\S+/g, w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase());
+        session.collectedData.ownerName = labeledName;
+        console.log(`[OWNER NAME: ${labeledName}] (labeled in "${userInput.trim()}")`);
+        return null; // name answered — continue to the next field
+      }
+      if (labeled.length > 0 && NON_NAME_STOPLIST.test(labeled)) {
+        console.log(`[OWNER NAME: label "${labeled}" is a non-name — re-asking, NOT stored]`);
+        return {
+          text: 'Само да потврдам, како да ве запишам?',
+          type: "QUESTION",
+          nextField: 'ownerName'
+        };
+      }
+    }
+    // PURE PHOTO-TALK GUARD — the owner is arranging photo delivery, not
+    // answering the name question: "NA OVOJ BROJ TREBA" ("[I'll send them]
+    // to this number"), "IMAM KE VI ISPRATAM", "KE VI PRATAM NA VIBER", or
+    // a bare phone number must NEVER be stored as the owner name (reported
+    // bug). Acknowledge the delivery (photos=VIBER_PENDING) and re-ask the
+    // name — the owner never answered it, so attempts stay uncounted.
+    if (isPurePhotoTalk(userInput)) {
+      ensurePhotoDeliveryPending(session);
+      console.log(`[OWNER NAME: pure photo-talk — NOT stored, photos=VIBER_PENDING, re-asking]`);
+      return {
+        text: 'Разбирам, ги очекувам фотографиите на Viber. Само да потврдам, како да ве запишам?',
+        type: "QUESTION",
+        nextField: 'ownerName'
+      };
+    }
     if (userInput.trim().length > 0) {
       let cleaned = userInput.trim();
       // Strip known Macedonian conversational prefixes (Latin and Cyrillic)
-      // IMPORTANT: Longest patterns MUST come FIRST in the alternation.
-      // Otherwise "пиши " (short) matches before "пиши ме како " (long),
-      // leaving "ме како Ана" as the name instead of just "Ана".
-      cleaned = cleaned.replace(/^(?:пиши\s+ме\s+како\s+|запиши\s+ме\s+како\s+|стави\s+ме\s+како\s+|може\s+да\s+запишеш\s+|може\s+да\s+ме\s+запишете\s+|внеси\s+ме\s+како\s+|запишете\s+|пиши[й]?\s+|запиши[й]?\s+|стави\s+|внеси\s+|pishi\s+me\s+kako\s+|zapishi\s+me\s+kako\s+|stavi\s+me\s+kako\s+|moze\s+da\s+zapishesh\s+|moze\s+da\s+me\s+zapishete\s+|vnesi\s+me\s+kako\s+|zapishete\s+|pishi\s+|zapishi\s+|stavi\s+|vnesi\s+)/i, '');
-      // Strip leading/trailing whitespace after prefix removal
-      cleaned = cleaned.trim();
+      // via the shared lexicon (OWNER_NAME_PREFIX_RE — longest patterns
+      // FIRST, see the const above). Applied TWICE with a separator strip in
+      // between so CHAINED prefixes reduce fully: "JAS SUM, PISI GORAN" →
+      // "jas sum" → ", pisi goran" → "pisi goran" → "goran".
+      cleaned = cleaned.replace(OWNER_NAME_PREFIX_RE, '').replace(/^[,;:\s]+/, '').replace(OWNER_NAME_PREFIX_RE, '').trim();
       // Truncate at conversational tails — owners often append chatty text
       // after giving their name (e.g. "GORAN I BI SAKALDA SE ZAPOZNAEME" =
       // "Goran and I would like to get to know you"). Only the name part
@@ -440,16 +747,25 @@ export function runComplexStatefulHandlers({ u, userInput, session, nextField, h
       // "ke te", "da se zapoznaeme", "sto e", "kako si", "izvini",
       // "povikaj me", "dodadi me", "moze da", "treba da"...
       cleaned = cleaned
-        .split(/[.!?…]+/)[0]
+        // Period-aware sentence split: a period cuts the chatty tail
+        // ("ZORAN ATANASOV. KE SE JAVAM UTRE" → "Zoran Atanasov"), but a
+        // period right after a SINGLE-LETTER initial must NOT cut ("G. PETROV"
+        // stays whole — lookbehind requires 2+ letters before the period).
+        .split(/(?<=[A-Za-zА-Яа-я]{2})\.\s+|[!?…]+/)[0]
         // Letter-boundary guard (?![a-zа-я]) after the marker: prevents
         // truncating surnames that CONTAIN a marker word (e.g. "Mislamov"
         // must not be cut to "Mislam"). The (?:da)? on the bi-sakal
         // variants keeps the merged form "BI SAKALDA" truncating correctly.
-        .replace(/\s+(?:i\s+)?(?:bi\s+sakal(?:da)?|би\s+сакал(?:да)?|bi\s+sakala(?:da)?|би\s+сакала(?:да)?|mislam|мислам|sakam|сакам|znam|знам|ke\s+te|ќе\s+те|da\s+se\s+zapoznaeme|да\s+се\s+запознаеме|sto\s+e|што\s+е|kako\s+si|како\s+си|izvini|извини|povikaj\s+me|повикај\s+ме|dodadi\s+me|додади\s+ме|mozе\s+da|може\s+да|treba\s+da|треба\s+да)(?![a-zа-я]).*$/i, '')
+        .replace(/\s+(?:i\s+)?(?:bi\s+sakal(?:da)?|би\s+сакал(?:да)?|bi\s+sakala(?:da)?|би\s+сакала(?:да)?|mislam|мислам|sakam|сакам|znam|знам|ke\s+te|ќе\s+те|da\s+se\s+zapoznaeme|да\s+се\s+запознаеме|sto\s+e|што\s+е|kako\s+si|како\s+си|izvini|извини|povikaj\s+me|повикај\s+ме|dodadi\s+me|додади\s+ме|mozе\s+da|може\s+да|treba\s+da|треба\s+да|ke\s+vi\s+ispratam|ќе\s+ви\s+испратам|ke\s+vi\s+pratam|ќе\s+ви\s+пратам|ke\s+gi\s+ispratam|ќе\s+ги\s+испратам|ke\s+gi\s+pratam|ќе\s+ги\s+пратам|ke\s+ispratam|ќе\s+испратам|ke\s+pratam|ќе\s+пратам|ispratam|испратам|pratam|пратам|imam|имам|sliki|слики|slikite|сликите|fotografii|фотографии|fotografite|фотографиите|na\s+ovoj\s+broj|на\s+овој\s+број|na\s+viber|на\s+вајбер|viber|вајбер|viberot|вајберот|zemi|земи|telefon|телефон)(?![a-zа-я]).*$/i, '')
+        // Strip a trailing phone number ("GORAN 070123456" → "GORAN")
+        .replace(/\s+\+?[0-9][0-9\s\-–/]{6,}$/, '')
         // Strip trailing separators left after truncation (e.g. "GORAN,")
-        .replace(/[,;:]+\s*$/, '')
+        .replace(/[,;:.]+\s*$/, '')
         .trim();
       if (cleaned.length > 0) {
+        // A name + photo-talk combo ("GORAN, IMAM SLIKI KE VI PRATAM...")
+        // acknowledges the delivery promise too.
+        if (mentionsPhotoTalk(userInput)) ensurePhotoDeliveryPending(session);
         // Title-case each word: first letter uppercase, rest lowercase
         cleaned = cleaned.replace(/\S+/g, w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase());
         session.collectedData.ownerName = cleaned;
@@ -459,10 +775,40 @@ export function runComplexStatefulHandlers({ u, userInput, session, nextField, h
   }
 
   // === address (gated — must be asked explicitly) ===
+  // PURE PHOTO-TALK GUARD — same as ownerName: "NA OVOJ BROJ TREBA" / a
+  // bare phone number is a photo-delivery arrangement, never an address.
   if (nextField === 'address') {
+    if (isPurePhotoTalk(userInput)) {
+      ensurePhotoDeliveryPending(session);
+      console.log(`[ADDRESS: pure photo-talk — NOT stored, photos=VIBER_PENDING, re-asking]`);
+      return {
+        text: 'Разбирам, ги очекувам фотографиите на Viber. Само да потврдам, која е точната адреса?',
+        type: "QUESTION",
+        nextField: 'address'
+      };
+    }
     if (userInput.trim().length > 0) {
-      session.collectedData.address = userInput.trim();
-      console.log(`[ADDRESS: ${session.collectedData.address}]`);
+      let cleaned = userInput.trim();
+      // EXPLICIT ADDRESS MARKER — "АДРЕСА: УЛ. 12", "adresata e ul. 12" —
+      // the owner labels the address inside a multi-part message.
+      const addrLabel = cleaned.match(/(?:^|[^a-zа-я])(?:адресата|adresata|адреса|adresa)\s*(?:е|e)?\s*:?\s*([^\n,;]+)/i);
+      if (addrLabel) cleaned = addrLabel[1].trim();
+      // PHOTO-TALK TAIL STRIP — same markers as ownerName: a photo-delivery
+      // tail after the address ("UL. PARTIZANSKA 12, IMAM SLIKI KE VI
+      // PRATAM NA VIBER") must never be stored as part of the address.
+      cleaned = cleaned
+        // NOTE: no period in the split — street abbreviations "ул."/"UL."
+        // (Ulica) are ubiquitous in addresses and a period-split would cut
+        // "UL. PARTIZANSKA 12" to just "UL". Only ! ? … end a sentence here.
+        .split(/[!?…]+/)[0]
+        .replace(/\s+(?:imam|имам|sliki|слики|slikite|сликите|fotografii|фотографии|fotografite|фотографиите|ispratam|испратам|pratam|пратам|prakj|праќам|pushtam|пуштам|ke\s+vi\s+ispratam|ќе\s+ви\s+испратам|ke\s+vi\s+pratam|ќе\s+ви\s+пратам|ke\s+gi\s+ispratam|ќе\s+ги\s+испратам|ke\s+gi\s+pratam|ќе\s+ги\s+пратам|ke\s+ispratam|ќе\s+испратам|ke\s+pratam|ќе\s+пратам|na\s+ovoj\s+broj|на\s+овој\s+број|na\s+viber|на\s+вајбер|viber|вајбер|viberot|вајберот|zemi|земи)(?![a-zа-я]).*$/i, '')
+        .replace(/[,;:.\s]+$/, '')
+        .trim();
+      if (cleaned.length > 0) {
+        if (mentionsPhotoTalk(userInput)) ensurePhotoDeliveryPending(session);
+        session.collectedData.address = cleaned;
+        console.log(`[ADDRESS: ${cleaned}] (cleaned from "${userInput.trim()}")`);
+      }
     }
   }
 
@@ -602,7 +948,8 @@ export function runDataCollectionFlow({ u, userInput, session, adMemory, hasScra
 
     const propertyLabel = known.propertyType === 'apartment' ? 'станот' :
                           known.propertyType === 'house' ? 'куќата' :
-                          known.propertyType === 'land' ? 'плацот' : 'имотот';
+                          known.propertyType === 'land' ? 'плацот' :
+                          known.propertyType === 'commercial' ? 'локалот' : 'имотот';
 
     // ========================================
     // MAX 2 ATTEMPTS PRECHECK (BEFORE asking)

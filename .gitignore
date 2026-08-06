@@ -5,8 +5,10 @@ data/*.jsonl
 data/*.csv
 data/*.json
 data/*.log
-# ...but keep the sim lead fixtures tracked — they are INPUTS to run-live-sim.js
+# ...but keep the lead fixtures tracked — they are INPUTS to run-live-sim.js and
+# interactive-test.js (the multi-lead TUI boots on data/multi-leads-sample.csv)
 !data/sim-leads-*.csv
+!data/multi-leads-sample.csv
 # Runtime data generated at project-relative defaults (config.js)
 data/blocked-numbers.json
 data/properties/

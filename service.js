@@ -13,6 +13,12 @@
 //
 // Public API unchanged: generateFirstMessage() and generateResponse().
 // ========================================
+import './env.js'; // side-effect: load ~/.ana/ana.env (see env.js) — never a .env* file in CWD.
+// service.js is the package.json `main` entry — running `node service.js`
+// directly must get the API key from the real env or ~/.ana/ana.env BEFORE
+// the Groq client (lazily constructed in handlers/persuasion-phase.js) reads
+// process.env. Every other entry point (ana-cli, TUI, run-live-sim) already
+// imports env.js; this closes the gap for the standalone main.
 import { getNextMissingField } from './workflow.js';
 
 import { detectOffensive, getStrikeResponse, addToBlocklist, applyStrikeDecay } from './offensive-filter.js';
@@ -40,18 +46,49 @@ export function generateFirstMessage(lead) {
   let propertyType = 'apartment';
   let propertyLabel = 'имотот';
 
-  if (/stan|стан/i.test(title)) {
-    propertyType = 'apartment';
-    propertyLabel = 'станот';
-  } else if (/kuk|куќ|house|villa|vila/i.test(title)) {
-    propertyType = 'house';
-    propertyLabel = 'куќата';
-  } else if (/plac|плац|land/i.test(title)) {
-    propertyType = 'land';
-    propertyLabel = 'плацот';
-  } else if (/lokal|office|commercial/i.test(title)) {
-    propertyType = 'commercial';
-    propertyLabel = 'локалот';
+  // PROPERTY-TYPE KEYWORD SCAN — the EARLIEST keyword in the title wins.
+  // Macedonian listing titles lead with the property type, so when a title
+  // mentions TWO types ("се продава парцела погодна за куќа" = parcel
+  // suitable for a house), the FIRST one is the actual subject: that real
+  // lead is LAND, and the old fixed precedence (stan → kuk → land → lokal)
+  // wrongly classified it as house because "куќа" appears later in the
+  // description. "Куќа со градина" (house with garden) stays a house,
+  // "Куќа во Градина" (house in the village Gradina) stays a house, while
+  // "Плац/нива/парцела..." titles classify as land. LAND terms now also
+  // cover the full land vocabulary (niva, parcela, zemjiste, oranica,
+  // livada, vinograd, zemja, gradina, земјоделско, градежно...).
+  // NOTE: "градежн" (construction) is deliberately NOT a bare term —
+  // "Градежна фирма продава стан" (a construction COMPANY selling an
+  // apartment) would otherwise classify as land. "Градежно земјиште" /
+  // "градежна парцела" (construction LAND) is virtually always written with
+  // земјиште/парцела — which are already covered — so градежн only counts
+  // when directly followed by one of those land words.
+  const LAND_TITLE_RE = /plac|плац|land|niva|нива|nivi|ниви|zemjiste|zemjishte|земјиште|земjиште|parcela|парцела|parceli|парцели|oranica|ораница|livada|ливада|vinograd|виноград|zemja|земја|gradina|градина|zemjodelsk|земјоделск|poljoprivredn|градежн[оa]?\s+(?:земjиште|земјиште|zemjiste|zemjishte|парцела|parcela)/i;
+  // BUSINESS/COMMERCIAL TITLE VOCABULARY — beyond the bare "локал", real
+  // Macedonian business leads use: деловен простор (business space),
+  // канцеларија (office), магацин/склад (warehouse), продавница/дуќан
+  // (shop), ресторан/кафуле (restaurant/cafe), салон (salon), хотел (hotel),
+  // бизнис (business), ателје (studio). These were previously unclassified
+  // and fell through to apartment ("Продажба на деловен простор" → стан,
+  // "МАГАЦИН ВО КУМАНОВО" → стан) — which would then ask the apartment
+  // batch (terrace/bedrooms/elevator) for a warehouse. "деловн"/"delovn"
+  // stems cover деловен/деловна/деловно; "kancelari" covers office. NOTE:
+  // "magazin" (magazine) is a false-positive risk only in non-real-estate
+  // contexts — in listing titles it virtually always means warehouse.
+  const COMMERCIAL_TITLE_RE = /lokal|локал|deloven|деловен|delovn|деловн|kancelari|канцелари|magacin|магацин|magazin|магазин|sklad|склад|prodavnic|продавниц|dukan|дукан|дуќан|restoran|ресторан|kafule|кафуле|kafic|кафич|kafe|кафе|salon|салон|atelje|ателје|biznis|бизнис|hotel|хотел|office|commercial|posloven|пословен|poslovn|пословн/i;
+  const candidates = [
+    [/stan|стан/i, 'apartment', 'станот'],
+    [/kuk|куќ|house|villa|vila/i, 'house', 'куќата'],
+    [LAND_TITLE_RE, 'land', 'плацот'],
+    [COMMERCIAL_TITLE_RE, 'commercial', 'локалот']
+  ].map(([re, type, label]) => {
+    const idx = title.search(re);
+    return idx === -1 ? null : { idx, type, label };
+  }).filter(Boolean).sort((a, b) => a.idx - b.idx);
+
+  if (candidates.length > 0) {
+    propertyType = candidates[0].type;
+    propertyLabel = candidates[0].label;
   }
 
   const transactionType = /издава|изнајмува|izdava|izdavam|kirija|кирија|под кирија|pod kirija|za izdavanje|за издавање|rent|rental|iznajmuva|изнајмувам/i.test(title) ? 'rent' : 'sale';
@@ -95,6 +132,17 @@ export async function generateResponse(session, userInput) {
   try {
     if (!session.collectedData) {
       session.collectedData = { cooperationAccepted: false };
+    }
+    // TRANSACTION-TYPE BACKFILL: the lead's rent/sale type is known from the
+    // ad title (adMemory) from the very first message, but collectedData only
+    // gets it copied on cooperation ACCEPT (persuasion-phase.js). The price
+    // extractors (data-collector.js) read ONLY collectedData — without this
+    // backfill a rent owner's "250 evra" volunteered during persuasion was
+    // stored as cleanPrice (the SALE price field) at HIGH confidence, because
+    // extractCleanPrice fires whenever transactionType !== 'rent'. Mirror the
+    // adMemory value up front so rent prices always land in monthlyRent.
+    if (!session.collectedData.transactionType && session.adMemory?.transactionType) {
+      session.collectedData.transactionType = session.adMemory.transactionType;
     }
     if (!session.commissionExplained) {
       session.commissionExplained = false;

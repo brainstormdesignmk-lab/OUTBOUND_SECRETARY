@@ -4,7 +4,7 @@ export function getPitchMessage(propertyType, transactionType) {
                     propertyType === 'land' ? 'плацот' : 'имотот';
 
   if (transactionType === 'rent') {
-    return `Здраво, јас сум Ана од Metropolis - Агенција за Недвижности. Ве контактирам во врска со огласот за ${typeLabel}. Без провизија за вас — стандардната провизија ја наплаќаме од закупецот на денот на договорот. Дали сте заинтересирани да соработуваме?`;
+    return `Здраво, јас сум Ана од Metropolis - Агенција за Недвижности. Ве контактирам во врска со огласот за ${typeLabel}. За издавање работиме по стандардна провизија: 50% од една месечна кирија (100% ако е над 1000 евра) на денот на потпишување на договорот. Дали сте заинтересирани да соработуваме?`;
   }
 
   // Default: sale
@@ -13,7 +13,7 @@ export function getPitchMessage(propertyType, transactionType) {
 
 export function getTermsExplanation(transactionType) {
   if (transactionType === 'rent') {
-    return 'Стандардна провизија за издавање: 50% од киријата се плаќа на денот на потпишување на договорот.';
+    return 'Стандардна провизија за издавање: сопственикот плаќа 50% од една месечна кирија (100% ако е над 1000 евра), а закупецот 50%, на денот на потпишување на договорот.';
   }
   return 'Додаваме 2% на вашата цена. Вие ја добивате бараната сума.';
 }
@@ -28,7 +28,20 @@ export function getCloseMessage() {
   return variations[Math.floor(Math.random() * variations.length)];
 }
 
-export function getFollowUpMessage() {
+// Follow-up nudge. Transaction-aware: the sale "без провизија за вас"
+// reminder is WRONG for rent — on rent the owner DOES pay the standard
+// 50%/100% commission, so the rent variants must never promise "no
+// commission / no obligations".
+export function getFollowUpMessage(transactionType) {
+  if (transactionType === 'rent') {
+    const rentVariations = [
+      'Дали размисливте за соработката за издавање?',
+      'Само да проверам дали сте заинтересирани за издавање?',
+      'Да ве потсетам — за издавање работиме по стандардна провизија, платена само на денот на потпишување. Дали размисливте?',
+      'Имате ли уште прашања околу соработката за издавање?'
+    ];
+    return rentVariations[Math.floor(Math.random() * rentVariations.length)];
+  }
   const variations = [
     'Дали размисливте за соработка?',
     'Само да проверам дали сте заинтересирани?',

@@ -35,7 +35,17 @@ function extractMonthlyRent(u, data) {
   // Also skip if cleanPrice already captured (cross-guard for sale leads)
   if (data.transactionType !== 'rent') return null;
   if (data.cleanPrice !== undefined) return null;
-  const price = extractPrice(u);
+  // UTILITIES-CLAUSE STRIP: "350 evra + reziski trosoci" quotes the RENT, but
+  // "reziski se 50 evra, kirijata 350" (utilities 50€, rent 350) would let
+  // extractPrice grab the FIRST number (50) as the rent — and the currency
+  // keyword ("evra") now scores it HIGH, so the confirmation net is gone.
+  // Strip any clause that attaches a number to the utilities/трошоци words
+  // (utilities word first, or a number directly before it) so the RENT number
+  // survives. The reported "350 evra + reziski trosoci" carries no number in
+  // its utilities clause → nothing is stripped → 350 is extracted as before.
+  let cleaned = u.replace(/(?:reziski|режиски|trosoci|трошоци)(?:[^,;.!?]*?)\d+(?:\s*(?:evra|евра|eur|evro|евро))?[^,;.!?]*/gi, ' ');
+  cleaned = cleaned.replace(/\d+(?:\s*(?:evra|евра|eur|evro|евро))?\s*(?:za|на|na|за)?\s*(?:reziski|режиски|trosoci|трошоци)/gi, ' ');
+  const price = extractPrice(cleaned);
   return price !== null ? { monthlyRent: price } : null;
 }
 
@@ -385,14 +395,22 @@ function extractHeating(u, data) {
 
 function extractParking(u, data) {
   if (data.parking !== undefined && data.parking !== null) return null;
-  if (/nema parking|нема паркинг|nema garaza|нема гаража|bez parking|без паркинг|без гаража|bez garaza/i.test(u)) {
+  if (/nema parking|нема паркинг|nema garaza|нема гаража|bez parking|без паркинг|без гаража|bez garaza|nema parkiranje|нема паркирање|bez parkiranje|без паркирање/i.test(u)) {
     return { parking: false };
   }
-  if (/garaza|гаража|privat|приват|parking|паркинг|garage|гараж|podzemna|подземна|sopstveno|сопствено|pred zgrada|пред зграда|na -|на -|podzemno|подземно|ima parking|има паркинг|ima garaza|има гаража/i.test(u)) {
+  if (/garaza|гаража|privat|приват|parking|паркинг|parkiranje|паркирање|garage|гараж|podzemna|подземна|sopstveno|сопствено|pred zgrada|пред зграда|na -|на -|podzemno|подземно|ima parking|има паркинг|ima garaza|има гаража/i.test(u)) {
     let parkingType = "public";
     if (/garaza|гаража|garage|гараж|podzemna|подземна|podzemno|подземно|na -1|на -1|na -2|на -2|na -|на -|podzemno parking|подземно паркинг|podzemna garaza|подземна гаража|garaza na -|гаража на -/i.test(u)) {
       parkingType = "garage";
-    } else if (/privat|приват|sopstveno|сопствено|pred zgrada|пред зграда|so nego|со него|so stanot|со станот|so apartmanot|со апартманот|so imotot|со имотот|kon stanot|кон станот/i.test(u)) {
+    } else if (/privat|приват|sopstveno|сопствено|pred zgrada|пред зграда|so nego|со него|so stanot|со станот|so apartmanot|со апартманот|so imotot|со имотот|kon stanot|кон станот|vo cenata|во цената|vo cena|во цена|vklucen vo cena|вклучен во цена|vklucena vo cena|вклучена во цена|vkluceno vo cena|вклучено во цена|so parking|со паркинг|so parkiranje|со паркирање/i.test(u) ||
+               // RENT: "IMA I PARKING" ("there's also parking") — in a rental
+               // that spot belongs to the apartment in question (the tenant's
+               // private spot), NOT public street parking (reported). Same
+               // "comes with the unit" semantics as "so parking" (RT3b), just
+               // built with the "i" ("also") construction. Rent-gated: in a
+               // SALE listing a bare "ima i parking" may describe the area,
+               // so the conservative public default stays there.
+               (data.transactionType === 'rent' && /ima i parking|има и паркинг|ima i parkiranje|има и паркирање/i.test(u))) {
       parkingType = "private";
     }
 
@@ -409,7 +427,7 @@ function extractParking(u, data) {
     //   "garaza plus 5000"
     let parkingSeparate = null;
     let parkingPrice = null;
-    if (/posebno|посебно|oddelno|одделно|oddeln|одделн|oddelen|одделен|dopolnitelno|дополнително|dodatni|дополнителни|dodatno|дополнително|plus|плус|extra|екстра/i.test(u)) {
+    if (/posebno|посебно|oddelno|одделно|oddeln|одделн|oddelen|одделен|dopolnitelno|дополнително|dodatni|дополнителни|dodatno|дополнително|plus|плус|extra|екстра|ne e vklucen|не е вклучен|ne e vkluceno|не е вклучено|ne se vkluceni|не се вклучени|ne se vklucen|не се вклучен/i.test(u)) {
       parkingSeparate = true;
       // Upgrade type: a separately-sold parking spot is a private spot,
       // not public street parking (the default when no garage keywords).
@@ -509,6 +527,23 @@ function extractRenovated(u, data) {
   // with NO clause separators (dali, znam, mozam, etc.) in between.
   // This intentionally does NOT catch "ne znam dali e renoviran" (uncertain, not negated).
   if (/(?:^|\s)(?:ne|не)\s+(?:(?:go|se|me|ti|ga|gi|sme|ste|e|ja|bea|sum|si|го|се|ме|ти|га|ги|сме|сте|е|ја|беа|сум|си)\s+){0,2}(?:renoviran[аоие]?|реновиран[аоие]?|renoviravme|реновиравме|renoviraa|реновираа|renovirav|реновирав|renovira|реновира|renoviral|renovirale|renovirali|реновирал|реновирале|реновирали|obnoven[аоие]?|обновен[аоие]?|osvezen[аоие]?|освежен[аоие]?)/i.test(u)) {
+    return { renovated: false, renovationYear: null };
+  }
+  // NEW-BUILD / FIRST-HAND → NOT renovated. A brand-new apartment (new
+  // construction, first hand, unused) has never been renovated. Direct
+  // answers to "Дали е реновиран?" like "NOV E 2025" (it's new, built 2025)
+  // previously fell through to a re-ask and then the max-2-attempts skip.
+  // Fully bilingual (Latin + Cyrillic) so НОВ Е / nov е / нов e / NOV E all
+  // match. Letter-boundary matching (not \b — that doesn't work with Cyrillic)
+  // prevents "nov" from matching inside "obnoven" (renovated).
+  // NEGATION GUARD (reported): "NE E NOVOGRADBA, NO E RENOVIRAN 2019" (it's
+  // NOT new construction, but it IS renovated) previously matched the bare
+  // "novogradba" keyword first and wrongly returned renovated=false —
+  // clobbering the owner's explicit positive answer. When any new-build
+  // keyword is directly negated ("ne e X"), the whole branch is skipped so
+  // the message falls through to the renovation checks below.
+  const newBuildNegated = /(?:ne|не)\s+(?:e|е)\s+(?:novogradba|новоградба|novogradbena|новоградбена|novoizgraden|новоизграден|nova gradba|нова градба|novo gradba|ново градба|nov stan|нов стан|nova zgrada|нова зграда|prva raka|прва рака|neupotreben|неупотребен)/i.test(u);
+  if (!newBuildNegated && /(?:^|[^a-zа-я])(?:nov|нов)\s+(?:e|е)(?:$|[^a-zа-я])|(?:^|[^a-zа-я])(?:nova|нова)\s+(?:e|е)(?:$|[^a-zа-я])|(?:^|[^a-zа-я])(?:novo|ново)\s+(?:e|е)(?:$|[^a-zа-я])|novogradba|новоградба|novogradbena|новоградбена|(?:nova|нова)\s+(?:gradba|градба)|(?:novo|ново)\s+(?:gradba|градба)|(?:nov|нов)\s+(?:stan|стан)|(?:nova|нова)\s+(?:zgrada|зграда)|novoizgraden|новоизграден|(?:prva|прва)\s+(?:raka|рака)|neupotreben|неупотребен/i.test(u)) {
     return { renovated: false, renovationYear: null };
   }
   // Check if year is embedded — prefer year near renovation keywords
@@ -626,10 +661,20 @@ function extractDocumentationClean(u, data) {
   }
 
   // NEGATIVE documentation signal — has issues
-  // Uses negative lookbehind to prevent "nema X" / "bez X" / "без X" from
-  // matching as negatives. "nema hipoteka" means "no mortgage" (positive),
-  // but bare "hipoteka" means "there's a mortgage" (negative).
-  if (/(?<!nema |нема |bez |без )hipoteka|(?<!nema |нема |bez |без )хипотека|(?<!nema |нема |bez |без )ostavinska|(?<!nema |нема |bez |без )оставинска|razvod|развод|sudski|судски|problem|проблем|ne e cist|не е чист|ne e cista|не е чиста|komplikacii|компликации|(?<!nema |нема |bez |без )teret|(?<!nema |нема |bez |без )терет|(?<!nema |нема |bez |без )zabrana|(?<!nema |нема |bez |без )забрана|zalozen|заложен|imam hipoteka|имам хипотека|ima hipoteka|има хипотека|ima problem|има проблем|ima teret|има терет|ima zabrana|има забрана|ne e cist imoten list|не е чист имотен лист|ne e legalizirano|не е легализирано|spor|спор|ne e sredeno|не е средено/i.test(u)) {
+  // Uses negative lookbehind to prevent "nema X" / "bez X" / "без X" / "nemam X"
+  // from matching as negatives. "nema hipoteka" means "no mortgage" (positive),
+  // but bare "hipoteka" means "there's a mortgage" (negative). IDIOM GUARD
+  // (reported): bare "problem|komplikacii" also matched inside "NEMA PROBLEMI"
+  // / "nema komplikacii" (no problems — a POSITIVE "docs are fine" answer) and
+  // stored documentationClean=false. The lookbehind blocks those — including
+  // intensifier forms ("NEMA NIKAKVI PROBLEMI", "nema vekje problemi") and the
+  // "ne e problem" idiom (the photos handler and acceptance classifier already
+  // treat "ne e problem" as positive). Past-tense positives are guarded too:
+  // "NE SUM IMAL PROBLEMI" / "не сум имал проблеми" (I've never had problems)
+  // is a positive answer, not a docs issue — without the guard it set
+  // documentationClean=false. The positive answer is caught by the
+  // field-specific bare-yes map when the documentation question is current.
+  if (/(?<!nema |нема |bez |без )hipoteka|(?<!nema |нема |bez |без )хипотека|(?<!nema |нема |bez |без )ostavinska|(?<!nema |нема |bez |без )оставинска|razvod|развод|sudski|судски|(?<!nema |нема |bez |без |nemam |немам |nikakvi |никакви |absolutno |апсолутно |vekje |веќе |voopsto |воопшто |stvarno |стварно |ne e |не е |ne sum imal |не сум имал |ne bev imal |не бев имал )problem|(?<!nema |нема |bez |без |nemam |немам |nikakvi |никакви |absolutno |апсолутно |vekje |веќе |voopsto |воопшто |stvarno |стварно |ne e |не е |ne sum imal |не сум имал |ne bev imal |не бев имал )проблем|ne e cist|не е чист|ne e cista|не е чиста|(?<!nema |нема |bez |без |nemam |немам |nikakvi |никакви |absolutno |апсолутно |vekje |веќе |voopsto |воопшто |stvarno |стварно |ne e |не е |ne sum imal |не сум имал |ne bev imal |не бев имал )komplikacii|(?<!nema |нема |bez |без |nemam |немам |nikakvi |никакви |absolutno |апсолутно |vekje |веќе |voopsto |воопшто |stvarno |стварно |ne e |не е |ne sum imal |не сум имал |ne bev imal |не бев имал )компликации|(?<!nema |нема |bez |без )teret|(?<!nema |нема |bez |без )терет|(?<!nema |нема |bez |без )zabrana|(?<!nema |нема |bez |без )забрана|zalozen|заложен|imam hipoteka|имам хипотека|ima hipoteka|има хипотека|ima problem|има проблем|ima teret|има терет|ima zabrana|има забрана|ne e cist imoten list|не е чист имотен лист|ne e legalizirano|не е легализирано|spor|спор|ne e sredeno|не е средено/i.test(u)) {
     let docsIssue = "other";
     if (/hipoteka|хипотека/i.test(u)) docsIssue = "hipoteka";
     else if (/ostavinska|оставинска/i.test(u)) docsIssue = "ostavinska";
@@ -680,6 +725,21 @@ const EXTRACTION_RULES = [
 // Words that indicate uncertain answers
 const UNCERTAINTY_WORDS = /mislam|okolu|околу|приближно|otprilika|отприлика|mozda|можеби|можда|negde|негде|valjda|ваљда|priblizno|приблизно|neshto vaka|нешто вака|tocno ne|точно не|ne znam|не знам|neznam|треба да|treba da|posle|после/i;
 
+// DECADE-YEAR PATTERNS — the same decade forms parseYearBuilt maps to a
+// memorized year (90ti → 1995, 80ti → 1985, 2000ti → 2005, 1980-ти → 1980;
+// value mapping lives in property-extractor.js parseYearBuilt — KEEP IN
+// SYNC). "90TI E ZGRADATA TOCNO NEZNAM" (it's from the 90s, I don't know
+// exactly) means the owner only knows the DECADE — the extracted year is
+// already the memorized approximation, so it must NOT be re-confirmed.
+// The DIGIT forms are LETTER-BOUNDED (unlike parseYearBuilt's bare
+// substrings) so a price like "50-iljadi evra" (contains "50-i") can never
+// count as a decade — without the boundary, parseYearBuilt's own "50-i"
+// quirk maps it to 1955 AND the confidence boost would skip the confirmation
+// net. Exact 2-digit years ("92") and exact 4-digit years ("1990", "2015ti")
+// are NOT decade answers — only "-ti/-ta" decade forms, decade words, and
+// 19XX/20XX + ти/та references ("1980-ти" = the 1980s).
+const DECADE_YEAR_RE = /(?:^|[^a-zа-я\d])(?:19|20)\d{2}\s*[- ]?(?:ti|ти|ta|та)(?:te|те)?(?:$|[^a-zа-я])|(?:^|[^a-zа-я\d])(?:2000|90|80|70|60|50)(?:\s*[- ]?)(?:ti|ти|i|ta|та)(?:te|те)?(?:$|[^a-zа-я])|деведесетти|деведесети|девеесетти|девеесети|деведесетта|деведесета|девеесета|осумдесетти|осумдесети|осумдесетта|осумдесета|осамдесетти|осамдесети|осамдесетта|осамдесета|седумдесетти|седумдесети|седумдесетта|седумдесета|шеесетти|шеесети|шеесетта|шеесета|педесетти|педесети|педесетта|педесета|пеесетти|пеесети|пеесетта|пеесета|двеилјадити|двеилјадита|deveesetti|deveeseti|devedesetti|devedeseti|deveesetta|deveeseta|devedesetta|devedeseta|osumdesetti|osumdeseti|osumdesetta|osumdeseta|osamdesetti|osamdeseti|osamdesetta|osamdeseta|sedumdesetti|sedumdeseti|sedumdesetta|sedumdeseta|seesetti|seeseti|seesetta|seeseta|pedesetti|pedeseti|pedesetta|pedeseta|peesetti|peeseti|peesetta|peeseta|(?:^|[^a-zа-я])(?:deveeset|девеесет|деведесет|devedeset|osemdeset|осумдесет|osumdeset|osamdeset|осамдесет|sedumdeset|седумдесет)(?:$|[^a-zа-я])/i;
+
 // Required context keywords per field for HIGH confidence
 // If these keywords are present in the message AND the value was extracted,
 // confidence is HIGH. Otherwise MEDIUM (or LOW for binary fields with no context).
@@ -690,7 +750,21 @@ const FIELD_CONFIDENCE_KEYWORDS = {
   'floor': /kat|кат|sprat|спрат|potkrovje|поткровје|prizemje|приземје|floor|етаж|etazh/i,
   'totalFloors': /katnica|катница|kata|ката|sprata|спрата|kati|кати|eta|ета|sprat|спрат|zgradata|зградата|vkupno|вкупно/i,
   'yearBuilt': /izgraden|граден|godina|година|gradba|градба|graden|граден|izgradba|изградба|zavrshen|завршен|star|стар/i,
-  'monthlyRent': /kirija|кирија|mesecno|месечно/i,
+  // RENT-VERB KEYWORDS: "go izdavam za 350 evra" (I rent it for 350€) is a
+  // CLEAR direct answer to the monthlyRent question, but the old pattern only
+  // matched kirija/mesecno — so a message with the rent verb (but no "kirija"
+  // word) got MEDIUM (0.60) and triggered an unnecessary confirmation re-ask.
+  // izdavam/iznajmuvam/pod kirija are unambiguous rent verbs — HIGH.
+  // CURRENCY/UTILITIES (reported): "350 evra + reziski trosoci" (350€ + utility
+  // bills) is the plainest possible direct answer — but "evra" was only in the
+  // cleanPrice keyword list, so the message scored MEDIUM (0.60) and the owner
+  // got asked "Дали точната вредност е 350?" despite having answered clearly.
+  // evra/евра/evro/евро/eur (currency) and reziski/режиски (utilities — a
+  // rent-specific term) are unambiguous rent markers. Safe because
+  // extractMonthlyRent only fires when transactionType==='rent' — the sale
+  // price keeps its own currency keywords on cleanPrice. A bare "350" (no
+  // currency word) still scores MEDIUM → confirmation re-ask (unchanged).
+  'monthlyRent': /kirija|кирија|mesecno|месечно|izdavam|издавам|izdava|издава|iznajmuvam|изнајмувам|iznajmuva|изнајмува|pod kirija|под кирија|evra|евра|evro|евро|eur|reziski|режиски/i,
   'orientation': /orientacija|ориентација|strana|страна|jug|север|istok|запад|zapad|sever|jugoistok|jugozapad|severoistok|severozapad|исток|југ|североисток|северозапад|југоисток|југозапад|pravec|правец/i,
   'terraceSqm': /terasa|тераса|teras|терас|тераси|terrace|m2|м2|kvadrati|квадрати/i
 };
@@ -709,6 +783,17 @@ const DERIVED_SUBKEYS = new Set([
 ]);
 
 function assessConfidence(field, value, input) {
+  // DECADE-YEAR ANSWERS ("90TI", "80TI", "осумдесетти") are inherently
+  // APPROXIMATE — the owner is telling us the decade, not the exact year, and
+  // the extractor maps it to a memorized mid-decade year (90ti → 1995). The
+  // message usually ALSO contains an uncertainty word ("90ti e zgradata tocno
+  // neznam"), but that uncertainty is about the EXACT year, which the decade
+  // answer already concedes — re-asking "Дали точната вредност е 1995?" is
+  // redundant (reported). Must run BEFORE the uncertainty downgrade below.
+  if ((field === 'yearBuilt' || field === 'renovationYear') && DECADE_YEAR_RE.test(input)) {
+    return 'HIGH';
+  }
+
   const hasUncertainty = UNCERTAINTY_WORDS.test(input);
   if (hasUncertainty) {
     return 'MEDIUM';
@@ -905,6 +990,64 @@ const NUMBER_SNIFFING_EXTRACTORS = new Set([
 ]);
 
 // ========================================
+// BARE YES/NO ANSWER MAPPING
+// The dedicated extractors require keyword context (extractRenovated needs
+// "renoviran", extractElevator needs "lift") — correct for global discovery,
+// but a DIRECT bare answer to the current question is also valid: when Ana
+// asks "Дали е реновиран?" and the owner replies "NE E" (or "da"), that IS
+// the answer. Only the preferredField path maps these bare answers; global
+// discovery mode never does (a bare "ne" could be answering anything, e.g.
+// rejecting cooperation). Reported bug: "NE E" to the renovation re-ask was
+// ignored → max-2-attempts skip → renovationYear wrongly asked next.
+// ========================================
+const BARE_YES_NO_FIELDS = new Set(['renovated', 'elevator', 'ac', 'parking', 'furnished', 'documentationClean']);
+// Whole-message anchors — a message with ANY extra content ("ne, 55 kvadrati")
+// or property keywords must NOT be treated as a bare yes/no.
+// 1st-person possession forms ("imam", "имам" = I have, "go imam" = I have
+// it) are affirmative answers to ANY binary question ("Дали имате чист
+// имотен лист?" → "IMAM"; "Дали има лифт?" → "go imam"...). Reported:
+// "IMAM NA MOE IME" (I have the deed in my name) was NOT memorized and the
+// documentation question was re-asked until max-2-attempts SKIP.
+const BARE_YES_RE = /^(?:da|да|ima|има|imam|имам|go imam|го имам|ja imam|ја имам|ok|ок|okej|океј|moze|може|tocno|точно|sekako|секако|naravno|наравно|normalno|нормално|da ima|да има|ima da|има да)$/i;
+// 1st-person negation forms ("nemam", "немам" = I don't have) are the
+// negative mirror of "imam" — answering "Дали имате чист имотен лист?"
+// with "NEMAM" must be memorized as documentationClean=false, not re-asked
+// into a max-2-attempts SKIP (mirror of the reported "IMAM" bug).
+const BARE_NO_RE = /^(?:ne|не|nema|нема|nemam|немам|bez|без|go nemam|го немам|ja nemam|ја немам|ne e|не е|nema e|нема е|ne e tocno|не е точно)$/i;
+
+// FIELD-SPECIFIC BARE-YES IDIOMS. The global extractor deliberately refuses
+// bare "cist"/"cisto" (matches "cist vozduh" = clean air, "cista cena" = net
+// price — never documentation), so a DIRECT answer to the CURRENT question
+// like "SE E CISTO" / "CISTO E" (it's all clean) in reply to "Дали имате
+// чист имотен лист?" needs its own anchored mapping. Only fires in the
+// preferredField path (the documentation question is literally being asked),
+// never in global discovery — the whole-message anchor keeps it safe. The// negative side needs no map: "ne e cisto" is already caught by the
+  // extractor's negative branch (substring "ne e cist"). Reported: "SE E
+  // CISTO" was not registered as positive → documentationClean re-asked with
+  // confirmatory phrasing (attempt 2) despite a clear direct answer.
+  // OWNERSHIP/POSSESSION ANSWERS (reported): "IMAM NA MOE IME" (I have the
+  // deed in my name) and "TI REKOV DEKA IMAM" (I told you I have it) are
+  // clear positives to "Дали имате чист имотен лист?", but the global
+  // extractor deliberately refuses bare "na moe ime" (generic ownership —
+  // could be answering a name/address question) and bare "imam". When the
+  // documentation question is CURRENT, these ownership assertions are the
+  // answer → documentationClean=true.
+  const BARE_YES_FIELD_RE = {
+  documentationClean: /^(?:se e cisto|се е чисто|cisto e|чисто е|cista e|чиста е|se e cist|се е чист|cist e|чист е|cisto|чисто|sve e cisto|све е чисто|sve cisto|све чисто|se cisti|се чисти|cisti se|чисти се|site dokumenti cisti|сите документи чисти|dokumentite se cisti|документите се чисти|uredno e|уредно е|sredeno e|средено е|kompletno cisto|комплетно чисто|nema problemi|нема проблеми|nema problem|нема проблем|nemam problemi|немам проблеми|nema nikakvi problemi|нема никакви проблеми|nemam nikakvi problemi|немам никакви проблеми|nema vekje problemi|нема веќе проблеми|sve e vo red|сè е во ред|se e vo red|се е во ред|sve vo red|сè во ред|se e cisto, nema problemi|се е чисто, нема проблеми|cisto e, nema problemi|чисто е, нема проблеми|nema problemi so dokumentite|нема проблеми со документите|se e cisto so dokumentite|се е чисто со документите|imam na moe ime|имам на мое име|na moe ime|на мое име|e na moe ime|е на мое име|imam imoten list|имам имотен лист|imam dokumenti|имам документи|imam cist|имам чист|cisto e na moe ime|чисто е на мое име|imam na moe ime, cisto e|имам на мое име, чисто е|imam na moe ime, nema problemi|имам на мое име, нема проблеми|se e cisto, imam na moe ime|се е чисто, имам на мое име|cisto e, na moe ime|чисто е, на мое име|se e cisto, na moe ime|се е чисто, на мое име|ti rekov deka imam|ти реков дека имам|rekov deka imam|реков дека имам|ti kazav deka imam|ти кажав дека имам|kazav deka imam|кажав дека имам|ti rekov deka go imam|ти реков дека го имам|ti rekov deka imam na moe ime|ти реков дека имам на мое име|rekov deka imam na moe ime|реков дека имам на мое име)$/i
+  };
+
+// FIELD-SPECIFIC BARE-NO IDIOMS (negative mirror of BARE_YES_FIELD_RE).
+// "NEMAM NA MOE IME" / "NE E NA MOE IME" (the deed is not in my name) or
+// "NEMA IMOTEN LIST" answering the documentation question = NOT clean docs
+// → documentationClean=false. The extractor's negative branch covers
+// hipoteka/teret/etc., but bare possession negations fall through — without
+// this map they'd be re-asked twice and SKIPPED (data lost), the exact mirror
+// of the reported "IMAM NA MOE IME" bug.
+const BARE_NO_FIELD_RE = {
+  documentationClean: /^(?:nemam na moe ime|немам на мое име|ne e na moe ime|не е на мое име|nema imoten list|нема имотен лист|nemam imoten list|немам имотен лист|nema dokumenti|нема документи|nemam dokumenti|немам документи)$/i
+};
+
+// ========================================
 // runGlobalExtraction — Main entry point
 // ========================================
 // Extracts field values from user input.
@@ -941,6 +1084,7 @@ function runGlobalExtraction(u, currentData, preferredField) {
     const extractor = FIELD_TO_EXTRACTOR[preferredField];
     if (extractor) {
       const groupFields = getGroupFields(preferredField);
+      let foundPreferred = false;
       for (const field of groupFields) {
         const rule = FIELD_TO_EXTRACTOR[field];
         if (!rule) continue;
@@ -955,6 +1099,38 @@ function runGlobalExtraction(u, currentData, preferredField) {
               updates[key] = value;
               console.log(`[EXTRACTION: field ${field} = ${JSON.stringify(value)} (from preferredField=${preferredField}, group=${JSON.stringify(groupFields)})]`);
             }
+          }
+          if (field === preferredField) foundPreferred = true;
+        }
+      }
+      // BARE YES/NO MAPPING: the current question was NOT answered by keyword
+      // extraction, but the message is a strict bare yes/no answer to a
+      // binary question ("Дали е реновиран?" → "ne"). Map it directly.
+      // Anchored whole-message patterns keep this safe: "ne, 55 kvadrati"
+      // or any message with extra content never matches.
+      if (!foundPreferred && BARE_YES_NO_FIELDS.has(preferredField)) {
+        // No-overwrite contract: a bare answer must not clobber a value the
+        // owner already gave (e.g. "renovated=false" then a stray "da").
+        const existingVal = currentData[preferredField];
+        if (existingVal === undefined || existingVal === null) {
+          // Leading affirmative prefix ("da"/"да" + separator) is stripped
+          // BEFORE the bare-answer match — "DA, IMAM NA MOE IME" reduces to
+          // "imam na moe ime" so the maps fire (reported docs answer). "da"
+          // ALONE is not stripped (the regex requires a separator after it),
+          // so bare "da" keeps matching BARE_YES_RE as before.
+          const bare = u.trim().replace(/[.!?,;]+$/, '').replace(/^(?:da|да)\s*[,:\s]+/i, '');
+          // Field-specific idioms (documentationClean: "SE E CISTO", ...) join
+          // the generic bare-yes phrases — see BARE_YES_FIELD_RE above.
+          const fieldYesRe = BARE_YES_FIELD_RE[preferredField];
+          // ...and their negative mirror ("NEMAM NA MOE IME" → false).
+          const fieldNoRe = BARE_NO_FIELD_RE[preferredField];
+          if (BARE_YES_RE.test(bare) || (fieldYesRe && fieldYesRe.test(bare))) {
+            updates[preferredField] = true;
+            console.log(`[EXTRACTION: field ${preferredField} = true (bare yes answer to ${preferredField} question)]`);
+          } else if (BARE_NO_RE.test(bare) || (fieldNoRe && fieldNoRe.test(bare))) {
+            updates[preferredField] = false;
+            if (preferredField === 'renovated') updates.renovationYear = null;
+            console.log(`[EXTRACTION: field ${preferredField} = false (bare no answer to ${preferredField} question)]`);
           }
         }
       }

@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 import { readFileSync, existsSync, mkdirSync, writeFileSync } from 'fs';
 import path from 'path';
+import './env.js'; // side-effect: load ~/.ana/ana.env (never a .env* file in CWD)
+import { requireEnv } from './env.js';
 import { config } from './config.js';
 import { Campaign } from './campaign.js';
 import { parseLeadLine } from './lead-processor.js';
@@ -20,6 +22,21 @@ async function main() {
   }
 
   console.log(`\n╔══════════════════════════════════════════╗\n║     ANA — METROPOLIS OUTBOUND SECRETARY  ║\n║          v2.0 — Production               ║\n╚══════════════════════════════════════════╝\n`);
+
+  // ========================================
+  // FAIL-FAST ENV CHECK — the Groq key is loaded from the real
+  // environment or ~/.ana/ana.env (see env.js), never from a .env*
+  // file in the CWD. Refuse to start with a clear message instead of
+  // failing silently hours into the campaign on the first LLM call.
+  // ========================================
+  try {
+    requireEnv('GROQ_API_KEY');
+    console.log('🔑 GROQ_API_KEY: OK\n');
+  } catch (err) {
+    console.error(`\n❌ ${err.message}`);
+    console.error(`   Add it to ~/.ana/ana.env or export GROQ_API_KEY.\n`);
+    process.exit(1);
+  }
 
   // ========================================
   // BOOT-TIME CLASSIFIER SELF-CHECK

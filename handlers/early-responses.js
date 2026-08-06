@@ -24,7 +24,12 @@ import {
   getRandomAgencyWorkflowResponse,
   isAskingWhereToSendPhotos,
   isAskingAboutLegalCosts,
-  isAskingAboutAgency
+  isAskingAboutAgency,
+  isAskingIfOwnerMustPay,
+  getRandomOwnerMustPayResponse,
+  isAskingAboutNoAgencyExperience,
+  getRandomNoAgencyExperienceResponse,
+  isAskingAboutClients
 } from '../objections.js';
 
 /**
@@ -60,9 +65,54 @@ export function runEarlyResponses({ u, isRent, session }) {
   }
 
   // ========================================
+  // HARDCODED: Property already SOLD / no longer available
+  // The owner says the property is GONE from the market — "go prodadov pred
+  // dva dena" (I sold it two days ago), "veke prodaden" (already sold),
+  // "go nema" / "ne e dostapen" (it's gone / not available), "go izdadov"
+  // (I rented it out). The deal is done — there is nothing to cooperate on
+  // for THIS property, so asking for its clean price / starting data
+  // collection is absurd (reported: cooperation was accepted after the owner
+  // clearly said the apartment was sold, and Ana then asked for the sold
+  // apartment's price). Congratulate, offer future cooperation, and CLOSE
+  // the lead gracefully.
+  //
+  // MUST run BEFORE the availability handler: that regex mixes positive and
+  // negative availability phrases and would otherwise swallow "go nema" /
+  // "ne e dostapen" and reply "glad it's still available" — the exact
+  // opposite of what the owner said.
+  //
+  // NOT-GONE GUARD: the still-available family must NOT match here —
+  // "ne sum go prodal" (I haven't sold it), "ne e prodaden" (it's NOT
+  // sold), "uste se prodava" (still for sale) are POSITIVE availability
+  // signals that must flow to the availability handler below.
+  // ========================================
+  const PROPERTY_GONE_RE =
+    /go prodadov|го продадов|ja prodadov|ја продадов|prodadov pred|продадов пред|veke prodaden|веќе продаден|prodaden e|продаден е|se prodade|се продаде|go nema|нема го|nema go|ne e dostapen|не е достапен|ne e veke dostapen|не е веќе достапен|veke ne e dostapen|веќе не е достапен|go povlekov|го повлеков|povlekov|повлеков|go izdadov|го издадов|ja izdadov|ја издадов|izdadov pred|издадов пред|veke izdaden|веќе издаден|izdaden e|издаден е|iznajmen e|изнајмен е|go iznajmiv|го изнајмив|veke ne se prodava|веќе не се продава|veke ne se izdava|веќе не се издава/i;
+  const NOT_GONE_RE =
+    /ne\s+sum\s+(?:go|го|ja|ја)?\s*(?:prodal|продал|prodadol|продадол|izdal|издал|iznajmil|изнајмил)|ne\s+(?:e|е)\s+(?:prodaden|продаден|izdaden|издаден|iznajmen|изнајмен)|uste\s+(?:ne|не)|уште\s+(?:ne|не)|ne\s+(?:se|се)\s+(?:prodava|продава|izdava|издава)|uste\s+(?:se|се)\s+(?:prodava|продава|izdava|издава)|dostapen\s+e|достапен\s+е|go\s+imam|го\s+имам|uste\s+go\s+imam|уште\s+го\s+имам/i;
+  // PHONE-CONTEXT GUARD: "brojot ne e dostapen" / "ne e dostapen brojot" (the
+  // phone NUMBER isn't reachable) is NOT the property being gone — "ne e
+  // dostapen" alone would otherwise close the lead. Exclude any message that
+  // ties "dostapen" to a phone/line/number word. (The availability handler
+  // below no longer contains the gone-phrases, so this falls through cleanly.)
+  const PHONE_UNAVAIL_RE = /(?:broj|број|linija|линија|telefon|телефон)\s*[^.]{0,20}?dostapen|dostapen\s*[^.]{0,20}?(?:broj|број|linija|линија|telefon|телефон)/i;
+  if (PROPERTY_GONE_RE.test(u) && !NOT_GONE_RE.test(u) && !PHONE_UNAVAIL_RE.test(u)) {
+    // Mark for traceability (the operator sees the closed state in the TUI;
+    // the message below already explains WHY to the owner).
+    session.propertySold = true;
+    console.log('[PROPERTY SOLD/GONE: owner says the property is no longer available — closing gracefully]');
+    return {
+      text: isRent
+        ? 'Разбирам, имотот е веќе издаден. Честитам за успешното издавање! Доколку во иднина имате друг имот за издавање, слободно контактирајте нè. Ви посакувам убав ден.'
+        : 'Честитам за успешната продажба на имотот! Доколку во иднина имате друг имот за продажба, слободно контактирајте нè. Ви посакувам убав ден.',
+      type: "CLOSED"
+    };
+  }
+
+  // ========================================
   // HARDCODED: Availability confirmation (with negative lookahead to prevent false matches)
   // ========================================
-  if (!session.collectedData.cooperationAccepted &&/uste go imam|уште го имам|dostapen e|достапен е|sloboden e|слободен е|seuste e dostapen|сè уште е достапен|go imam|го имам|uste e|уште е|dostapen|достапен|da imam|да имам|uste go imam da|уште го имам да|da uste go imam|да уште го имам|seuste go imam|сè уште го имам|go imam uste|го имам уште|uste e sloboden|уште е слободен|e sloboden|е слободен|dostapno e|достапно е|seuste e dostapno|сè уште е достапно|ima uste|има уште|uste ima|уште има|go ima uste|го има уште|uste go ima|уште го има|go ima|го има|uste go imam|уште го имам|go nema|го нема|nema go|нема го|ne e dostapen|не е достапен|go nema uste|го нема уште|uste go nema|уште го нема|seuste e|сè уште е|seuste go imam|сè уште го имам|dostapna e|достапна е|slobodna e|слободна е|seuste e dostapna|сè уште е достапна|uste e dostapna|уште е достапна|dostapni se|достапни се|seuste se dostapni|сè уште се достапни|uste se dostapni|уште се достапни|go imam uste|го имам уште|uste go imam|уште го имам|go imam seuste|го имам сè уште|seuste go imam|сè уште го имам|go imam|го имам|uste go imam|уште го имам|seuste go imam|сè уште го имам|go imam|го имам|uste go imam|уште го имам|nema go|нема го|go nema|го нема|go nema uste|го нема уште|uste go nema|уште го нема|nema uste|нема уште|seuste e|сè уште е|dostapen|достапен|dostapna|достапна|ne sum go prodal|не сум го продал|ne sum go prodadol|не сум го продадол|uste ne sum go prodal|уште не сум го продал|uste ne sum go prodadol|уште не сум го продадол|uste se prodava|уште се продава|se prodava uste|се продава уште|ne e prodaden|не е продаден|uste ne e prodaden|уште не е продаден|ne sum go izdal|не сум го издал|ne sum go iznajmil|не сум го изнајмил|uste se izdava|уште се издава|se izdava uste|се издава уште|ne e izdaden|не е издаден|uste ne e izdaden|уште не е издаден|ne e izdadena|не е издадена|uste ne e izdadena|уште не е издадена|ne e iznajmen|не е изнајмен|uste ne e iznajmen|уште не е изнајмен|ne e iznajmena|не е изнајмена|uste ne e iznajmena|уште не е изнајмена/i.test(u) && !/ne se prodava|не се продава|ne se izdava|не се издава|terasa|тераса|klima|клима|parking|паркинг|procent|процент|obvrski|обврски|klient|клиент|broj|број|kancelari|канцелари|sorabotka|соработка|uslovi|услови|garaza|гаража|garage|гараж|lift|лифт|m2|квадрати|kvadrati|heating|греење|parno|парно/i.test(u)) {
+  if (!session.collectedData.cooperationAccepted &&/uste go imam|уште го имам|dostapen e|достапен е|sloboden e|слободен е|seuste e dostapen|сè уште е достапен|go imam|го имам|uste e|уште е|dostapen|достапен|da imam|да имам|uste go imam da|уште го имам да|da uste go imam|да уште го имам|seuste go imam|сè уште го имам|go imam uste|го имам уште|uste e sloboden|уште е слободен|e sloboden|е слободен|dostapno e|достапно е|seuste e dostapno|сè уште е достапно|ima uste|има уште|uste ima|уште има|go ima uste|го има уште|uste go ima|уште го има|go ima|го има|uste go imam|уште го имам|seuste e|сè уште е|seuste go imam|сè уште го имам|dostapna e|достапна е|slobodna e|слободна е|seuste e dostapna|сè уште е достапна|uste e dostapna|уште е достапна|dostapni se|достапни се|seuste se dostapni|сè уште се достапни|uste se dostapni|уште се достапни|go imam uste|го имам уште|uste go imam|уште го имам|go imam seuste|го имам сè уште|seuste go imam|сè уште го имам|go imam|го имам|uste go imam|уште го имам|seuste go imam|сè уште го имам|go imam|го имам|uste go imam|уште го имам|seuste e|сè уште е|dostapen|достапен|dostapna|достапна|ne sum go prodal|не сум го продал|ne sum go prodadol|не сум го продадол|uste ne sum go prodal|уште не сум го продал|uste ne sum go prodadol|уште не сум го продадол|uste se prodava|уште се продава|se prodava uste|се продава уште|ne e prodaden|не е продаден|uste ne e prodaden|уште не е продаден|ne sum go izdal|не сум го издал|ne sum go iznajmil|не сум го изнајмил|uste se izdava|уште се издава|se izdava uste|се издава уште|ne e izdaden|не е издаден|uste ne e izdaden|уште не е издаден|ne e izdadena|не е издадена|uste ne e izdadena|уште не е издадена|ne e iznajmen|не е изнајмен|uste ne e iznajmen|уште не е изнајмен|ne e iznajmena|не е изнајмена|uste ne e iznajmena|уште не е изнајмена/i.test(u) && !/ne se prodava|не се продава|ne se izdava|не се издава|terasa|тераса|klima|клима|parking|паркинг|procent|процент|obvrski|обврски|klient|клиент|broj|број|kancelari|канцелари|sorabotka|соработка|uslovi|услови|garaza|гаража|garage|гараж|lift|лифт|m2|квадрати|kvadrati|heating|греење|parno|парно/i.test(u)) {
     const propertyLabel = session.adMemory?.propertyType === 'apartment' ? 'станот' :
                           session.adMemory?.propertyType === 'house' ? 'куќата' :
                           session.adMemory?.propertyType === 'land' ? 'плацот' :
@@ -70,10 +120,14 @@ export function runEarlyResponses({ u, isRent, session }) {
 
     let response;
     if (isRent) {
+      // IMPORTANT: rent owners DO pay the standard commission (50% of one
+      // month's rent, 100% above €1000) — so the rent variants must NEVER
+      // promise "без провизија за вас" / "без никакви давачки" / "без
+      // обврски" (that phrasing is sale-only).
       const rentResponses = [
-        `Драго ми е што ${propertyLabel} е сè уште достапен. Дали би сакале да го понудиме на нашите клиенти за издавање, без провизија за вас?`,
-        `Драго ми е што ${propertyLabel} е сè уште достапен. Дали би сакале да го издадеме во најкраток можен рок, без никакви давачки за вас?`,
-        `Драго ми е што ${propertyLabel} е сè уште достапен. Дали би сакале нашата агенција да се погрижи за професионално издавање, без никакви обврски од ваша страна?`
+        `Драго ми е што ${propertyLabel} е сè уште достапен. Дали би сакале да го понудиме на нашите клиенти за издавање?`,
+        `Драго ми е што ${propertyLabel} е сè уште достапен. Дали би сакале да го издадеме во најкраток можен рок?`,
+        `Драго ми е што ${propertyLabel} е сè уште достапен. Дали би сакале нашата агенција да се погрижи за професионално издавање?`
       ];
       response = rentResponses[Math.floor(Math.random() * rentResponses.length)];
     } else {
@@ -95,9 +149,58 @@ export function runEarlyResponses({ u, isRent, session }) {
   }
 
   // ========================================
-  // HARDCODED: Agency Questions (HIGHEST priority — answer BEFORE anything else)
-  // When the owner asks about the agency itself (name, experience, location),
-  // answer immediately. Never continue data collection until the question is addressed.
+  // HARDCODED: "Kako zarabotuvate bez provizija?" / "Kako funkcionira bez
+  // provizija?" / "rabotite besplatno?" — how does the no-commission model
+  // work / do you work for free? Answer with the commission-difference
+  // explanation (rotating variants).
+  // MUST be checked BEFORE the agency block: a message like "dali vashata
+  // agencija raboti besplatno?" contains "agencija" and would otherwise be
+  // swallowed by isAskingAboutAgency's generic pitch instead of getting the
+  // commission explanation. Also MUST be checked BEFORE isAskingHowItWorks,
+  // otherwise "kako funkcionira bez provizija" would incorrectly get the
+  // generic workflow answer.
+  // ========================================
+  if (isAskingHowCommissionWorks(u)) {
+    return {
+      text: getRandomCommissionNoProvisionResponse(isRent),
+      type: "NORMAL"
+    };
+  }
+
+  // ========================================
+  // HARDCODED: "Ke vi platam li nesto?" / "ke vi dolzam nesto?" — the owner
+  // asks whether THEY must pay the agency anything. Sale: no obligations
+  // (they keep their clean price, we earn from the difference). Rent: the
+  // 50%/100% rent commission rule. NOT the generic persuasion pitch.
+  // ========================================
+  if (isAskingIfOwnerMustPay(u)) {
+    return {
+      text: getRandomOwnerMustPayResponse(isRent),
+      type: "NORMAL"
+    };
+  }
+
+  // ========================================
+  // HARDCODED: "Ne sum sorabotuval so agencii do sega" — the owner says
+  // they have NO experience working with agencies (or it's their first
+  // time). Sale: the agency takes nothing from their share, it only raises
+  // the chances of a faster sale. Rent: a professional rental service with
+  // carefully filtered clientele. MUST run BEFORE the agency block — the
+  // message contains "agencija" and would otherwise get the generic
+  // Metropolis pitch instead of this reassurance.
+  // ========================================
+  if (isAskingAboutNoAgencyExperience(u)) {
+    return {
+      text: getRandomNoAgencyExperienceResponse(isRent),
+      type: "NORMAL"
+    };
+  }
+
+  // ========================================
+  // HARDCODED: Agency Questions (answer BEFORE anything else except
+  // commission-work / no-experience questions — the owner asks about the
+  // agency itself: name, experience, location). Answer immediately. Never
+  // continue data collection until the question is addressed.
   // ========================================
   if (isAskingAboutAgency(u)) {
     const agencyAnswers = [
@@ -131,6 +234,16 @@ export function runEarlyResponses({ u, isRent, session }) {
     session.collectedData.mentionedPrice = price;
     session.rejectionCount = 0; // Reset rejection count
 
+    // Rent rule: the quoted sum is the monthly rent, and the OWNER pays the
+    // standard 50%/100% commission on the signing day — never "ние додаваме
+    // над неа" (that sale phrasing would claim the owner owes nothing).
+    if (isRent) {
+      return {
+        text: `Вие барате ${price.toLocaleString()} евра месечна кирија. За издавање, вашата обврска е стандардната провизија: 50% од една месечна кирија (100% ако е над 1000 евра), платена на денот на потпишување на договорот. Дали сте расположени да соработуваме?`,
+        type: "NORMAL"
+      };
+    }
+
     return {
       text: `Вие барате ${price.toLocaleString()} евра. Тоа е вашата чиста цена, а ние додаваме над неа. Дали сте расположени да соработуваме?`,
       type: "NORMAL"
@@ -152,18 +265,6 @@ export function runEarlyResponses({ u, isRent, session }) {
     const answers = isRent ? rentAnswers : saleAnswers;
     return {
       text: answers[Math.floor(Math.random() * answers.length)],
-      type: "NORMAL"
-    };
-  }
-
-  // HARDCODED: "Kako zarabotuvate bez provizija?" / "Kako funkcionira bez provizija?"
-  // The owner asks how the no-commission model works — answer with the
-  // commission-difference explanation (rotating variants). MUST be checked
-  // BEFORE isAskingHowItWorks, otherwise "kako funkcionira bez provizija"
-  // would incorrectly get the generic workflow answer.
-  if (isAskingHowCommissionWorks(u)) {
-    return {
-      text: getRandomCommissionNoProvisionResponse(isRent),
       type: "NORMAL"
     };
   }
@@ -204,7 +305,11 @@ export function runEarlyResponses({ u, isRent, session }) {
   }
 
  // HARDCODED: Client question (requires longer phrase context, not bare words)
-  if (/imat klient|imate klient|имате клиент|klient spremen|клиент спремен|zainteresiran kupuvac|заинтересиран купувач|klienti zainteresirani|клиенти заинтересирани|imate klienti|имате клиенти|klient zainteresiran|клиент заинтересиран|imate gotov klient|имате готов клиент|imate kupuvac|имате купувач|kupuvac spremen|купувач спремен|najdovte klient|најдовте клиент|najdovte kupuvac|најдовте купувач|dali imate klient|дали имате клиент|dali imate kupuvac|дали имате купувач|ima li zainteresirani|има ли заинтересирани|imate gotov|имате готов|najdovte|најдовте|klient e|клиент е|kupuvac e|купувач е|koi se klientite|кои се клиентите|imate vekje klienti|имате веќе клиенти|imate vekje kupci|имате веќе купувачи|imate vekje zainteresirani|имате веќе заинтересирани|imate kupci|имате купувачи|dali imate kupci|дали имате купувачи|imame kupci|имаме купувачи|zainteresirani kupci|заинтересирани купувачи/i.test(u)) {
+  // Uses the SHARED isAskingAboutClients gate (objections.js — single source of
+  // truth, includes the "imate nekoj zainteresiran" family and bare "imate
+  // zainteresirani" variants). An inline copy used to live here and drifted
+  // from the objections.js version; now there is exactly one pattern.
+  if (isAskingAboutClients(u)) {
     const clientPropertyLabel = session.adMemory?.propertyType === 'apartment' ? 'за таков стан' :
                                 session.adMemory?.propertyType === 'house' ? 'за таква куќа' :
                                 session.adMemory?.propertyType === 'land' ? 'за таков плац' :
@@ -301,9 +406,20 @@ if (/kako bi sorabotuvale|како би соработувале|како да �
   // ========================================
   // HARDCODED: Phone Origin
   // ========================================
-  if (!session.collectedData.cooperationAccepted && isAskingAboutPhone(u)) {
+  // MONEY-QUESTION GUARD: isAskingAboutPhone matches any "od kade..." message
+  // (its "od kade" prefix), but a question like "od kade se parite?" (where
+  // does the money come from) is a commission/money question — it must get the
+  // from_whose_pocket objection answer, NEVER "Го добив вашиот број од
+  // огласот...". The commission gate above already intercepts money-origin
+  // phrases (see isAskingAboutCommission); this guard is the second layer.
+  const isMoneyQuestion = /pari|пари|dzeb|џеб|provizij|провизиј|zemate|земате|naplakj|наплаќ/i.test(u);
+  if (!session.collectedData.cooperationAccepted && isAskingAboutPhone(u) && !isMoneyQuestion) {
     return {
-      text: "Го добив вашиот број од огласот за станот што го објавивте. Ние работиме без провизија за вас. Дали сте заинтересирани за соработка?",
+      // Rent: the owner DOES pay the standard commission — never claim
+      // "без провизија за вас" (sale-only phrasing).
+      text: isRent
+        ? "Го добив вашиот број од огласот за станот што го објавивте. За издавање работиме по стандардна провизија за агенцијата. Дали сте заинтересирани за соработка?"
+        : "Го добив вашиот број од огласот за станот што го објавивте. Ние работиме без провизија за вас. Дали сте заинтересирани за соработка?",
       type: "NORMAL"
     };
   }

@@ -27,6 +27,41 @@ const assert = harness.assert;
 function handleTerrace(u, data) {
   // Returns null (no early return) or { return: { text, type } } (early return = follow-up question)
   if (data.terraceSqm === undefined && data.hasTerrace === undefined) {
+    // PENDING FOLLOW-UP (mirror of handlers/data-collection.js): process the
+    // "ne znam" / negative / number / terrace-COUNT reply first, so a count
+    // answer ("imaima terasi 2") resolves as "has terrace, size unknown"
+    // instead of re-arming the follow-up forever.
+    if (data.pendingFollowUp === 'terraceSqm') {
+      if (/ne znam|не знам|незнам|neznam|ne znam tocno|не знам точно|ne sum siguren|не сум сигурен/i.test(u)) {
+        data.hasTerrace = true;
+        data.terraceSqm = null;
+        data.pendingFollowUp = null;
+        return null;
+      }
+      if (/^0$|nema terasa|нема тераса|nema|нема|без|bez|nema|нема|bez terasa|без тераса|nema parking|нема паркинг/i.test(u) && !/ima|има|kv|кв|m2|м2|kvadrat|квадрат/i.test(u)) {
+        data.hasTerrace = false;
+        data.terraceSqm = 0;
+        data.pendingFollowUp = null;
+        return null;
+      }
+      const firstNum = extractTerraceNumber(u);
+      if (firstNum !== null && firstNum > 0 && firstNum < 100) {
+        data.hasTerrace = true;
+        data.terraceSqm = firstNum;
+        data.pendingFollowUp = null;
+        return null;
+      }
+      // TERRACE-COUNT ANSWER (reported): "imaima terasi 2" — the number is
+      // the terrace COUNT, not the m² size → "has terrace, size unknown".
+      if (/terasa|тераса|terrace|teras|терас|(?:^|[^a-zа-я])ima(?:$|[^a-zа-я])|(?:^|[^a-zа-я])има(?:$|[^a-zа-я])/i.test(u)) {
+        data.hasTerrace = true;
+        data.terraceSqm = null;
+        data.pendingFollowUp = null;
+        return null;
+      }
+      data.pendingFollowUp = null;
+      return null;
+    }
     if (/ne znam|не знам|незнам|neznam|ne znam tocno|не знам точно|ne sum siguren|не сум сигурен/i.test(u)) {
       data.hasTerrace = true;
       data.terraceSqm = null;
@@ -36,7 +71,7 @@ function handleTerrace(u, data) {
       data.hasTerrace = false;
       data.terraceSqm = 0;
       return null;
-    }        // NOTE: Must stay in sync with service.js — only match terrace-specific words,
+    }        // NOTE: Must stay in sync with handlers/data-collection.js — only match terrace-specific words,
         // not generic sqm words like 'kvadrati'/'m2' (those are for totalSqm)
         if (/ima|има|terasa|тераса|terrace|teras|терас/i.test(u) || isPositive(u)) {
       const firstNum = extractTerraceNumber(u);
@@ -52,14 +87,22 @@ function handleTerrace(u, data) {
   return null;
 }
 
+// EXPLICIT NON-ANSWER to the "Какво парно?" follow-up — the ONLY case that
+// may default heating to parno_unknown (see the DEFAULT block below). Mirrors
+// the real handler in handlers/data-collection.js. Reported bug: bare "parno"
+// volunteered as bonus info got its follow-up pending, then an UNRELATED
+// message ("parking mesto na -1 vo centar") was consumed as a heating
+// non-answer → heating wrongly stored as parno_unknown with no clarification.
+const heatingNonAnswer = /(?:^|[^a-zа-я])(?:ne|не)\s+(?:znam|знам)(?:\s+(?:tocno|tochno|точно|sigurno|сигурно))?(?:$|[^a-zа-я])|(?:^|[^a-zа-я])(?:ne|не)\s+sum\s+(?:siguren|сигурен|sigurna|сигурна)(?:$|[^a-zа-я])|(?:^|[^a-zа-я])(?:ne|не)\s+(?:mozam|можам)\s+da\s+(?:kazam|кажам)(?:$|[^a-zа-я])|(?:^|[^a-zа-я])(?:ne|не)\s+se\s+(?:secavam|сеќавам)(?:$|[^a-zа-я])|(?:^|[^a-zа-я])(?:nema|нема|nemam|немам)\s+(?:poim|поим)(?:$|[^a-zа-я])/i;
+
 function handleHeating(u, data, nextField) {
   // Returns { response } if follow-up question, null otherwise
   if (nextField === 'heating' || data.heatingFollowUp) {
-    if (/gradsko|градско|граѓско|dalinsko|dalecno|далечно|toplovod|beg/i.test(u)) {
+    if (/gradsko|градско|граѓско|dalinsko|dalecno|далечно|toplovod|beg|centralno|централно|central/i.test(u)) {
       data.heating = "district";
       data.heatingType = "district";
       data.heatingFollowUp = false;
-    } else if (/centralno|централно|central|sopstveno|сопствено|individualno|индивидуално|svoja|своја|kotel|kotlarnica|котларница|сопствена|sopstvena|moe|мое|nase|наше|licno|лично|zgradata|зградата|na zgradata|на зградата|sopstveno parno|сопствено парно|moe parno|мое парно|nase parno|наше парно|licno parno|лично парно|parno moe|парно мое|parno nase|парно наше|parno licno|парно лично|parno na zgradata|парно на зградата|sopstveno|сопствено|sopstveno parno|сопствено парно/i.test(u)) {
+    } else if (/sopstveno|сопствено|individualno|индивидуално|svoja|своја|kotel|kotlarnica|котларница|сопствена|sopstvena|moe|мое|nase|наше|licno|лично|zgradata|зградата|na zgradata|на зградата|sopstveno parno|сопствено парно|moe parno|мое парно|nase parno|наше парно|licno parno|лично парно|parno moe|парно мое|parno nase|парно наше|parno licno|парно лично|parno na zgradata|парно на зградата|sopstveno|сопствено|sopstveno parno|сопствено парно/i.test(u)) {
       data.heating = "central";
       data.heatingType = "private_central";
       data.heatingFollowUp = false;
@@ -84,10 +127,30 @@ function handleHeating(u, data, nextField) {
       data.heatingFollowUp = true;
       return { type: "QUESTION" }; // "Kakvo parno? Gradsko ili sopstveno?"
     }
+    // The follow-up is pending but this message did NOT resolve it. Only an
+    // explicit non-answer ("ne znam" family — the owner saw the question and
+    // can't answer) defaults to parno_unknown; an unrelated message (bonus
+    // info about ANOTHER field) or a repeated bare "parno" re-asks instead.
     if (data.heatingFollowUp) {
-      data.heating = "parno_unknown";
-      data.heatingType = "unknown";
-      data.heatingFollowUp = false;
+      if (heatingNonAnswer.test(u)) {
+        data.heating = "parno_unknown";
+        data.heatingType = "unknown";
+        data.heatingFollowUp = false;
+      } else {
+        // Re-ask with a max-2 cap (mirrors the max-2-attempts skip for
+        // regular fields): after 2 unanswered re-asks, default to unknown so
+        // the conversation can never pin on the heating question.
+        const reAskCount = data.heatingFollowUpAttempts || 0;
+        if (reAskCount >= 2) {
+          data.heating = "parno_unknown";
+          data.heatingType = "unknown";
+          data.heatingFollowUp = false;
+          delete data.heatingFollowUpAttempts;
+        } else {
+          data.heatingFollowUpAttempts = reAskCount + 1;
+          return { type: "QUESTION" }; // re-ask "Kakvo parno? Gradsko ili sopstveno?"
+        }
+      }
     }
   }
   return null;
@@ -359,6 +422,61 @@ console.log(`━━━━━━━━━━━━━━━━━━━━━━�
   assert("T26: 'terace 8m2' (typo) → NOT extracted", d.hasTerrace === undefined, `got hasTerrace=${d.hasTerrace}`);
 })();
 
+// T27: Terrace COUNT vs SIZE (reported) — "imaima terasi 2" = there are 2
+// terraces, the "2" is the COUNT not the m² size. Must NOT be stored as
+// terraceSqm=2 → follow-up asks for the size instead.
+(() => {
+  const d = freshData();
+  const result = handleTerrace("imaima terasi 2", d);
+  assert("T27: 'imaima terasi 2' (count) → follow-up, NOT terraceSqm=2", result !== null && result.type === "QUESTION" && d.hasTerrace === undefined && d.terraceSqm === undefined, `got result=${JSON.stringify(result)}, hasTerrace=${d.hasTerrace}, sqm=${d.terraceSqm}`);
+})();
+
+// T28: "ima 2 terasi" (count BEFORE plural form) — same rule
+(() => {
+  const d = freshData();
+  const result = handleTerrace("ima 2 terasi", d);
+  assert("T28: 'ima 2 terasi' (count) → follow-up, NOT terraceSqm=2", result !== null && result.type === "QUESTION" && d.hasTerrace === undefined && d.terraceSqm === undefined, `got result=${JSON.stringify(result)}, hasTerrace=${d.hasTerrace}, sqm=${d.terraceSqm}`);
+})();
+
+// T29: Unit-attached size with plural form still extracts — "ima 2 terasi od 5m2"
+// The "5m2" is an explicit area → terraceSqm=5 (the count "2" is ignored).
+(() => {
+  const d = freshData();
+  handleTerrace("ima 2 terasi od 5m2", d);
+  assert("T29: 'ima 2 terasi od 5m2' → terraceSqm=5 (unit wins over count)", d.hasTerrace === true && d.terraceSqm === 5, `got hasTerrace=${d.hasTerrace}, sqm=${d.terraceSqm}`);
+})();
+
+// T30: Follow-up answered with a COUNT — "imaima terasi 2" after the m²
+// question → terrace exists, size unknown (like "ne znam"), NO re-ask loop.
+(() => {
+  const d = freshData();
+  d.pendingFollowUp = 'terraceSqm';
+  const result = handleTerrace("imaima terasi 2", d);
+  assert("T30: follow-up count answer → hasTerrace=true, sqm=null, no re-ask", result === null && d.hasTerrace === true && d.terraceSqm === null && d.pendingFollowUp === null, `got result=${JSON.stringify(result)}, hasTerrace=${d.hasTerrace}, sqm=${d.terraceSqm}, pending=${d.pendingFollowUp}`);
+})();
+
+// T31: Follow-up answered with a word-number COUNT — "dve terasi"
+(() => {
+  const d = freshData();
+  d.pendingFollowUp = 'terraceSqm';
+  const result = handleTerrace("dve terasi", d);
+  assert("T31: follow-up 'dve terasi' → hasTerrace=true, sqm=null", result === null && d.hasTerrace === true && d.terraceSqm === null, `got hasTerrace=${d.hasTerrace}, sqm=${d.terraceSqm}`);
+})();
+
+// T32: Singular bare size is UNTOUCHED by the plural guard — "terasa 4" = 4 m²
+(() => {
+  const d = freshData();
+  handleTerrace("terasa 4", d);
+  assert("T32: 'terasa 4' (singular bare) → terraceSqm=4", d.hasTerrace === true && d.terraceSqm === 4, `got hasTerrace=${d.hasTerrace}, sqm=${d.terraceSqm}`);
+})();
+
+// T33: Singular bare word-number size — "terasa so pet" = 5 m² (not blocked)
+(() => {
+  const d = freshData();
+  handleTerrace("terasa so pet", d);
+  assert("T33: 'terasa so pet' (singular word) → terraceSqm=5", d.hasTerrace === true && d.terraceSqm === 5, `got hasTerrace=${d.hasTerrace}, sqm=${d.terraceSqm}`);
+})();
+
 
 // ========================================
 // HEATING HANDLER TESTS
@@ -395,11 +513,11 @@ console.log(`━━━━━━━━━━━━━━━━━━━━━━�
   assert("H4: 'toplovod' → heating=district", d.heating === "district", `got heating=${d.heating}`);
 })();
 
-// H5: Private central — "centralno"
+// H5: District — "centralno" (централно парно = градско)
 (() => {
   const d = freshData();
   handleHeating("centralno", d, 'heating');
-  assert("H5: 'centralno' → heating=central, type=private_central", d.heating === "central" && d.heatingType === "private_central", `got heating=${d.heating}, type=${d.heatingType}`);
+  assert("H5: 'centralno' → heating=district", d.heating === "district" && d.heatingType === "district", `got heating=${d.heating}, type=${d.heatingType}`);
 })();
 
 // H6: Private central — Cyrillic
@@ -637,12 +755,12 @@ console.log(`━━━━━━━━━━━━━━━━━━━━━━�
   assert("H37: 'нафта' → heating=oil, type=oil", d.heating === "oil" && d.heatingType === "oil", `got heating=${d.heating}, type=${d.heatingType}`);
 })();
 
-// H38: Follow-up answer with "centralno" → private_central
+// H38: Follow-up answer with "centralno" → district (централно парно = градско)
 (() => {
   const d = freshData();
   handleHeating("parno", d, 'heating');
   handleHeating("centralno", d, null);
-  assert("H38: parno→'centralno' → central, type=private_central", d.heating === "central" && d.heatingType === "private_central", `got heating=${d.heating}, type=${d.heatingType}`);
+  assert("H38: parno→'centralno' → heating=district", d.heating === "district" && d.heatingType === "district", `got heating=${d.heating}, type=${d.heatingType}`);
 })();
 
 // H39: "parno nase" during follow-up → private_central
@@ -658,6 +776,75 @@ console.log(`━━━━━━━━━━━━━━━━━━━━━━�
   const d = freshData();
   handleHeating("termo", d, 'heating');
   assert("H40: 'termo' → heating=electric, type=electric", d.heating === "electric" && d.heatingType === "electric", `got heating=${d.heating}, type=${d.heatingType}`);
+})();
+
+// H41: THE REPORTED BUG — an UNRELATED message while the follow-up is pending
+// must NOT be consumed as a heating non-answer (no parno_unknown default).
+// Owner volunteered "ima parno" as bonus info, then sent "parking mesto na -1
+// vo centar" — that is NOT an answer to "Какво парно?" → re-ask the follow-up.
+(() => {
+  const d = freshData();
+  handleHeating("parno", d, 'heating');            // follow-up triggered
+  const result = handleHeating("parking mesto na -1 vo centar", d, null);
+  assert("H41: unrelated msg while follow-up pending → follow-up RE-ASKED", result !== null && result.type === "QUESTION", `got ${JSON.stringify(result)}`);
+  assert("H41: heating NOT defaulted to unknown", d.heating === undefined && d.heatingType === undefined, `got heating=${d.heating}, type=${d.heatingType}`);
+  assert("H41: follow-up still pending", d.heatingFollowUp === true, `got ${d.heatingFollowUp}`);
+})();
+
+// H42: repeated bare "parno" while the follow-up is pending → still re-ask
+(() => {
+  const d = freshData();
+  handleHeating("parno", d, 'heating');
+  const result = handleHeating("ima parno", d, null);
+  assert("H42: repeated 'parno' → follow-up RE-ASKED (not defaulted)", result !== null && result.type === "QUESTION", `got ${JSON.stringify(result)}`);
+  assert("H42: heating still unset", d.heating === undefined, `got ${d.heating}`);
+})();
+
+// H43: explicit non-answer "ne znam tocno" still defaults (H17 family)
+(() => {
+  const d = freshData();
+  handleHeating("parno", d, 'heating');
+  handleHeating("ne znam tocno", d, null);
+  assert("H43: 'ne znam tocno' → parno_unknown (explicit non-answer)", d.heating === "parno_unknown" && d.heatingType === "unknown", `got heating=${d.heating}, type=${d.heatingType}`);
+})();
+
+// H44: Cyrillic explicit non-answer "не знам" still defaults
+(() => {
+  const d = freshData();
+  handleHeating("парно", d, 'heating');
+  handleHeating("не знам", d, null);
+  assert("H44: 'не знам' → parno_unknown (Cyrillic non-answer)", d.heating === "parno_unknown" && d.heatingType === "unknown", `got heating=${d.heating}, type=${d.heatingType}`);
+})();
+
+// H45: RE-ASK CAP — after 2 unanswered re-asks, the 3rd unrelated message
+// defaults to unknown (the conversation must never pin on heating forever)
+(() => {
+  const d = freshData();
+  handleHeating("parno", d, 'heating');            // initial ask
+  let r = handleHeating("parking mesto na -1", d, null);   // re-ask 1
+  assert("H45: re-ask 1 → QUESTION", r !== null && r.type === "QUESTION", `got ${JSON.stringify(r)}`);
+  assert("H45: heating still unset after re-ask 1", d.heating === undefined, `got ${d.heating}`);
+  r = handleHeating("ul. partizanska 12", d, null);        // re-ask 2
+  assert("H45: re-ask 2 → QUESTION", r !== null && r.type === "QUESTION", `got ${JSON.stringify(r)}`);
+  r = handleHeating("ima garaza", d, null);                // re-ask 3 → cap
+  assert("H45: 3rd unrelated msg → defaulted (cap reached)", d.heating === "parno_unknown" && d.heatingType === "unknown", `got heating=${d.heating}, type=${d.heatingType}`);
+  assert("H45: follow-up cleared after cap", d.heatingFollowUp === false, `got ${d.heatingFollowUp}`);
+})();
+
+// H46: "ne znam tochno" (h-form Viber spelling) → defaults
+(() => {
+  const d = freshData();
+  handleHeating("parno", d, 'heating');
+  handleHeating("ne znam tochno", d, null);
+  assert("H46: 'ne znam tochno' → parno_unknown", d.heating === "parno_unknown" && d.heatingType === "unknown", `got heating=${d.heating}, type=${d.heatingType}`);
+})();
+
+// H47: "nemam poim" (I have no idea) → defaults
+(() => {
+  const d = freshData();
+  handleHeating("parno", d, 'heating');
+  handleHeating("nemam poim", d, null);
+  assert("H47: 'nemam poim' → parno_unknown", d.heating === "parno_unknown" && d.heatingType === "unknown", `got heating=${d.heating}, type=${d.heatingType}`);
 })();
 
 

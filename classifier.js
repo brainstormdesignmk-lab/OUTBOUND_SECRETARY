@@ -171,18 +171,42 @@ export function classifyIntent(userInput, conversation) {
   // should trigger auto-acceptance on a short positive reply.
   // ==========================================
   const anaAskingCooperation = /(?:да\s+почнеме.{0,30}?соработ|расположени\s+да\s+соработув)/i.test(ctx.lastAnaMessage);
+
+  // ==========================================
+  // FUTURE/HYPOTHETICAL COOPERATION GUARD (reported)
+  // Ana's last message may ask about cooperation in the FUTURE or conditionally
+  // ("Дали сте расположени да соработуваме во иднина, ако имате друг имот
+  // за продажба?") rather than committing to the CURRENT property. A short
+  // positive reply ("sekako" — sure, "ke ve kontaktiram" — I'll contact you,
+  // "ubav den" — have a nice day) to such a question is polite SOCIAL
+  // agreement — the owner is wrapping up the conversation, NOT accepting a
+  // cooperation deal for this property. Real owners say "sekako" and hang up.
+  // Only PRESENT-tense commitment questions ("Дали да почнеме со соработка?")
+  // should boost short positives to ACCEPTED. AnaAskingCooperation-gated so
+  // unrelated messages never hit this.
+  // ==========================================
+  const anaAskingFutureCooperation = anaAskingCooperation &&
+    /(?:во\s+иднина|vo\s+idnina|иднина|idnina|ако\s+(?:имате|имаш|има|сакате)|ako\s+(?:imate|imas|ima|sakate)|доколку|dokolku|друг\s+имот|drug\s+imot|друг\s+стан|drug\s+stan|подоцна|podocna|во\s+прилика|vo\s+prilika|кога\s+ќе|koga\s+ke|следниот\s+пат|sledniot\s+pat)/i.test(ctx.lastAnaMessage);
+
   const isShortPositive = u.length < 50 && !/(ne|не)/i.test(u) && !/\?/.test(u) && !/(ama|ама|sepak|сепак|no|но)\b/i.test(u);
 
   // ==========================================
   // CONTEXT RULE A3: Rhetorical closer context
   // If Ana's last message ended with a rhetorical/meta closer
-  // ("Како ви звучи ова?" / "Што мислите?" / "Дали ви е појасно?" / "Дали ви се разјасни?"),
-  // a short positive reply is only acknowledging the explanation — it is NOT
-  // committing to cooperate. The owner is saying "sounds fine" about the pitch,
-  // not "yes, let's work together." Stay in PERSUASION (INTERESTED).
+  // ("Како ви звучи ова?" / "Што мислите?" / "Дали ви е појасно?" / "Дали ви се разјасни?" /
+  // "Дали ви помогна примерот?" — did the example help?), a short positive
+  // reply is only acknowledging the explanation — it is NOT committing to
+  // cooperate. The owner is saying "sounds fine" about the pitch, not
+  // "yes, let's work together." Stay in PERSUASION (INTERESTED).
+  // NOTE: "дали ви помогна" / "помогна ли" (did it help) was added after the
+  // reported bug: after the commission EXAMPLE ("...а разликата е наша
+  // провизија. Дали ви помогна примерот?") the owner's "da jasno mi e"
+  // (yes, it's clear to me) is an answer to the example question, NOT a
+  // cooperation acceptance — but the affirmative-start catch-all read it as
+  // ACCEPTED 0.9 and kicked the phase into DATA_COLLECTION.
   // ==========================================
   const anaAskedRhetoricalCloser =
-    /како ви звучи|kako vi zvuci|што мислите|sto mislite|дали ви е појасно|dali vi e pojasno|дали ви се разјасни|dali vi se razjasni|дали ви е јасно|dali vi e jasno|како звучи|kako zvuci/i.test(ctx.lastAnaMessage);
+    /како ви звучи|kako vi zvuci|што мислите|sto mislite|дали ви е појасно|dali vi e pojasno|дали ви се разјасни|dali vi se razjasni|дали ви е јасно|dali vi e jasno|како звучи|kako zvuci|дали ви помогна|dali vi pomogna|помогна ли|pomogna li/i.test(ctx.lastAnaMessage);
 
   // "звучи" acknowledgment guard — "dobro mi zvuci" (sounds good to me),
   // "dobro zvuci" (sounds good) — the owner is commenting on the offer's
@@ -262,6 +286,25 @@ export function classifyIntent(userInput, conversation) {
   const hasDoubt = hasAcceptanceDoubt(u);
 
   // ==========================================
+  // COOPERATION-VERB COMMITMENT ESCAPE (shared by D3 + the understanding guard)
+  // The acknowledgment guards below downgrade short positives after a
+  // rhetorical closer / understanding phrase to INTERESTED. But the
+  // cooperation VERBS are explicit commitments: "sorabotuvame" (we cooperate),
+  // "ke sorabotuvame" (we will cooperate), "sorabotuvam" (I cooperate).
+  // STRONG_ACCEPTANCE_WORDS deliberately excludes the sorabotuv root (so
+  // "dobro zvuci. vekje sorabotuvam so druga agencija" — already cooperating
+  // with ANOTHER agency — is never taken as acceptance), which means the
+  // guards would wrongly downgrade a genuine commitment verb after a closer.
+  // Escape rule: ke/da-prefixed forms are ALWAYS commitments; the bare verb is
+  // a commitment UNLESS the owner is already cooperating elsewhere
+  // ("vekje ... druga" — that stays an acknowledgment / non-acceptance).
+  // ==========================================
+  const coopCommitmentVerb =
+    /(?:ke|ќе|da|да)\s*(?:sorabotuvam|соработувам|sorabotuvame|соработуваме)/i.test(u) ||
+    (/(?:^|\s)(?:sorabotuvame|соработуваме|sorabotuvam|соработувам)(?:\s|$)/i.test(u) &&
+     !/(?:vekje|веќе|веке).{0,20}(?:druga|друга)/i.test(u));
+
+  // ==========================================
   // CONTEXT RULE D3: Rhetorical closer guard
   // If Ana's last message used a rhetorical/meta closer ("Како ви звучи ова?",
   // "Што мислите?", "Дали ви е појасно?", "Дали ви се разјасни?"), a short
@@ -273,7 +316,7 @@ export function classifyIntent(userInput, conversation) {
   // through unchanged. anaAskingCooperation cases are never downgraded.
   // ==========================================
   if (anaAskedRhetoricalCloser && !anaAskingCooperation && isShortPositive && !hasDoubt &&
-      !STRONG_ACCEPTANCE_WORDS.test(u)) {
+      !STRONG_ACCEPTANCE_WORDS.test(u) && !coopCommitmentVerb) {
     return { intent: "INTERESTED", confidence: 0.7, reason: "rhetorical closer — acknowledgment, not cooperation" };
   }
 
@@ -417,7 +460,7 @@ export function classifyIntent(userInput, conversation) {
     // CONTEXT RULE C1: Cooperation question boost
     // If Ana just directly asked "Дали да почнеме со соработка?",
     // and owner says "da" (the simplest possible yes), that's clear acceptance.
-    if (anaAskingCooperation) {
+    if (anaAskingCooperation && !anaAskingFutureCooperation) {
       return { intent: "ACCEPTED", confidence: 0.90, reason: "standalone da responding to cooperation question" };
     }
     // CONTEXT RULE C2: Previous hesitation → downgrade standalone "da" to INTERESTED
@@ -435,7 +478,7 @@ export function classifyIntent(userInput, conversation) {
     // CONTEXT RULE C3: Cooperation question boost
     // If Ana just asked "Дали да почнеме со соработка?" and owner says "moze",
     // that's a clear acceptance, not ambiguous permission.
-    if (anaAskingCooperation) {
+    if (anaAskingCooperation && !anaAskingFutureCooperation) {
       return { intent: "ACCEPTED", confidence: 0.90, reason: "moze responding to cooperation question" };
     }
     return { intent: "ACCEPTED", confidence: 0.65, reason: "moze — low confidence cooperation" };
@@ -444,7 +487,10 @@ export function classifyIntent(userInput, conversation) {
   // "моže {name}" — acceptance with personal address (0.90)
   // e.g., "moze ana", "може ана" — very common Macedonian acceptance pattern
   // The name can be any short word (agent name, etc.)
-  if (/^(moze|може)\s[a-zа-яё]{2,12}$/i.test(u) && !hasDoubt) {
+  // FUTURE-COOP GATE: "moze ana" after a future/hypothetical cooperation
+  // question ("Дали сте расположени да соработуваме во иднина?") is polite
+  // social agreement, not a commitment — same guard as C1/C3/D (reported).
+  if (/^(moze|може)\s[a-zа-яё]{2,12}$/i.test(u) && !hasDoubt && !anaAskingFutureCooperation) {
     return { intent: "ACCEPTED", confidence: 0.90, reason: "moze plus name — strong personal acceptance" };
   }
 
@@ -477,6 +523,25 @@ export function classifyIntent(userInput, conversation) {
     return { intent: "ACCEPTED", confidence: 0.80, reason: "ok/okej — okay" };
   }
 
+  // ==========================================
+  // POLITE FAREWELL / FUTURE-CONTACT GUARD (reported)
+  // "ubav den" (have a nice day), "pozdrav" (greetings), "ke ve kontaktiram"
+  // (I'll contact you), "ke se javam" (I'll get back to you), "ke prasam"
+  // (I'll ask) — polite CLOSING messages. Owners send these to end the
+  // conversation politely, NOT to accept cooperation. Previously, if Ana had
+  // just asked a cooperation question (CONTEXT RULE D), a bare "ke ve
+  // kontaktiram" / "ubav den" was boosted to ACCEPTED 0.85 → the phase
+  // wrongly advanced to DATA_COLLECTION and Ana started asking for the sold
+  // property's price (the reported conversation). This guard runs BEFORE the
+  // cooperation-context boost and keeps these at INTERESTED. Real acceptance
+  // words ("da probame", "sakam") are unaffected — "ke ve kontaktiram" after
+  // "da, sakam sorabotka" still accepts via the sakam rule above.
+  // ==========================================
+  if (/(^(?:ubav|убав)\s+(?:den|ден)|^(?:prijaten|пријатен)\s+(?:den|ден)|^(?:ubava|убава)\s+(?:vecer|вечер)|^(?:prijatna|пријатна)\s+(?:vecer|вечер)|^pozdrav|^поздрав|^zbogum|^збогум|ke\s+ve\s+kontaktiram|ќе\s+ве\s+контактирам|ke\s+se\s+javam|ќе\s+се\s+јавам|ke\s+se\s+javim|ќе\s+се\s+јавим|ke\s+vi\s+se\s+javam|ќе\s+ви\s+се\s+јавам|ke\s+prasam|ќе\s+прашам)/i.test(u) &&
+      !STRONG_ACCEPTANCE_WORDS.test(u) && !coopCommitmentVerb) {
+    return { intent: "INTERESTED", confidence: 0.6, reason: "polite farewell / future contact — not cooperation" };
+  }
+
   // CONTEXT RULE D: Cooperation question context boost
   // If Ana just explicitly asked "Дали да почнеме со соработка?" and the
   // owner replies with a short positive message, boost to ACCEPTED.
@@ -492,11 +557,36 @@ export function classifyIntent(userInput, conversation) {
   // this guard, CONTEXT RULE D would re-accept what the prior-agreement rule's
   // hasPriorRejection guard just blocked. Explicit fresh acceptances ("да"/"moze"
   // via C1/C3, "ajde da probame", etc.) are unaffected.
-  if (anaAskingCooperation && isShortPositive && !hasDoubt && !hasPriorRejection && !HESITATION_GUARD_WORDS.test(u) &&
+  if (anaAskingCooperation && !anaAskingFutureCooperation && isShortPositive && !hasDoubt && !hasPriorRejection && !HESITATION_GUARD_WORDS.test(u) &&
       !/(moze|може)\s+[a-zа-яё]{2,12}$/i.test(u) &&
       !CONV_CONTINUATION_WORDS.test(u) &&
       !/^(da|да)\s*[,.]?\s*moze(?:те|\s|$)/i.test(u)) {
     return { intent: "ACCEPTED", confidence: 0.85, reason: "cooperation question context — short positive reply" };
+  }
+
+  // ==========================================
+  // UNDERSTANDING CONFIRMATION GUARD (reported)
+  // "da jasno mi e" ("yes, it's clear to me") — the owner is confirming they
+  // UNDERSTOOD Ana's explanation (the commission example), NOT agreeing to
+  // cooperate. The bottom "clear understanding" rule only matched
+  // "mi … jasno" (mi BEFORE the keyword), so the reported message (jasno
+  // BEFORE mi) fell through to the affirmative-start catch-all → ACCEPTED
+  // 0.9 → the phase wrongly advanced to DATA_COLLECTION (the reported
+  // "collecting phase triggered / wrong"). Covers both word orders
+  // ("mi e jasno" / "jasno mi e"), "se e jasno" / "sve e jasno"
+  // (everything's clear), "razbrav"/"razbiram" (I understood) and bare
+  // "jasno". MUST run BEFORE the affirmative-start catch-all. Strong
+  // acceptances are excluded via STRONG_ACCEPTANCE_WORDS, so
+  // "jasno mi e, ajde da probame" still accepts (the strong rules then fire).
+  // EXTRA EXCLUSION — the cooperation-verb commitment escape (coopCommitmentVerb,
+  // shared with D3): an UNDERSTANDING phrase + "ke/da sorabotuvame" or a bare
+  // cooperation verb ("jasno mi e, ke sorabotuvame" = "it's clear, we'll
+  // cooperate") IS cooperation; only "vekje ... druga" (already cooperating
+  // with another agency) stays an acknowledgment.
+  // ==========================================
+  if (/(?:mi|ми).{0,12}(?:jasno|јасно|razjasni|разјасни|razbira|разбира|razbrav|разбрав)|(?:jasno|јасно|razjasni|разјасни|razbira|разбира|razbrav|разбрав).{0,12}(?:mi|ми)|(?:se|се|sve|све)\s+(?:e|е)\s+(?:jasno|јасно)|^(?:da|да)?[,.]?\s*(?:jasno|јасно|razbrav|разбрав|razbiram|разбирам)(?:\s|$)/i.test(u) &&
+      !STRONG_ACCEPTANCE_WORDS.test(u) && !coopCommitmentVerb) {
+    return { intent: "INTERESTED", confidence: 0.8, reason: "clear understanding — acknowledgment, not cooperation" };
   }
 
   // COMPREHENSIVE GUARD: affirmative start + objection/concern/question → INTERESTED (not ACCEPTED)

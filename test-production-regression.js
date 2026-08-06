@@ -86,6 +86,8 @@ async function sendMessage(session, userInput) {
     // would make real API calls and are deliberately excluded.
     const normalTurns = [
       'IMATE KLIENTI ZAINTERESIRANI?',          // hardcoded client handler
+      'IMATE NEKOJ ZAINTERESIRAN?',             // hardcoded client handler (nekoj family)
+      'VE PRASUVAM DALI VIE IMATE NEKOJ ZAINTERESIRAN?', // hardcoded client handler (nekoj family)
       'OBJASNI MI MOLIMTE KAKO RABOTITE BEZ PROVIZIJA ?', // hardcoded commission-explanation
       'KAKVI DAVACKI IMAM JAS PREMA VAS AKO NE PLAKJAM PROVIZIJA?', // hardcoded commission
       'KOJPLAKJA ADVOKAT , NOTAR ?'             // hardcoded legal costs
