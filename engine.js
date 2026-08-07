@@ -64,6 +64,14 @@ const TYPING_SCALE = Math.max(0, Number(process.env.ANA_SIM_TYPING_SCALE) || 1);
 // escalation is never dropped).
 const TERMINAL_RESPONSE_TYPES = new Set(['TERMINATE', 'ESCALATE', 'CLOSE', 'CLOSED', 'NO_INTEREST']);
 
+// STRIKE WARNING responses are ALSO routed immediately mid-batch (though
+// they do NOT end the conversation and the batch keeps processing — see the
+// WARNING branch in _processOwnerBatch). This is a DELIBERATE exception to
+// the "only the LAST response is ever sent" rule: a warning must never be
+// dropped by a quickfire follow-up, or an owner could be blocklisted on
+// strike 3 having never seen a warning (reported). Do not remove that
+// branch as "redundant" with this comment.
+
 // ============================================================
 // QUESTION-STATE SNAPSHOT/RESTORE (owner-follow-up grace batches)
 // ============================================================
@@ -90,6 +98,12 @@ function _captureQuestionState(session) {
     // a DROPPED response must not burn one of the max-2 re-asks on a question
     // the owner never saw (same phantom-attempt principle as GR11).
     heatingFollowUpAttempts: session.collectedData?.heatingFollowUpAttempts,
+    // The still-available acknowledgment gates a PREFIX on the next field
+    // question (data-collection.js). An acknowledgment attached to a question
+    // the owner never SAW (intermediate message, response dropped) must not
+    // be consumed — roll it back so the visible reply still registers the
+    // availability message.
+    availabilityAcknowledged: session.availabilityAcknowledged,
     skippedKeys: Object.keys(session.collectedData || {}).filter(k => k.endsWith('Skipped'))
   };
 }
@@ -98,6 +112,7 @@ function _restoreQuestionState(session, snap) {
   session.questionAttempts = snap.questionAttempts;
   session.pendingConfirmation = snap.pendingConfirmation;
   session.pendingFollowUp = snap.pendingFollowUp;
+  session.availabilityAcknowledged = snap.availabilityAcknowledged;
   if (session.collectedData) {
     // The heating handler's "Какво парно?" marker — a follow-up question the
     // owner never saw must not keep the next message in a phantom heating
@@ -552,6 +567,17 @@ export class MultiLeadEngine {
       }
       if (questionState && !TERMINAL_RESPONSE_TYPES.has(response.type)) {
         _restoreQuestionState(session, questionState);
+      }
+      // STRIKE WARNING ROUTING (reported): the only-last-response rule used
+      // to DROP a mid-batch strike warning — the follow-up sentence's reply
+      // replaced it, so the owner never saw the strike-2 final warning (and
+      // could be blocklisted on strike 3 having never been warned). Route
+      // WARNING responses IMMEDIATELY like terminal responses, but KEEP
+      // processing the rest of the batch: a later offense still escalates to
+      // TERMINATE (routed + break below), and a normal follow-up still gets
+      // its answer (the isLast branch below).
+      if (response.type === 'WARNING' && !isLast) {
+        await this._routeResponse(session, response);
       }
       // Terminal responses end the conversation — route them IMMEDIATELY
       // even if they're intermediate in the batch, so a quickfire escalation

@@ -1747,9 +1747,16 @@ const e2eSession = {
 };
 const e2eResp = await generateResponse(e2eSession, 'ok');
 console.log(`  e2e future-coop + "ok" → ${e2eResp.type}; accepted=${e2eSession.collectedData.cooperationAccepted}`);
+// HARDENED (was flaky): the old check rejected any reply containing "цена"/
+// "price" — but this case's reply is a LIVE persuasion LLM call, and a
+// sale-pitch about a future property legitimately mentions the price in
+// SOME generations ("...да го продадете имотот на нашата цена..."), so the
+// text regex tripped ~1-in-4 runs on CORRECT behavior (NORMAL + not
+// accepted). The real contract is type-based: the owner must NOT be
+// accepted AND must NOT get a data-collection price QUESTION.
 assert('e2e: "ok" after future-coop question stays PERSUASION (no price question)',
-  e2eSession.collectedData.cooperationAccepted === false && !/цена|price/i.test(e2eResp.text || ''),
-  `Got accepted=${e2eSession.collectedData.cooperationAccepted}, resp=${(e2eResp.text || '').substring(0, 60)}`);
+  e2eSession.collectedData.cooperationAccepted === false && e2eResp.type !== 'QUESTION',
+  `Got accepted=${e2eSession.collectedData.cooperationAccepted}, type=${e2eResp.type}, resp=${(e2eResp.text || '').substring(0, 60)}`);
 
 // ========================================
 // SCENARIO 18: BUSINESS/COMMERCIAL properties ask the business field set

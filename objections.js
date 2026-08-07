@@ -106,6 +106,57 @@ function getRandomAgencyWorkflowResponse(isRent) {
   return responses[Math.floor(Math.random() * responses.length)];
 }
 
+// ========================================
+// WHO PAYS? RESPONSES — "Koj ve plakja?" / "koi vi se klientite?" — who
+// pays the agency. Sale: the buyer pays the final price; the owner keeps
+// their clean price; the difference is the commission. Rent: BOTH sides pay
+// the standard 50%/100% rule. All variants rotate randomly (same as legal
+// costs / agent visit / age) so repeated follow-ups never read as a bot.
+// ========================================
+const WHO_PAYS_RESPONSES_SALE = [
+  'Разликата меѓу вашата чиста цена и постигнатата купопродажна цена е провизија за агенцијата. Дали ви се разјасни принципот?',
+  'Не плаќате вие — плаќа купувачот. Вие ја добивате вашата чиста цена во целост, а разликата до продажната цена е наша провизија. Дали е јасно?',
+  'На вас ништо не ви се наплаќа. Купувачот ја плаќа конечната цена, а ние заработуваме од разликата меѓу вашата чиста цена и постигнатата цена. Дали ви е појасно?'
+];
+
+const WHO_PAYS_RESPONSES_RENT = [
+  'За издавање, провизијата за агенцијата е 50% од месечната кирија од сопственикот (100% ако киријата е над 1000 евра) и 50% од закупецот. На ден на потпишување, закупецот плаќа прва кирија + депозит + провизија. Минимум 12 месеци. Дали ви е појасно?',
+  'За издавање, провизијата ја плаќаат двете страни: вие 50% од една месечна кирија (100% ако е над 1000 евра) и закупецот 50%, на денот на потпишување на договорот. Дали ви е јасно?',
+  'Кај издавање, закупецот плаќа прва кирија, депозит и својата провизија, а вие плаќате 50% од една месечна кирија (100% над 1000 евра) — сè на ден на потпишување. Дали ви е појасно?'
+];
+
+function getRandomWhoPaysResponse(isRent) {
+  const responses = isRent ? WHO_PAYS_RESPONSES_RENT : WHO_PAYS_RESPONSES_SALE;
+  return responses[Math.floor(Math.random() * responses.length)];
+}
+
+// ========================================
+// FROM WHOSE POCKET? RESPONSES — "Od kogo zemate pari?" / "od koj dzeb se
+// parite?" — from whose pocket does the money come. SALE: the BUYER pays
+// the final price — the owner gets their asked price in full, the difference
+// is the commission, nothing comes out of the owner's pocket. RENT: the
+// tenant pays rent + deposit; the owner pays only the standard 50%/100%
+// commission on signing day. All variants rotate randomly so the repeated
+// "od kogo" press never gets the identical sentence (reported production
+// bug: Ana repeated the same persuasion line verbatim).
+// ========================================
+const FROM_WHOSE_POCKET_RESPONSES_SALE = [
+  'Купувачот ја плаќа конечната цена. Вие ја добивате вашата барана цена, а нашата провизија е разликата над неа. Дали ви е појасно?',
+  'Ние заработуваме од купувачот — тој ја плаќа конечната цена, вие ја добивате вашата барана цена целосно, а разликата над неа е наша провизија. Од вас не земаме ништо. Дали ви е појасно?',
+  'Парите ги земаме од купувачот: тој плаќа повеќе од вашата барана цена, вие ја добивате вашата целосно, а разликата е нашата заработувачка. Дали ви е појасно?'
+];
+
+const FROM_WHOSE_POCKET_RESPONSES_RENT = [
+  'Кај издавање, закупецот ги плаќа киријата и депозитот, а провизијата за агенцијата — 50% од една месечна кирија (100% ако е над 1000 евра) — ја плаќате вие на денот на потпишување. Дали ви е појасно?',
+  'За издавање, закупецот ги плаќа киријата и депозитот, а вие плаќате само стандардната провизија — 50% од една месечна кирија (100% ако е над 1000 евра) — на денот на потпишување на договорот. Дали ви е јасно?',
+  'Кај издавање парите ги земаме од закупецот (кирија и депозит), а од вас само 50% од една месечна кирија како провизија (100% ако е над 1000 евра), на денот на потпишување. Дали ви е појасно?'
+];
+
+function getRandomFromWhosePocketResponse(isRent) {
+  const responses = isRent ? FROM_WHOSE_POCKET_RESPONSES_RENT : FROM_WHOSE_POCKET_RESPONSES_SALE;
+  return responses[Math.floor(Math.random() * responses.length)];
+}
+
 const OBJECTION_RESPONSES = {
   'legal_costs': {
     pattern: /advokat|адвокат|notar|нотар|danok|данок/i,
@@ -127,7 +178,7 @@ const OBJECTION_RESPONSES = {
     // ensure it fires BEFORE the phone-origin handler, which would otherwise
     // swallow "od kade se parite" as a phone question ("Го добив вашиот број
     // од огласот...").
-    pattern: /od koj dzeb|од кој џеб|od kade se pari|од каде се пари|od kade vi se pari|од каде ви се пари|kade se pari|каде се пари|od koj dzeb se pari|од кој џеб се пари|od koj dzeb gi vadite pari|од кој џеб ги вадите пари|koi se pari|чии се пари|cii se pari|cii pari se toa|чии пари се тоа|od kade pa tie pari|од каде па тие пари|od kade vam pari|од каде вам пари|kako vie ke naplakjate|како вие ќе наплаќате|kako vie zemate|како вие земате|koj vi dava provizija|кој ви дава провизија|koj vi gi dava parite za provizija|кој ви ги дава парите за провизија|od kade e provizijata|од каде е провизијата|koj plakja provizija|кој плаќа провизија|kako se naplakjate vie|како се наплаќате вие/i,
+    pattern: /od koj dzeb|од кој џеб|od kade se pari|од каде се пари|od kade vi se pari|од каде ви се пари|kade se pari|каде се пари|od koj dzeb se pari|од кој џеб се пари|od koj dzeb gi vadite pari|од кој џеб ги вадите пари|koi se pari|чии се пари|cii se pari|cii pari se toa|чии пари се тоа|od kade pa tie pari|од каде па тие пари|od kade vam pari|од каде вам пари|kako vie ke naplakjate|како вие ќе наплаќате|kako vie zemate|како вие земате|koj vi dava provizija|кој ви дава провизија|koj vi gi dava parite za provizija|кој ви ги дава парите за провизија|od kade e provizijata|од каде е провизијата|koj plakja provizija|кој плаќа провизија|kako se naplakjate vie|како се наплаќате вие|od kogo zemate|од кого земате|od kogo gi zemate|од кого ги земате|od kogo zemate pari|од кого земате пари|kogo zemate|кого земате|kazi od kogo|кажи од кого|kazi mi od kogo|кажи ми од кого|pa kazi od kogo|па кажи од кого|pa od kogo|па од кого|od kogo se parite|од кого се парите|od kogo vi se parite|од кого ви се парите|od kogo\s*[?]|од кого\s*[?]/i,
     response: 'Купувачот ја плаќа конечната цена. Вие ја добивате вашата барана цена, а нашата провизија е разликата над неа. Дали ви е појасно?'
   },
   'trust': {
@@ -172,8 +223,10 @@ function matchObjection(text, isRent) {
       if (isRent) {
         if (key === 'legal_costs') {
           response = getRandomLegalCostResponse(true);
-        } else if (key === 'commission' || key === 'who_pays') {
+        } else if (key === 'commission') {
           response = 'За издавање, провизијата за агенцијата е 50% од месечната кирија од сопственикот (100% ако киријата е над 1000 евра) и 50% од закупецот. На ден на потпишување, закупецот плаќа прва кирија + депозит + провизија. Минимум 12 месеци. Дали ви е појасно?';
+        } else if (key === 'who_pays') {
+          response = getRandomWhoPaysResponse(true);
         } else if (key === 'faster_sale') {
           response = 'Агенцијата има голема база на потенцијални клиенти кои се спремни да изнајмат, ако нешто им се допадне. Дали би пробале агенциски третман за вашата недвижност?';
         } else if (key === 'example') {
@@ -185,7 +238,8 @@ function matchObjection(text, isRent) {
         } else if (key === 'from_whose_pocket') {
           // Never the sale answer ("Купувачот ја плаќа конечната цена...") —
           // on rent there is no buyer, and the owner pays the 50%/100% fee.
-          response = 'Кај издавање, закупецот ги плаќа киријата и депозитот, а провизијата за агенцијата — 50% од една месечна кирија (100% ако е над 1000 евра) — ја плаќате вие на денот на потпишување. Дали ви е појасно?';
+          // Rotates (3 variants) so repeated "od kogo" presses vary.
+          response = getRandomFromWhosePocketResponse(true);
         } else if (key === 'percentage') {
           // Defensive: on rent there is NO 2%-on-top model — the standard
           // 50%/100% rent rule applies. (Typical phrasings are pre-empted by
@@ -197,6 +251,10 @@ function matchObjection(text, isRent) {
       } else if (key === 'legal_costs') {
         // For sale, pick a random version
         response = getRandomLegalCostResponse(false);
+      } else if (key === 'who_pays') {
+        response = getRandomWhoPaysResponse(false);
+      } else if (key === 'from_whose_pocket') {
+        response = getRandomFromWhosePocketResponse(false);
       }
       return { key, response };
     }
@@ -216,7 +274,7 @@ function isAskingAboutRentCommission(text) {
 }
 
 function isAskingAboutCommission(text) {
-  return /провизи|provizija|koj vi|кој ви|kako vi|како ви|komisija|комисија|koj plakja|кој плаќа|koj ve plakja|кој ве плаќа|od kade se pari|од каде се пари|od kade vi se pari|од каде ви се пари|kade se pari|каде се пари|od koj dzeb|од кој џеб|cii se pari|чии се пари|cii pari|чии пари|od kade pa tie pari|од каде па тие пари|od kade vam pari|од каде вам пари|kako vie zemate|како вие земате|kako vie ke naplakjate|како вие ќе наплаќате|kolku zimate|колку земате|sto zimate|што земате|dali vi plakjam|дали ви плаќам|uslovi|услови|condition|terms|vasi uslovi|ваши услови|kako rabotite|како работите|sorabotka|соработка|kakva vi e provizijata|каква ви е провизијата|kakvi se uslovite|какви се условите|koi vi se uslovite|кои ви се условите|kakvi se vasi|какви се ваши|nisto ne zemate|ништо не земате|ne zemate|не земате|od mojot del|од мојот дел|vie zemate|вие земате|sto zemate|што земате|dali zimate|дали земате|vie naplakjate|вие наплаќате|kako se naplakjate|како се наплаќате|kako vi e provizijata|како ви е провизијата|znaci nisto|значи ништо|znaci ne|значи не|znaci bez|значи без|kakvi drugi obvrski|какви други обврски|drugi obvrski|други обврски|obvrski kon vas|обврски кон вас|sto treba da vi platam|што треба да ви платам|kolku procenti|колку проценти|kolku %|колку %|kolku e provizijata|колку е провизијата|kolku iznesuva provizijata|колку изнесува провизијата|kolku se naplakjate|колку се наплаќате|kolku e vashata provizija|колку е вашата провизија|kolku zimate|колку земате|kolku vi e provizijata|колку ви е провизијата|kolku vi naplakjate|колку ви наплаќате|kolku procenti zimate|колку проценти земате|kolku dodavate|колку додавате|kolku e vasiot del|колку е вашиот дел|kolku nad cenata|колку над цената|koja vi e provizijata|која ви е провизијата|kolku e vashata naknada|колку е вашата надокнада|kolku procenti vi e|колку проценти ви е|kolku se naplakja|колку се наплаќа|kolku vi se|колку ви се/i.test(text);
+  return /провизи|provizija|koj vi|кој ви|kako vi|како ви|komisija|комисија|koj plakja|кој плаќа|koj ve plakja|кој ве плаќа|od kade se pari|од каде се пари|od kade vi se pari|од каде ви се пари|kade se pari|каде се пари|od koj dzeb|од кој џеб|cii se pari|чии се пари|cii pari|чии пари|od kade pa tie pari|од каде па тие пари|od kade vam pari|од каде вам пари|kako vie zemate|како вие земате|kako vie ke naplakjate|како вие ќе наплаќате|kolku zimate|колку земате|sto zimate|што земате|dali vi plakjam|дали ви плаќам|uslovi|услови|condition|terms|vasi uslovi|ваши услови|kako rabotite|како работите|sorabotka|соработка|kakva vi e provizijata|каква ви е провизијата|kakvi se uslovite|какви се условите|koi vi se uslovite|кои ви се условите|kakvi se vasi|какви се ваши|nisto ne zemate|ништо не земате|ne zemate|не земате|od mojot del|од мојот дел|vie zemate|вие земате|sto zemate|што земате|dali zimate|дали земате|vie naplakjate|вие наплаќате|kako se naplakjate|како се наплаќате|kako vi e provizijata|како ви е провизијата|znaci nisto|значи ништо|znaci ne|значи не|znaci bez|значи без|kakvi drugi obvrski|какви други обврски|drugi obvrski|други обврски|obvrski kon vas|обврски кон вас|sto treba da vi platam|што треба да ви платам|kolku procenti|колку проценти|kolku %|колку %|kolku e provizijata|колку е провизијата|kolku iznesuva provizijata|колку изнесува провизијата|kolku se naplakjate|колку се наплаќате|kolku e vashata provizija|колку е вашата провизија|kolku zimate|колку земате|kolku vi e provizijata|колку ви е провизијата|kolku vi naplakjate|колку ви наплаќате|kolku procenti zimate|колку проценти земате|kolku dodavate|колку додавате|kolku e vasiot del|колку е вашиот дел|kolku nad cenata|колку над цената|koja vi e provizijata|која ви е провизијата|kolku e vashata naknada|колку е вашата надокнада|kolku procenti vi e|колку проценти ви е|kolku se naplakja|колку се наплаќа|kolku vi se|колку ви се|od kogo zemate|од кого земате|od kogo gi zemate|од кого ги земате|od kogo zemate pari|од кого земате пари|kogo zemate|кого земате|kazi od kogo|кажи од кого|kazi mi od kogo|кажи ми од кого|pa kazi od kogo|па кажи од кого|pa od kogo|па од кого|od kogo se parite|од кого се парите|od kogo vi se parite|од кого ви се парите|od kogo\s*[?]|од кого\s*[?]/i.test(text);
 }
 
 function isAskingForExplanation(text) {
@@ -445,6 +503,14 @@ function isAskingAboutAgency(text) {
   // IMPORTANT: Negative lookahead for provizija/procent prevents false matches
   // from commission questions like "shto rabotite so provizijata?" which should
   // be handled by the commission/objection handler, NOT by the agency handler.
+  // REFUSAL NEGATIVE GUARD (reported, lead 5502969): "NE MI TREBA AGENCIJA",
+  // "SAMA KE SI GI IZDADAM", "BEZ AGENCIJA" are REFUSALS of the agency —
+  // they must fall through to the phase detector (rejection escalation), NOT
+  // get the generic "Ние сме Metropolis..." agency pitch. The bare
+  // "agencija|агенциј" token in the positive pattern would otherwise match
+  // every refusal that mentions the word "agency".
+  const refusalGuard = /(?:ne\s*mi\s*(?:treba|треба)|не\s*ми\s*треба|ne\s*sakam|не\s*сакам|bez\s*agencij|без\s*агенци|sama\s*ke|сама\s*ќе|sam\s*ke|сам\s*ќе|ke\s*si\s*gi\s*izdadam|ќе\s*си\s*ги\s*издадам|ke\s*gi\s*izdadam\s*(?:sam|sama)|ќе\s*ги\s*издадам\s*(?:сам|сама)|nema\s*(?:potreba|потреба)\s*od\s*agenci|нема\s*потреба\s*од\s*агенци|ne\s*mi\s*treba\s*agencija|не\s*ми\s*треба\s*агенција)/i.test(text);
+  if (refusalGuard) return false;
   return /agencija|агенциј|firma|фирм|kancelari|канцелари|biro|биро|vreme rabotite|време работите|iskustvo|искуство|godini rabotite|години работите|kako se vika|како се вика|kako se vikate|како се викате|koja ste|која сте|koj ve vodi|кој ве води|vodi agencijata|води агенцијата|kade rabotite|каде работите|od kade rabotite|од каде работите|kade vi e|каде ви е|kade se naogja|каде се наоѓа|shto rabotite(?!\s+so\s+(provizija|провизија|procent|процент))|што работите(?!\s+со\s+(провизија|provizija|процент|procent))|shto e toa metropolis|што е тоа metropolis|sto e metropolis|што е метрополис|sto e metro polis|metropolis agencija|metropolis агенција|angažirate|ангажирате|vraboteni|вработени|kolektiv|колектив|ime na agencijata|име на агенцијата/i.test(text);
 }
 
@@ -469,6 +535,12 @@ export {
   getRandomCommissionNoProvisionResponse,
   AGENCY_WORKFLOW_RESPONSES_SALE,
   AGENCY_WORKFLOW_RESPONSES_RENT,
+  WHO_PAYS_RESPONSES_SALE,
+  WHO_PAYS_RESPONSES_RENT,
+  getRandomWhoPaysResponse,
+  FROM_WHOSE_POCKET_RESPONSES_SALE,
+  FROM_WHOSE_POCKET_RESPONSES_RENT,
+  getRandomFromWhosePocketResponse,
   getRandomAgencyWorkflowResponse,
   isAskingHowCommissionWorks,
   isAskingIfOwnerMustPay,

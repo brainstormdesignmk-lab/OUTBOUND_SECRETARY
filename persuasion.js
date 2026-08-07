@@ -56,6 +56,13 @@ export function buildPersuasionPrompt(conv, userInput, persuasionContext, isRent
   // the standard confident answer instead of the generic "имаме голем број
   // клиенти" pitch. Same wording for rent and sale (clients are clients).
   const clientQuestionRule = 'Ако сопственикот праша дали имате заинтересиран клиент/купувач/закупец ("imate nekoj zainteresiran", "imate zainteresirani", "dali imate kupci", "имате некој заинтересиран"), одговори: "Постојано имаме заинтересирани клиенти за тој реон." — НЕ кажувај само "имаме голем број клиенти".';
+  // No-verbatim-repeat rule: if the owner presses on the same objection and
+  // Ana already answered it, the LLM must REPHRASE — the reported production
+  // bug had Ana sending the identical sentence twice in a row ("Ве разбирам
+  // дека имате сомнежи, но нашата заработувачка е разликата..." twice),
+  // which reads as a bot. Same information, different words, different
+  // closing question.
+  const noRepeatRule = 'АКО ВО ПРЕТХОДНИОТ ОДГОВОР СИ ЈА КАЖАЛА ИСТАТА РЕЧЕНИЦА, НЕ ЈА ПОВТОРУВАЈ БУКВАЛНО — кажи ги истите информации со поинакви зборови и со поинакво затворачко прашање.';
 
   return `
 Ти си Ана, професионална македонска агенка за недвижности.
@@ -88,6 +95,7 @@ export function buildPersuasionPrompt(conv, userInput, persuasionContext, isRent
 - ${freeWorkRule}
 - ${mustPayRule}
 - ${clientQuestionRule}
+- ${noRepeatRule}
 - Секогаш заврши со прашање за соработка: "Дали сте расположени да соработуваме?"
 - Пишувај исклучиво на стандарден македонски јазик (македонски книжевен јазик).
 - НЕ користі русизми, украинизми или србизми.

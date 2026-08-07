@@ -204,6 +204,8 @@ const LEXICON = [
   { id: 'M6', category: 'mild', severity: 1, confidence: 0.8, stems: ['bolesnik', 'bolesna'], reason: 'bolesnik' },
   { id: 'M7', category: 'mild', severity: 1, confidence: 0.8, stems: ['smesen', 'smesna'], reason: 'smeshen' },
   { id: 'M8', category: 'mild', severity: 1, confidence: 0.8, stems: ['lazo', 'laze', 'lazi', 'lazov'], reason: 'lazh/lazho' },
+  { id: 'M9', category: 'mild', severity: 1, confidence: 0.8, boundary: true, stems: ['dosadna si', 'si dosadna', 'dosaden si', 'si dosaden', 'dosadni ste', 'dosadno e'], reason: 'you are annoying (DOSADNA SI)' },
+  { id: 'M10', category: 'mild', severity: 1, confidence: 0.8, boundary: true, stems: ['otkaci se', 'otkazi se', 'otkazhi se'], reason: 'buzz off (OTKACI SE)' },
   { id: 'O1', category: 'mild', severity: 1, confidence: 0.8, stems: ['zamolci', 'kjuti', 'kjutis'], reason: 'O1 zamolchi/kjuti' },
   { id: 'O4', category: 'mild', severity: 1, confidence: 0.8, stems: ['ne znaes nisto'], reason: 'O4 ne znaes nisto' },
   { id: 'O5', category: 'mild', severity: 1, confidence: 0.8, stems: ['ne si profesionalka'], reason: 'O5 ne si profesionalka' },

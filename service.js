@@ -31,7 +31,8 @@ import {
   runPendingConfirmation,
   runGlobalExtractionPass,
   runComplexStatefulHandlers,
-  runDataCollectionFlow
+  runDataCollectionFlow,
+  applyPriceCorrectionIfAny
 } from './handlers/data-collection.js';
 import { runAwaitingPhotos } from './handlers/awaiting-photos.js';
 import { PHASES } from './handlers/state-machine.js';
@@ -144,6 +145,26 @@ export async function generateResponse(session, userInput) {
     if (!session.collectedData.transactionType && session.adMemory?.transactionType) {
       session.collectedData.transactionType = session.adMemory.transactionType;
     }
+    // PRICE BACKFILL (reported): the owner quoted their price during
+    // persuasion ("baram 350 evra") — the early-response price handler stores
+    // it as mentionedPrice, but the real field (monthlyRent for rent /
+    // cleanPrice for sale) stays empty, so once cooperation is accepted Ana
+    // re-asks for a price the owner already gave. Mirror mentionedPrice into
+    // the price field (HIGH — the owner stated it explicitly) so the
+    // data-collection flow moves on. Never overwrites an already-collected
+    // price (runGlobalExtractionPass only fills empty fields anyway).
+    if (session.collectedData.mentionedPrice != null &&
+        session.collectedData.monthlyRent === undefined &&
+        session.collectedData.cleanPrice === undefined) {
+      const priceField = session.collectedData.transactionType === 'rent' ? 'monthlyRent' : 'cleanPrice';
+      session.collectedData[priceField] = session.collectedData.mentionedPrice;
+      session.collectedData[priceField + 'Confidence'] = 0.95;
+      console.log(`[PRICE BACKFILL: mentionedPrice=${session.collectedData.mentionedPrice} → ${priceField}]`);
+      // Clear the quoted price once mirrored — it was never a real collected
+      // field and would otherwise inflate the data-collection fieldCount
+      // (question-prefix selection) and linger as stale state.
+      delete session.collectedData.mentionedPrice;
+    }
     if (!session.commissionExplained) {
       session.commissionExplained = false;
     }
@@ -238,12 +259,34 @@ export async function generateResponse(session, userInput) {
     if (escalation) return escalation;
 
     // ========================================
+    // PRICE CORRECTION SAFETY NET for early-return paths.
+    // Any handler that returns a response BEFORE the global extraction pass
+    // (runEarlyResponses, awaiting-photos resolution, detectPhase
+    // short-circuits, complex stateful follow-ups, and runDataCollectionFlow
+    // when a pending follow-up skipped extraction) swallows the whole
+    // message — an explicit mid-collection price correction ("ne, 300 e",
+    // "kirijata e 300") inside it would be lost and the stored
+    // backfilled/extracted price would stay stale (same bug class as the
+    // extraction-pass and pending-confirmation fixes; reported: commission
+    // questions answered mid-flow). Apply the correction (guarded — only
+    // fires on an explicit correction signal with a DIFFERENT number against
+    // an already-stored price, see applyPriceCorrectionIfAny) before the
+    // canned response is handed back. Re-application is a verified no-op
+    // (the value-difference guard skips when the stored price already
+    // matches), so wrapping paths where extraction already ran is safe.
+    // ========================================
+    const guardResponse = (resp) => {
+      if (resp) applyPriceCorrectionIfAny(u, session);
+      return resp;
+    };
+
+    // ========================================
     // PHASE 1: HARDCODED EARLY RESPONSES
     // Availability, agency, objection router, photos, phone, rollback.
     // Returns a response immediately if the message matches a known pattern.
     // ========================================
     const early = runEarlyResponses({ u, isRent, session });
-    if (early) return early;
+    if (early) return guardResponse(early);
 
     // ========================================
     // PHASE 2: AWAITING_PHOTOS RESOLUTION
@@ -257,14 +300,14 @@ export async function generateResponse(session, userInput) {
       // If the owner resumed normally (owner_back → DATA_COLLECTION) or the
       // cooperation was rolled back (→ PERSUASION), runAwaitingPhotos returns
       // null and we fall through to the normal flow below.
-      if (awaitingResp) return awaitingResp;
+      if (awaitingResp) return guardResponse(awaitingResp);
     }
 
     // ========================================
     // PHASE 3: PHASE DETECTION (PERSUASION vs DATA_COLLECTION)
     // ========================================
     const detection = detectPhase({ u, conv, session, isRent });
-    if (detection.response) return detection.response;
+    if (detection.response) return guardResponse(detection.response);
     const { phase, classification } = detection;
 
     let nextField = null;
@@ -297,7 +340,7 @@ export async function generateResponse(session, userInput) {
     // ========================================
     if (phase === "DATA_COLLECTION") {
       const complexResp = runComplexStatefulHandlers({ u, userInput, session, nextField, hasScraperPhotos });
-      if (complexResp) return complexResp;
+      if (complexResp) return guardResponse(complexResp);
     }
 
     console.log(`[PHASE: ${phase}]`);
@@ -312,8 +355,11 @@ export async function generateResponse(session, userInput) {
       // next field, or CLOSE — both when all fields were collected AND when
       // the max-2-attempts loop skipped every remaining field (previously it
       // returned null and we fell through to the persuasion phase, which was
-      // wrong for an owner who already accepted cooperation).
-      if (dcResult) return dcResult;
+      // wrong for an owner who already accepted cooperation). Guarded: when a
+      // pending follow-up had skipped the extraction pass and this message
+      // RESOLVED it (complex handler cleared pendingFollowUp and returned
+      // null), any price correction in the message would otherwise be lost.
+      if (dcResult) return guardResponse(dcResult);
     }
 
     // ========================================

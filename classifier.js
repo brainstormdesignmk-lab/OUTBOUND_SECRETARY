@@ -256,6 +256,48 @@ export function classifyIntent(userInput, conversation) {
   if (/(ne|не)\s*(bake|бате)/i.test(u)) return { intent: "REJECTED", confidence: 0.9, reason: "ne bake" };
   if (/(ne|не)\s*(mislam|мислам)\s*da/i.test(u)) return { intent: "REJECTED", confidence: 0.85, reason: "ne mislam da" };
   if (/(ne|не)\s*(moze|може)\s*da/i.test(u)) return { intent: "REJECTED", confidence: 0.8, reason: "ne moze da" };
+  // PRIOR-REFUSAL REAFFIRMATION (reported, lead 5502969): "TI REKOV DEKA
+  // SAMA KE PROBAM" (I TOLD YOU I'll try myself) is a firm reaffirmation of
+  // an EARLIER refusal, NOT a fresh acceptance — the generic "ke probam" rule
+  // (ACCEPTED 0.85) must never fire on it. Requires BOTH an "I already told
+  // you" marker AND a self-doing/refusal verb, so price/floor answers
+  // ("350 TI KAZAV", "7 TI KAZAV") stay unaffected.
+  if (/(?:ti|ти)\s*(?:rekov|реков|kazav|кажав)/i.test(u) &&
+      /(?:sama|сама|sam|сам)\s*(?:ke|ќе)|ne\s*mi\s*treba|не\s*ми\s*треба|nema\s*(?:potreba|потреба)|bez\s*agencija|без\s*агенција|ne\s*sakam|не\s*сакам|ostavi\s*me|остави\s*ме/i.test(u)) {
+    return { intent: "REJECTED", confidence: 0.9, reason: "prior refusal reaffirmation" };
+  }
+  // SELF-SERVICE REFUSAL (reported, lead 5502969): "SAMA KE SI GI IZDADAM",
+  // "SAMA KE PROBAM", "SAM KE PROBAM", "KE PROBAM SAMA" — the owner will do
+  // it THEMSELVES, which is a refusal of the agency. "ke probam" (I will try)
+  // is only acceptance when it means trying WITH us; "sama/sam ke probam"
+  // always means trying ALONE. Must fire before the "ke probam" ACCEPTED rule.
+  // VERB-BOUNDARY GUARD (reviewer finding): the verb alternatives must not
+  // PREFIX-match longer verbs — "probam" (I'll try, 1sg) would otherwise
+  // match inside "probame" (we'll try, 1pl), so "SAMA KE PROBAME ZAEDNO"
+  // (let's try TOGETHER — a cooperative offer with the owner as part of the
+  // "we") was wrongly REJECTED as self-service. Same for "izdadame"
+  // (we-rent). The boundary is CYRILLIC-AWARE (?=$|[^a-zа-я]) — JS `\b` is
+  // ASCII-only and fails after a Cyrillic verb. Both word orders get it.
+  if (/(?:sama|сама|sam|сам)\s*(?:ke|ќе)\s*(?:(?:(?:(?:si|си)\s*)?(?:(?:gi|ги|go|го)\s*)?(?:izdadam|издадам|izdavam|издавам))|(?:probam|пробам)|(?:napravam|направам))(?=$|[^a-zа-я])/i.test(u) ||
+      /(?:ke|ќе)\s*(?:(?:go|го)\s*)?(?:probam|пробам|izdadam|издадам|izdavam|издавам)(?=$|[^a-zа-я])\s+(?:sama|сама|sam|сам)/i.test(u)) {
+    return { intent: "REJECTED", confidence: 0.85, reason: "self-service (sama/sam ke)" };
+  }
+  // BUZZ-OFF / UNSUBSCRIBE (reported, lead 5502969): "OTKACI SE" (buzz off),
+  // "OTKAZI SE", "откачи се" — a firm demand to stop messaging. Same class as
+  // "ostavi me" — must count as a rejection, never as engagement.
+  if (/(?:otkaci|откачи|otkazi|откажи|otkazhi)\s*(?:se|се)/i.test(u)) {
+    return { intent: "REJECTED", confidence: 0.9, reason: "otkaci se" };
+  }
+  // FRUSTRATION SIGNAL (reported, lead 5502969): "DOSADNA SI" (you're
+  // annoying) — the owner wants to be left alone; treat it as a rejection so
+  // it escalates Ana toward giving up, never as engagement.
+  // WORD-BOUNDARY REQUIRED: "si"/"ste"/"e" must be a standalone word —
+  // "dosadna situacija" (the annoying situation) contains "dosadna si..." as
+  // a substring but is NOT "you are annoying".
+  if (/(?:dosadna|досадна|dosaden|досаден|dosadno|досадно|dosadni|досадни)[\s,]+(?:si|си|ste|сте|e|е)(?:[\s,.;!?]|$)/i.test(u) ||
+      /(?:si|си|ste|сте)[\s,]+(?:dosadna|досадна|dosaden|досаден|dosadni|досадни)(?:[\s,.;!?]|$)/i.test(u)) {
+    return { intent: "REJECTED", confidence: 0.85, reason: "dosadna si (frustration)" };
+  }
 
   // ==========================================
   // NEGATED COOPERATION STATEMENT — rollback phrases

@@ -9,7 +9,7 @@
 //   4. History scan + close flow + field question flow (with re-ask phrasings)
 // ========================================
 import { getNextMissingField, getQuestion } from '../workflow.js';
-import { runGlobalExtraction, assessConfidence, confidenceToNumeric, scanHistoryForField } from '../data-collector.js';
+import { runGlobalExtraction, assessConfidence, confidenceToNumeric, scanHistoryForField, isExplicitPriceCorrection } from '../data-collector.js';
 import {
   extractTerraceNumber,
   isPositive,
@@ -18,6 +18,18 @@ import {
 import { getRentDefaults, calculateRentCommission } from '../lib/commission.js';
 import { getNextPropertyId, createPropertyFolder, saveToCSV } from './storage.js';
 import { transition } from './state-machine.js';
+import { isAvailabilityConfirmation } from './early-responses.js';
+
+// ========================================
+// STILL-AVAILABLE ACKNOWLEDGMENT — shared vocabulary, stricter guard
+// Same positive/negative vocabulary as the persuasion availability handler,
+// PLUS: an owner QUESTION ("dali e dostapen?") is not an availability
+// statement and must never trigger the acknowledgment (mirrors the "?"
+// exclusion the short-positive logic uses elsewhere).
+// ========================================
+function confirmsAvailability(text) {
+  return isAvailabilityConfirmation(text) && !/\?/.test(text);
+}
 
 // ========================================
 // RE-ASK DETECTION — Confirmatory & Apologetic Questions
@@ -57,6 +69,40 @@ const CONFIRMATORY_QUESTIONS = {
  *
  * @returns {Object|null} — { text, type, nextField } response, or null to continue
  */
+// ========================================
+// PRICE CORRECTION PASS-THROUGH (shared)
+// An explicit mid-collection price correction ("ne, 300 e", "kirijata e 300")
+// must update the stored backfilled/extracted price even when the current
+// turn is consumed by a handler that returns BEFORE the global extraction
+// pass — otherwise the canned response swallows the message and the old
+// price stays (same reported bug class as the extraction-pass fix). Two
+// call sites: (1) the pending-confirmation reject branch here, and (2) the
+// service.js early-return guard (runEarlyResponses / awaiting-photos /
+// detectPhase / complex-handler responses). Reuses runGlobalExtraction,
+// whose STEP 1/STEP 2 guards only let a price re-extract on an explicit
+// correction, so no unrelated number (sqm, floor, parking) can ever clobber
+// the price here. SAFE when the pending field IS the price field: a pending
+// price is never stored yet (pendingConfirmation is only created for empty
+// fields), so the stored value is undefined and nothing is applied — the
+// "ne, 400 e" → fresh-ask contract is preserved.
+// ========================================
+export function applyPriceCorrectionIfAny(u, session) {
+  const d = session.collectedData;
+  const hasStoredPrice = typeof d.monthlyRent === 'number' || typeof d.cleanPrice === 'number';
+  if (!hasStoredPrice) return;
+  const updates = runGlobalExtraction(u, d, session.pendingConfirmation?.field);
+  for (const [key, value] of Object.entries(updates)) {
+    if (key !== 'cleanPrice' && key !== 'monthlyRent') continue;
+    const existing = d[key];
+    if (typeof existing !== 'number' || typeof value !== 'number') continue;
+    if (Math.abs(existing - value) < 1) continue; // same value — nothing to change
+    d[key] = value;
+    d[key + 'Confidence'] = 0.95;
+    delete d[key + 'Skipped'];
+    console.log(`[PRICE CORRECTION (pass-through): ${key} ${existing} → ${value}]`);
+  }
+}
+
 export function runPendingConfirmation({ u, session }) {
   if (!session.pendingConfirmation) return null;
 
@@ -72,8 +118,24 @@ export function runPendingConfirmation({ u, session }) {
   // starting with "ne" or containing a negation marker is a rejection or
   // correction, never a confirmation. Extended with "ne e" (not it —
   // "ne e 350", "350 ne e tocno") and leading "ne"/"не" ("ne, 400 e").
-  if (/^ne$|^не$|ne e tocno|не е точно|greska|грешка|pogresno|погрешно|ne e taka|не е така|ne tok|не ток|ne e|не е|^\s*ne\b|^\s*не\b/i.test(u)) {
+  // NOTE: the leading Cyrillic negation uses a LETTER-BOUNDARY, not \b — in
+  // JS \b only separates ASCII \w chars, so "^\s*не\b" NEVER matched after
+  // Cyrillic letters ("не, 100 илјади" was never rejected — a silent
+  // divergence from the Latin "ne," path). (?:$|[^a-zа-я]) is the file-wide
+  // letter-boundary convention.
+  if (/^ne$|^не$|ne e tocno|не е точно|greska|грешка|pogresno|погрешно|ne e taka|не е така|ne tok|не ток|ne e|не е|^\s*ne\b|^\s*не(?:$|[^a-zа-я])/i.test(u)) {
     session.pendingConfirmation = null;
+    // PRICE CORRECTION PASS-THROUGH (same bug class as the extraction-pass
+    // fix): a correction message ("ne, 300 e") sent while a DIFFERENT field's
+    // confirmation is pending must not be lost — the re-ask returned below
+    // would swallow it and the stored backfilled/extracted price would stay
+    // stale. Apply the price correction now (same gate as runGlobalExtraction)
+    // so the price is updated even though this turn re-asks the pending field.
+    // SAFE when the PENDING field IS the price field: a pending price is never
+    // stored yet (pendingConfirmation is only created for empty fields), so
+    // the stored price is undefined and nothing is applied — the re-ask
+    // contract ("ne, 400 e" → fresh ask) is preserved.
+    applyPriceCorrectionIfAny(u, session);
     console.log(`[REJECTED: ${pField} = ${JSON.stringify(pValue)} — ask again]`);
     const propertyLabel = session.adMemory?.propertyType === 'apartment' ? 'станот' :
                           session.adMemory?.propertyType === 'house' ? 'куќата' :
@@ -122,6 +184,28 @@ export function runPendingConfirmation({ u, session }) {
   }
 
   return null;
+}
+
+// ========================================
+// RECENT AVAILABILITY CONFIRMATION (grace batches)
+// The engine's owner-follow-up grace window runs EVERY queued message
+// through generateResponse but only the LAST response is sent. By the time
+// the last message is processed, session.messages already contains all the
+// batched owner texts (engine.onOwnerMessage → addReply runs immediately).
+// An availability confirmation that arrived as an EARLIER message in the
+// same batch ("da" → "uste ne sum go izdal" → "350 evra") must still be
+// acknowledged on the visible reply — checking only the current message
+// would miss it. Returns true if any owner message since Ana's last reply
+// confirms the property is still available.
+// ========================================
+function hasRecentAvailabilityConfirmation(session) {
+  const msgs = session.messages || [];
+  for (let i = msgs.length - 1; i >= 0; i--) {
+    const m = msgs[i];
+    if (m.role === 'model') break; // stop at Ana's last reply
+    if (confirmsAvailability(m.text)) return true;
+  }
+  return false;
 }
 
 // ========================================
@@ -204,14 +288,26 @@ export function runGlobalExtractionPass({ u, userInput, session, nextField }) {
 
   // Store HIGH and volunteered-MEDIUM values (with their confidence scores)
   for (const [key, value] of Object.entries(toStore)) {
-    // Don't overwrite values already set by confirmed high-confidence extraction
-    if (session.collectedData[key] === undefined || session.collectedData[key] === null) {
+    // Don't overwrite values already set by confirmed high-confidence
+    // extraction — EXCEPT explicit mid-collection PRICE corrections
+    // ("ne, 300 e"): the owner's new number REPLACES the stored
+    // backfilled/extracted price instead of being silently kept (reported).
+    const isPriceKey = key === 'cleanPrice' || key === 'monthlyRent';
+    const existingVal = session.collectedData[key];
+    const isCorrection = isPriceKey && typeof existingVal === 'number' && typeof value === 'number' &&
+                         Math.abs(existingVal - value) >= 1 && isExplicitPriceCorrection(u);
+    if (existingVal === undefined || existingVal === null || isCorrection) {
       session.collectedData[key] = value;
-      session.collectedData[key + 'Confidence'] = toScores[key] || 0.95;
+      // A corrected price is the owner's explicit statement → store at HIGH;
+      // fresh fills keep the assessed score (0.95 HIGH / 0.60 volunteered).
+      session.collectedData[key + 'Confidence'] = isCorrection ? 0.95 : (toScores[key] || 0.95);
       // A real value just arrived — clear any stale skip marker from an earlier
       // max-2-attempts skip (e.g. renovated was skipped as null, then the owner
       // finally answered "NE E RENOVIRAN" → renovated=false at 0.95).
       delete session.collectedData[key + 'Skipped'];
+      if (isCorrection) {
+        console.log(`[PRICE CORRECTION: ${key} ${existingVal} → ${value} (explicit correction, stored at HIGH)]`);
+      }
     }
   }
 
@@ -447,7 +543,13 @@ export function runComplexStatefulHandlers({ u, userInput, session, nextField, h
         // message mentioning "dodatni sest iljadi" → false terraceSqm).
         const hasTerraceContext = /terasa|тераса|terrace|teras|терас|(?:^|[^a-zа-я])ima(?:$|[^a-zа-я])|(?:^|[^a-zа-я])има(?:$|[^a-zа-я])|(?:^|[^a-zа-я])da(?:$|[^a-zа-я])|(?:^|[^a-zа-я])да(?:$|[^a-zа-я])|(?:^|[^a-zа-я])ok(?:$|[^a-zа-я])|(?:^|[^a-zа-я])океј(?:$|[^a-zа-я])|(?:^|[^a-zа-я])moze(?:$|[^a-zа-я])|(?:^|[^a-zа-я])може(?:$|[^a-zа-я])/i.test(u);
         const hasGenericSqm = /kvadrati|квадрати|m2|м2|kv|кв|sqm/i.test(u);
-        const hasPriceContext = /iljadi|илјади|evra|евра|eur|evro|евро/i.test(u);
+        // RENT/PAYMENT CONTEXT — reported phantom: in a rent conversation the
+        // owner answers with "EDNA KIRIJA" / "DEPOZIT KIRIJA" (one rent as
+        // deposit, paid in advance) — payment terms, NOT a terrace. Without
+        // kirija/depozit/kavcija/odnapred here, extractTerraceNumber's bare-
+        // number fallback parsed "edna"→1 and stored a phantom
+        // terraceSqm=1 (corrupting the listing data).
+        const hasPriceContext = /iljadi|илјади|evra|евра|eur|evro|евро|kirija|кирија|depozit|депозит|kavcija|кавција|кауција|odnapred|однапред/i.test(u);
         if ((hasTerraceContext || (!hasGenericSqm && !hasPriceContext))) {
           session.collectedData.hasTerrace = true;
           session.collectedData.terraceSqm = firstNum;
@@ -950,6 +1052,40 @@ export function runDataCollectionFlow({ u, userInput, session, adMemory, hasScra
                           known.propertyType === 'house' ? 'куќата' :
                           known.propertyType === 'land' ? 'плацот' :
                           known.propertyType === 'commercial' ? 'локалот' : 'имотот';
+
+    // ========================================
+    // AVAILABILITY ACKNOWLEDGMENT (reported bug)
+    // The owner already accepted cooperation ("da") and THEN confirms the
+    // property is still available ("uste ne sum go izdal" = "I haven't
+    // rented it out yet"). The early-responses availability handler is
+    // gated on !cooperationAccepted, so this second message used to be
+    // silently swallowed — Ana re-asked the field question with ZERO
+    // acknowledgment, as if the owner's second message never happened.
+    // When the CURRENT message — or an earlier message in the same grace
+    // batch — confirms availability, register it by prepending a natural
+    // acknowledgment to the next field question. Fires at most once per
+    // conversation (session.availabilityAcknowledged is also set by the
+    // persuasion-phase availability handler, so a still-available reply
+    // that was already acknowledged there is never acknowledged twice).
+    // KNOWN LIMITATION: this block only runs on the QUESTION path — if an
+    // earlier handler returns first on the same turn (pending-confirmation
+    // re-ask, terrace/heating follow-up, photos recovery), the flag stays
+    // unset and the acknowledgment lands on the next asked question.
+    // ========================================
+    if (!session.availabilityAcknowledged &&
+        session.collectedData.cooperationAccepted === true &&
+        (confirmsAvailability(u) || hasRecentAvailabilityConfirmation(session))) {
+      session.availabilityAcknowledged = true;
+      console.log('[AVAILABILITY: acknowledged — owner confirms the property is still available]');
+      const ack = 'Одлично, значи сè уште е достапен! ';
+      // Replace the generic filler lead ("Одлично.", "Супер."...), never a
+      // double lead ("Одлично. ... Одлично, значи..."). Capitalize the
+      // remainder so the rare "Одлично, уште последниве..." branch reads
+      // naturally after the "!".
+      const leadStripped = prefix.replace(/^(?:Одлично\.|Одлично,|Супер\.|Добро\.|Разбирам\.|Во ред\.|Благодарам\.)\s*/, '');
+      const capitalized = leadStripped.charAt(0) ? leadStripped.charAt(0).toUpperCase() + leadStripped.slice(1) : leadStripped;
+      prefix = ack + capitalized;
+    }
 
     // ========================================
     // MAX 2 ATTEMPTS PRECHECK (BEFORE asking)

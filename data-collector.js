@@ -62,9 +62,49 @@ function extractTotalSqm(u, data) {
     const parsed = parseNumberWords(sqmWordMatch[1]);
     if (parsed !== null && parsed >= 10 && parsed <= 999) return { totalSqm: parsed };
   }
-  // NO bare-number fallback. If the message doesn't contain an explicit sqm
-  // keyword (m2, kvadrati, etc.), don't guess. Ana must NEVER invent data.
-  // The workflow will ask the totalSqm question properly in DATA_COLLECTION.
+  // VKUPNO (TOTAL) CONTEXT (reported): "VKUPNO IMA OSUMDESET I SES I TERASA
+  // OD 3 M2" = 86 m² total + 3 m² terrace. The total is stated in WORDS with
+  // no sqm keyword attached (the "3 M2" belongs to the terrace), so the
+  // keyword patterns above miss it. An explicit "вкупно"/"vkupno" (total)
+  // marks the number phrase as the total size. Guarded against price context
+  // ("vkupno ... iljadi evra"), floor context ("vkupno 7 sprata"), and year
+  // context ("osumdeset godina") — those are never totalSqm.
+  if (/vkupno|вкупно/i.test(u) &&
+      !/iljadi|илјади|evra|евра|eur|evro|евро|sprat|спрат|kat|кат|lift|лифт|elevator|godina|година|izgraden|граден|katnica|катница/i.test(u)) {
+    const parsed = parseNumberWords(u);
+    if (parsed !== null && parsed >= 10 && parsed <= 999) return { totalSqm: parsed };
+    const vkDigits = u.match(/\b(\d{2,4})\b/);
+    if (vkDigits) {
+      const n = parseInt(vkDigits[1]);
+      if (n >= 10 && n <= 999) return { totalSqm: n };
+    }
+  }
+
+  // BARE NUMBER FALLBACK — FRUSTRATED-REPEAT STRIP ONLY (reported): "86 TI
+  // KAZAV" ("86, I told you") — the owner repeats the totalSqm answer with an
+  // annoyance suffix because Ana re-asked. The suffix used to break the
+  // whole-message bare-number check below, so totalSqm was NOT collected on
+  // the first attempt and Ana asked "Дали точната вредност е 86?" (same
+  // re-ask loop as the totalFloors "7 TI KAZAV" bug). Strip the suffix first
+  // ("86 TI KAZAV" → "86", "OSUMDESET TI REKOV" → "OSUMDESET") and only then
+  // accept a bare number. Trailing punctuation after the marker is dropped
+  // too ("86, TI KAZAV!" → "86"). This is deliberately STRICTER than the
+  // totalFloors fallback: a plain bare number without an annoyed marker must
+  // still NOT guess (Ana must never invent data) — the workflow asks the
+  // totalSqm question properly in DATA_COLLECTION.
+  const uRepeatStrippedSqm = u.replace(ANNOYED_REPEAT_RE, ' ').replace(/[.,:;!?\-]+$/, '').trim();
+  if (uRepeatStrippedSqm !== u.trim()) {
+    const bareSqmDigit = uRepeatStrippedSqm.match(/^(\d{1,4})$/);
+    if (bareSqmDigit) {
+      const n = parseInt(bareSqmDigit[1], 10);
+      if (n >= 10 && n <= 999) return { totalSqm: n };
+    }
+    // Multi-word number phrases ("OSUMDESET I SEST" = 86) parse only via
+    // parseNumberWords — parseMacedonianNumber is single-word only.
+    const bareSqmWord = uRepeatStrippedSqm.trim();
+    const w = parseNumberWords(bareSqmWord);
+    if (w !== null && w >= 10 && w <= 999) return { totalSqm: w };
+  }
   return null;
 }
 
@@ -81,8 +121,8 @@ function extractBedrooms(u, data) {
 // answers in a single turn and skip the totalFloors question entirely.
 // ========================================
 function extractCompoundFloor(u, data) {
-  // Pattern 1: "na 8 od 10" or "8 od 10" — digit "od" digit
-  const digitOdMatch = u.match(/(?:na\s+)?(\d{1,2})\s+od\s+(\d{1,3})/i);
+  // Pattern 1: "na 8 od 10" or "8 od 10" — digit "od" digit (bilingual od/од)
+  const digitOdMatch = u.match(/(?:na\s+|на\s+)?(\d{1,2})\s+(?:od|од)\s+(\d{1,3})/i);
   if (digitOdMatch) {
     const floor = parseInt(digitOdMatch[1]);
     const total = parseInt(digitOdMatch[2]);
@@ -91,12 +131,27 @@ function extractCompoundFloor(u, data) {
     }
   }
 
-  // Pattern 2: "na osmi od deset", "na 8 od vkupno deset", "osmi kat od vkupno deset"
-  // word (ordinal or digit) "od" word/digit
+  // Pattern 2: "na osmi od deset", "na 8 od vkupno deset", "osmi kat od vkupno deset",
+  // "NA VTORI OD 7" — word (ordinal or digit) "od" word/digit.
   // Optional word (\S+\s+)? between floor and "od" handles "osmi kat od..." and
   // "na osmi kat od..." — a common Macedonian compound floor pattern.
   // The optional word is non-capturing ((?:...)) so capture indices 1 and 2 stay correct.
-  const wordOdMatch = u.match(/(?:na\s+)?(\w+)\s+(?:\S+\s+)?od\s+(?:vkupno\s+)?(\S{2,})/i);
+  // TOTAL TOKEN: (\d{1,3}|[a-zа-я]{2,}) — a bare SINGLE-DIGIT total ("od 7" in
+  // "NA VTORI OD 7") previously failed the old (\S{2,}) 2-char minimum, so the
+  // compound never fired and totalFloors=7 was lost (reported: "TOTAL FLOORS
+  // NOT COLLECTED"). Digits always allowed (1-3); words keep the 2-char minimum
+  // so a stray single letter can never be a total. Downstream range check
+  // (total 2..50) still guards garbage.
+  // FLOOR-WORD TOKEN: [a-zа-я\d]+ (NOT \w) so Cyrillic ordinals ("втори",
+  // "осми") match — \w is ASCII-only and silently misses Cyrillic, making
+  // "на втори од 7" fall through to single-field extraction (totalFloors
+  // lost).
+  // FILLER GUARD: the optional word between floor and "od" must be a FLOOR
+  // keyword ("osmi kat od deset", "втори кат од седум"). A broad \S+ filler
+  // let the terrace phrase "93 kvadrati so 2 TERASI od 5m2" match as
+  // floor=2/totalFloors=5 (reported P10 regression) — "terasi" is not a
+  // floor word, so that construction is rejected and stays a terrace answer.
+  const wordOdMatch = u.match(/(?:na\s+|на\s+)?([a-zа-я\d]+)\s+(?:(?:kat|кат|sprat|спрат|kata|ката|floor|етаж|eta|ета)\s+)?(?:od|од)\s+(?:vkupno\s+|вкупно\s+)?(\d{1,3}|[a-zа-я]{2,})/i);
   if (wordOdMatch) {
     const floorWord = wordOdMatch[1].toLowerCase();
     const totalWord = wordOdMatch[2].toLowerCase();
@@ -175,11 +230,42 @@ function extractFloor(u, data) {
   // matching word parts ("denes" contains "den" but is not a time phrase),
   // and "kat"/"sprat" are NOT time words so "tret kat" still extracts 3.
   const uNoTimeCount = u.replace(
-    /(?:prv|прв|vtor|втор|tret|трет|cetvrt|четврт|petti|петти|peti|пети|sesti|шести|sedmi|седми|osmi|осми|devetti|деветти)[а-яa-z]*\s*(?:pat|пат|den|ден)(?:\s|$)/gi,
+    /(?:prv|прв|vtor|втор|tret|трет|cetvrt|четврт|petti|петти|peti|пети|sesti|шести|sedmi|седми|osmi|осми|devetti|деветти)[а-яa-z]*\s*(?:pat|пат|den|ден|mesto|место)(?:\s|$)/gi,
     ' '
   );
   const ordinal = parseOrdinalFloor(uNoTimeCount);
-  if (ordinal !== null) return { floor: ordinal };
+  if (ordinal !== null) {
+    // FLOOR-CONTEXT / DIRECT-ANSWER GUARD (reported, lead 5502969): a bare
+    // ordinal word ("prvo", "vtori") is only a floor answer when the message
+    // has a floor keyword ("na vtori kat"), the ordinal sits after "na"/"на"
+    // (the standard answer shape — "на втори"), or the message is a short
+    // direct reply ("VTORI", "NA VTORI"). In longer free-form messages
+    // ("PA PRVO KE RPOBAM MESEC DVA..."), "prvo" (firstly) is an adverb, NOT
+    // a floor — it must never set floor=1.
+    const floorWords = uNoTimeCount.split(/\s+/).filter(Boolean);
+    const hasFloorKeyword = /(?:kat(?!nica)|кат(?!ница)|kata|ката|sprat(?!a)(?!а)|спрат(?!а)(?!a)|floor|eta|ета|katnica|катница|sprata|спрата|katovi|катови|spratovi|спратови)/i.test(u);
+    // A direct floor answer with volunteered details ("VTORI, IMA LIFT I
+    // KLIMA") starts with the ordinal — accept that shape too. The adverb
+    // "prvo" (firstly) is deliberately excluded from the start-anchor: in
+    // sentence-initial position without floor context it is an adverb, not
+    // a floor ("PRVO KE PROBAM SAMA...").
+    const firstWord = (uNoTimeCount.trim().split(/\s+/)[0] || '').toLowerCase();
+    const startsWithFloorOrdinal = /^(?:vtor|втор|tret|трет|cetvrt|четврт|petti|петти|peti|пети|sesti|шести|sedmi|седми|osmi|осми|devetti|деветти|prizemje|приземје|potkrovje|поткровје)/.test(firstWord);
+    // ADVERB WORD-COUNT GUARD (reviewer finding): the reported adverb bug
+    // ("PA PRVO KE RPOBAM MESEC DVA..." → phantom floor=1) was fixed for LONG
+    // messages via the word-count threshold — but a SHORT adverb sentence
+    // ("PRVO KE PROBAM" = 3 words) still slipped through the ≤3-word
+    // direct-answer shortcut and set floor=1. The adverb forms "prvo"/"prva"
+    // (firstly) must be excluded from the shortcut just like they are from
+    // the start-anchor; the masculine "PRVI" (a genuine bare floor answer)
+    // stays a valid direct reply.
+    const startsWithPrvoAdverb = /^(?:prvo|прво|prva|прва)(?:$|[^a-zа-я])/.test(firstWord);
+    const isDirectAnswer = (floorWords.length <= 3 && !startsWithPrvoAdverb) || /(?:^|\s)(?:na|на)\s+/.test(u) || startsWithFloorOrdinal;
+    if (hasFloorKeyword || isDirectAnswer) {
+      return { floor: ordinal };
+    }
+    console.log(`[FLOOR: skip — ordinal "${uNoTimeCount.trim().slice(0, 40)}" without floor context]`);
+  }
   // Digit floor — find number adjacent to floor context words.
   // Uses (?!nica) negative lookahead to prevent "kat" from matching
   // "katnica" ("kat" + "nica") while still allowing "kat" standalone,
@@ -306,13 +392,20 @@ function extractTotalFloors(u, data) {
   // answering the totalFloors question without "katnica"/"sprata" keywords.
   // The NUMBER_SNIFFING_EXTRACTORS guard in STEP 2 prevents false positives
   // in global discovery mode (when user says "10" unrelated to floors).
-  const bareDigit = u.match(/^(\d{1,3})$/);
+  //
+  // FRUSTRATED-REPEAT STRIP (reported): "7 TI KAZAV" ("7, I told you") — the
+  // owner repeats the answer with an annoyance suffix because Ana re-asked.
+  // The suffix used to break the whole-message bare-number checks below, so
+  // the answer was NOT collected on the first attempt. Strip the suffix first
+  // ("7 TI KAZAV" → "7", "SEDUM TI REKOV" → "SEDUM") so the fallback fires.
+  const uRepeatStripped = u.replace(ANNOYED_REPEAT_RE, ' ').trim();
+  const bareDigit = uRepeatStripped.match(/^(\d{1,3})$/);
   if (bareDigit) {
     const num = parseInt(bareDigit[1]);
     if (num >= 1 && num <= 50) return { totalFloors: num };
   }
   // Bare word number: "deset" → 10
-  const bareWord = u.trim();
+  const bareWord = uRepeatStripped.trim();
   if (!/\s/.test(bareWord) && bareWord.length > 0) {
     const wordNum = parseMacedonianNumber(bareWord);
     if (wordNum !== null && wordNum >= 1 && wordNum <= 50) return { totalFloors: wordNum };
@@ -331,9 +424,15 @@ function extractElevator(u, data) {
 
 function extractAC(u, data) {
   if (data.ac !== undefined && data.ac !== null) return null;
+  // NEGATION CHECKED FIRST (reported lead 5540516): the positive keyword
+  // branch below matches ANY "klima" mention, so "KLIMA NEMA AMA
+  // ORIENTACIJATA MU E JUG TAKA DA NE TREBA" (no AC — it's south-facing, so
+  // it doesn't need one) used to collect ac:true. Covers both word orders
+  // ("nema klima" and "klima nema"), the definite form ("klimata nema"),
+  // and the "ne treba" family ("AC not needed" ⇒ no AC).
+  if (/nema\s+klima|нема\s+клима|klima\s+nema|клима\s+нема|klimata\s+nema|климата\s+нема|bez\s+klima|без\s+клима|klima\s+ne\s+treba|клима\s+не\s+треба|klimata\s+ne\s+treba|климата\s+не\s+треба|ne\s+treba\s+klima|не\s+треба\s+клима|nema\s+potreba\s+od\s+klima|нема\s+потреба\s+од\s+клима|klima\s+nema\s+potreba|клима\s+нема\s+потреба/i.test(u)) return { ac: false };
   // Require AC-specific context — cooling/cooling-related words only
   if (/klima|клима|inverter|инвертер|split|сплит|клима уред|klima ured/i.test(u)) return { ac: true };
-  if (/bez klima|без клима|nema klima/i.test(u)) return { ac: false };
   return null;
 }
 
@@ -395,12 +494,15 @@ function extractHeating(u, data) {
 
 function extractParking(u, data) {
   if (data.parking !== undefined && data.parking !== null) return null;
-  if (/nema parking|нема паркинг|nema garaza|нема гаража|bez parking|без паркинг|без гаража|bez garaza|nema parkiranje|нема паркирање|bez parkiranje|без паркирање/i.test(u)) {
+  if (/nema parking|нема паркинг|nema garaza|нема гаража|nema graza|нема граза|bez parking|без паркинг|без гаража|без граза|bez garaza|bez graza|nema parkiranje|нема паркирање|bez parkiranje|без паркирање/i.test(u)) {
     return { parking: false };
   }
-  if (/garaza|гаража|privat|приват|parking|паркинг|parkiranje|паркирање|garage|гараж|podzemna|подземна|sopstveno|сопствено|pred zgrada|пред зграда|na -|на -|podzemno|подземно|ima parking|има паркинг|ima garaza|има гаража/i.test(u)) {
+  // "graza" = the common Latin-script misspelling of "гаража" (garage) —
+  // "SO GRAZA ZIDANA" (with a masonry garage) must register parking=true
+  // like "garaza" does (reported lead 5540516 multi-field answer).
+  if (/garaza|гаража|graza|граза|privat|приват|parking|паркинг|parkiranje|паркирање|garage|гараж|podzemna|подземна|sopstveno|сопствено|pred zgrada|пред зграда|na -|на -|podzemno|подземно|ima parking|има паркинг|ima garaza|има гаража/i.test(u)) {
     let parkingType = "public";
-    if (/garaza|гаража|garage|гараж|podzemna|подземна|podzemno|подземно|na -1|на -1|na -2|на -2|na -|на -|podzemno parking|подземно паркинг|podzemna garaza|подземна гаража|garaza na -|гаража на -/i.test(u)) {
+    if (/garaza|гаража|graza|граза|garage|гараж|podzemna|подземна|podzemno|подземно|na -1|на -1|na -2|на -2|na -|на -|podzemno parking|подземно паркинг|podzemna garaza|подземна гаража|garaza na -|гаража на -/i.test(u)) {
       parkingType = "garage";
     } else if (/privat|приват|sopstveno|сопствено|pred zgrada|пред зграда|so nego|со него|so stanot|со станот|so apartmanot|со апартманот|so imotot|со имотот|kon stanot|кон станот|vo cenata|во цената|vo cena|во цена|vklucen vo cena|вклучен во цена|vklucena vo cena|вклучена во цена|vkluceno vo cena|вклучено во цена|so parking|со паркинг|so parkiranje|со паркирање/i.test(u) ||
                // RENT: "IMA I PARKING" ("there's also parking") — in a rental
@@ -725,6 +827,20 @@ const EXTRACTION_RULES = [
 // Words that indicate uncertain answers
 const UNCERTAINTY_WORDS = /mislam|okolu|околу|приближно|otprilika|отприлика|mozda|можеби|можда|negde|негде|valjda|ваљда|priblizno|приблизно|neshto vaka|нешто вака|tocno ne|точно не|ne znam|не знам|neznam|треба да|treba da|posle|после/i;
 
+// FRUSTRATED-REPEAT STRIP — "7 TI KAZAV" ("7, I told you"), "SEDUM TI
+// REKOV", "TI KAZAV 350" ("I told you, 350") — the owner repeats the answer
+// with an annoyance suffix/prefix because Ana re-asked. Shared by
+// extractTotalFloors, extractTotalSqm (so the bare-number fallbacks fire),
+// and assessConfidence (so the repeat collects at HIGH, no needless re-ask).
+// Covers BOTH word orders: the marker may follow the number ("350 TI KAZAV")
+// or precede it ("TI KAZAV 350" — the exact reported price phrasing).
+// Punctuation tolerance: "350, TI KAZAV!", "TI KAZAV - 350" all strip to the
+// bare number. IMPORTANT: only the MARKER PHRASE is stripped — a number (or
+// "na vtori") that follows it is deliberately LEFT in place, so phrase-first
+// repeats keep their value and the floor repeat "TI KAZAV NA VTORI" still
+// resolves the ordinal.
+const ANNOYED_REPEAT_RE = /(?:^|[\s.,:;!?\-]+)(?:ti\s+|ти\s+)?(?:kazav|кажав|rekov|реков)(?![a-zа-я])/gi;
+
 // DECADE-YEAR PATTERNS — the same decade forms parseYearBuilt maps to a
 // memorized year (90ti → 1995, 80ti → 1985, 2000ti → 2005, 1980-ти → 1980;
 // value mapping lives in property-extractor.js parseYearBuilt — KEEP IN
@@ -821,14 +937,67 @@ function assessConfidence(field, value, input) {
     return 'HIGH';
   }
 
-  // ORDINAL FLOOR WORDS ("vtori", "na vtori", "tret sprat", "osmi") are
-  // explicit floor answers even WITHOUT "kat"/"sprat" keywords — the owner
-  // is directly answering "Na koj kat?" with a bare ordinal ("vtori").
-  // A bare ordinal can only be a floor value, so this is HIGH — no re-ask.
-  // Fixes reported bug: "TI KAZAV NA VTORI" was REJECTED as context
-  // mismatch and the floor question looped forever (→ owner insulted Ana).
-  if (field === 'floor' && parseOrdinalFloor(input) !== null) {
-    return 'HIGH';
+  // BARE DIRECT ANSWERS for floor, totalFloors & totalSqm are HIGH — the
+  // owner is directly answering the question just asked:
+  //   - ORDINAL FLOOR WORDS ("vtori", "na vtori", "tret sprat", "osmi") — a
+  //     bare ordinal can only be a floor value. Fixes reported bug:
+  //     "TI KAZAV NA VTORI" was REJECTED as context mismatch and the floor
+  //     question looped forever (→ owner insulted Ana).
+  //   - BARE CARDINAL WORDS ("SEDUM" = 7, "deset" = 10) — a single number
+  //     word answering "Колку спрата има вкупно?" is unambiguous.
+  //   - BARE DIGITS ("7") — same, in the floor/totalFloors question context.
+  //   - BARE SQM DIGITS ("86") — a 2-3 digit number can only be a totalSqm
+  //     answer to "Колкава е вкупната квадратура?".
+  //   - FRUSTRATED REPEATS ("7 TI KAZAV" = "7, I told you") — the owner
+  //     repeats the answer after a re-ask; the suffix is stripped (mirrors
+  //     extractTotalFloors' strip) so the repeat collects at HIGH on the
+  //     FIRST attempt, no needless "Дали точната вредност е 7?" re-ask
+  //     (reported: "SEDUM" extracted at 0.60 → re-ask → "DA" accepted).
+  if (field === 'floor' || field === 'totalFloors' || field === 'totalSqm') {
+    const stripped = input.trim().replace(ANNOYED_REPEAT_RE, ' ').replace(/[.,:;!?\-]+$/, '').trim();
+    if (parseOrdinalFloor(stripped) !== null) return 'HIGH';
+    // Bare digit: 0-50 for floor/totalFloors (0 = приземје for floor),
+    // 10-999 for totalSqm (a 1-digit number is never a sqm value).
+    // Effectively inert for the floor FIELD itself (extractFloor requires
+    // kat/sprat context and never extracts bare digits — only
+    // extractTotalFloors' bare fallback does), but harmless and needed for
+    // totalFloors direct answers ("7") and totalSqm repeats ("86 TI KAZAV").
+    if (/^\d{1,3}$/.test(stripped)) {
+      const n = parseInt(stripped, 10);
+      if ((field === 'totalSqm' && n >= 10 && n <= 999) ||
+          (field !== 'totalSqm' && n >= 0 && n <= 50)) return 'HIGH';
+    }
+    if (!/\s/.test(stripped) && stripped.length > 0) {
+      const w = parseMacedonianNumber(stripped);
+      if (w !== null && w >= 1 && w <= 50) return 'HIGH';
+      if (field === 'totalSqm' && w !== null && w >= 10 && w <= 999) return 'HIGH';
+    }
+    // Multi-word number phrases ("OSUMDESET I SEST" = 86) parse only via
+    // parseNumberWords — parseMacedonianNumber is single-word only.
+    if (field === 'totalSqm') {
+      const wn = parseNumberWords(stripped);
+      if (wn !== null && wn >= 10 && wn <= 999) return 'HIGH';
+    }
+  }
+  // PRICE REPEATS ("350 TI KAZAV", "TI KAZAV 350" = "350, I told you") — the
+  // owner repeats a price they ALREADY gave, annoyed that Ana re-asked. The
+  // strip must FIRE (the message must contain an annoyed-repeat marker); a
+  // plain bare "350" with NO marker stays MEDIUM below (RT3d4 — confirmation
+  // re-ask preserved for genuinely new prices). This kills the reported
+  // "TI KAZAV 350 → 0.60 → re-ask → DA" price loop, mirroring the
+  // floor/totalFloors repeat fix.
+  if (field === 'cleanPrice' || field === 'monthlyRent') {
+    const strippedPrice = input.trim().replace(ANNOYED_REPEAT_RE, ' ').replace(/[.,:;!?\-]+$/, '').trim();
+    if (strippedPrice !== input.trim() && strippedPrice.length > 0) {
+      const barePriceDigit = strippedPrice.match(/^(\d{1,7})$/);
+      if (barePriceDigit) {
+        const p = parseInt(barePriceDigit[1], 10);
+        if (p >= 10) return 'HIGH';
+      } else if (!/\s/.test(strippedPrice)) {
+        const w = parseMacedonianNumber(strippedPrice);
+        if (w !== null && w >= 10) return 'HIGH';
+      }
+    }
   }
 
   // Check field-specific keywords for numeric/string fields
@@ -842,7 +1011,7 @@ function assessConfidence(field, value, input) {
   // the message may lack "kat"/"sprat" keywords, the compound structure
   // (digit/bare "od" digit/bare, ordinal "od" word, digit/bare "/" digit/bare)
   // uniquely identifies it as a floor answer. No confirmation needed.
-  const hasCompoundFloor = /\d{1,2}\s+od\s+\d{1,3}|\w+\s+od\s+\w+|\d{1,2}\s*\/\s*\d{1,2}/i.test(input);
+  const hasCompoundFloor = /\d{1,2}\s+(?:od|од)\s+\d{1,3}|[a-zа-я\d]+\s+(?:od|од)\s+[a-zа-я\d]+|\d{1,2}\s*\/\s*\d{1,2}/i.test(input);
   if (hasCompoundFloor && (field === 'floor' || field === 'totalFloors')) {
     return 'HIGH';
   }
@@ -1048,6 +1217,37 @@ const BARE_NO_FIELD_RE = {
 };
 
 // ========================================
+// EXPLICIT PRICE CORRECTION GATE — mid-data-collection price fixes
+// (reported): the owner answers the price question — or corrects a
+// backfilled/extracted price — with a DIFFERENT number ("ne, 300 e"), and
+// the stored price must be UPDATED, not silently kept. Extractors NEVER
+// overwrite by design; this gate is the ONLY admission for price
+// re-extraction, so unrelated numbers in other-field answers ("63
+// kvadrati", "3 kat", a parking "5000 evra") can never clobber the price.
+// Signals (any one suffices):
+//   1. Correction verbs: promeni/izmeni/smeni/koregiraj/ispravi/popravi...
+//   2. Leading negation: "ne, 300 e" / "не 300" / "ne, 100 iljadi" — the
+//      reported phrasing for a correction to a previously given number.
+//   3. An explicit rent noun binding: "kirijata e 300", "mesecno 300",
+//      "300 evra za mesec" — a bare currency mention ("5000 evra" as a
+//      parking price) is NOT a rent correction, so bare evra/iljadi alone
+//      never opens the gate.
+// ========================================
+export function isExplicitPriceCorrection(u) {
+  if (/(?:promeni|промени|izmeni|измени|smeni|смени|koregir|корегир|koregiraj|корегирај|ispravi|исправи|popravi|поправи|korekcij|корекци)/i.test(u)) return true;
+  // Leading negation WITH a digit — "ne, 300 e" / "не 300" / "ne, 100 iljadi".
+  // The digit must sit IMMEDIATELY after the negation (only separators in
+  // between): a digit buried later in the sentence ("NE ZNAM, 300 EVRA E
+  // POVEKJE OD ONA STO BARAV", "NE TREBA POVEKJE OD 300") belongs to a
+  // DIFFERENT thought — the owner is NOT correcting the price, so the gate
+  // must stay closed or an unrelated number would clobber the stored price.
+  // A bare "ne" / "ne znam" (no number) is a non-answer, NOT a correction.
+  if (/^\s*(?:ne|не)[,.\s]*\d/.test(u)) return true;
+  if (/(?:kirija|кирија|kirijata|киријата|mesecno|месечно|izdavam|издавам|izdava|издава|iznajmuvam|изнајмувам|iznajmuva|изнајмува|za mesec|за месец)/i.test(u)) return true;
+  return false;
+}
+
+// ========================================
 // runGlobalExtraction — Main entry point
 // ========================================
 // Extracts field values from user input.
@@ -1061,7 +1261,9 @@ const BARE_NO_FIELD_RE = {
 //   Run ALL extractors (global discovery mode).
 //
 // Returns { field: value, ... } for any newly extracted data.
-// Does NOT overwrite existing non-null values in currentData.
+// Does NOT overwrite existing non-null values in currentData — EXCEPT an
+// explicit price correction ("ne, 300 e"), which re-extracts and replaces
+// the stored price (see isExplicitPriceCorrection).
 // ========================================
 function runGlobalExtraction(u, currentData, preferredField) {
   // Normalize to lowercase ONCE for the whole pass. Viber owners type in
@@ -1088,16 +1290,25 @@ function runGlobalExtraction(u, currentData, preferredField) {
       for (const field of groupFields) {
         const rule = FIELD_TO_EXTRACTOR[field];
         if (!rule) continue;
-        // Skip if field already has a value
+        // Skip if field already has a value — EXCEPT explicit price
+        // corrections ("ne, 300 e") which legitimately re-extract to
+        // replace the stored backfilled/extracted price (reported).
         const dataKey = field;
-        if (currentData[dataKey] !== undefined && currentData[dataKey] !== null) continue;
+        const isPriceField = dataKey === 'cleanPrice' || dataKey === 'monthlyRent';
+        if (currentData[dataKey] !== undefined && currentData[dataKey] !== null &&
+            !(isPriceField && isExplicitPriceCorrection(u))) continue;
         const result = rule(u, currentData);
         if (result) {
           for (const [key, value] of Object.entries(result)) {
             const existing = currentData[key];
+            const isPriceKey = key === 'cleanPrice' || key === 'monthlyRent';
             if (existing === undefined || existing === null) {
               updates[key] = value;
               console.log(`[EXTRACTION: field ${field} = ${JSON.stringify(value)} (from preferredField=${preferredField}, group=${JSON.stringify(groupFields)})]`);
+            } else if (isPriceKey && typeof existing === 'number' && typeof value === 'number' &&
+                       Math.abs(existing - value) >= 1 && isExplicitPriceCorrection(u)) {
+              updates[key] = value;
+              console.log(`[EXTRACTION: ${key} CORRECTED ${existing} → ${value} (explicit price correction)]`);
             }
           }
           if (field === preferredField) foundPreferred = true;
@@ -1214,13 +1425,21 @@ function runGlobalExtraction(u, currentData, preferredField) {
   //
   // Essential for catching volunteered info (terrace, orientation, parking)
   // that the user adds to their answer for the current question.
+  // REPEAT-STRIPPED TEXT for the bare-number guard: "86 TI KAZAV" is a bare
+  // answer ("86") wearing an annoyance marker. Judging isBareNumber on the
+  // RAW message would let "kazav" count as a strong keyword and un-leash the
+  // number-sniffing extractors on the same bare number (extractTotalFloors
+  // would read totalFloors=86 from the totalSqm repeat, etc.). Strip the
+  // marker so a repeat during ANOTHER question is treated as the bare number
+  // it is and correctly skipped by the guard (cross-field contamination).
+  const uRepeatStrippedGuard = u.replace(ANNOYED_REPEAT_RE, ' ').trim();
   const isBareNumber = !hasStrongKeywords &&
     // Short message (bare answer, not a multi-field sentence)
-    u.length < 50 &&
+    uRepeatStrippedGuard.length < 50 &&
     // No commas/semicolons (separators that indicate multi-field content)
-    !/[,;]/.test(u) &&
+    !/[,;]/.test(uRepeatStrippedGuard) &&
     // No specific field units
-    !/m2|м2|кв|%|€|£|\$/i.test(u);
+    !/m2|м2|кв|%|€|£|\$/i.test(uRepeatStrippedGuard);
 
   // Track price extraction in THIS call (both group pass and bonus pass)
   let priceExtracted = false;
@@ -1300,11 +1519,23 @@ function runGlobalExtraction(u, currentData, preferredField) {
         // Don't overwrite what Step 1 already extracted
         if (key in updates) continue;
         const existing = currentData[key];
+        const isPriceKey = key === 'cleanPrice' || key === 'monthlyRent';
         if (existing === undefined || existing === null) {
           updates[key] = value;
-          if (key === 'cleanPrice' || key === 'monthlyRent') {
+          if (isPriceKey) {
             priceExtracted = true;
           }
+        } else if (isPriceKey && typeof existing === 'number' && typeof value === 'number' &&
+                   Math.abs(existing - value) >= 1 && isExplicitPriceCorrection(u)) {
+          // PRICE CORRECTION (reported): the owner answered the price
+          // question — or corrected the stored backfilled/extracted price —
+          // with a DIFFERENT number ("ne, 300 e"). Extractors never
+          // overwrite by design; only an explicit correction passes the
+          // gate, so unrelated numbers in other-field answers (sqm, floor,
+          // parking price) can never clobber the price.
+          updates[key] = value;
+          priceExtracted = true;
+          console.log(`[PRICE CORRECTION: ${key} ${existing} → ${value} (explicit correction in "${u}")]`);
         }
       }
     }

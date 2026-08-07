@@ -32,6 +32,39 @@ import {
   isAskingAboutClients
 } from '../objections.js';
 
+// ========================================
+// AVAILABILITY-POSITIVE PHRASES (shared)
+// The complete vocabulary of messages saying the property is STILL
+// available ("uste go imam", "dostapen e", "ne sum go izdal", "ne e
+// prodaden"...). This is the exact pattern the availability handler below
+// matches. Exported so the DATA_COLLECTION flow can reuse it to ACKNOWLEDGE
+// a still-available confirmation that arrives AFTER cooperation was already
+// accepted — reported bug: owner sent "da" then "uste ne sum go izdal", the
+// first message moved the session into DATA_COLLECTION, and the second one
+// was never registered because this handler is gated on
+// !cooperationAccepted. AVAILABILITY_NEGATIVE_RE keeps out messages that
+// merely contain an availability phrase but are really about something else
+// (terrace, klima, parking, broj, sorabotka...).
+// ========================================
+export const AVAILABILITY_POSITIVE_RE = /uste go imam|уште го имам|dostapen e|достапен е|sloboden e|слободен е|seuste e dostapen|сè уште е достапен|go imam|го имам|uste e|уште е|dostapen|достапен|da imam|да имам|uste go imam da|уште го имам да|da uste go imam|да уште го имам|seuste go imam|сè уште го имам|go imam uste|го имам уште|uste e sloboden|уште е слободен|e sloboden|е слободен|dostapno e|достапно е|seuste e dostapno|сè уште е достапно|ima uste|има уште|uste ima|уште има|go ima uste|го има уште|uste go ima|уште го има|go ima|го има|uste go imam|уште го имам|seuste e|сè уште е|seuste go imam|сè уште го имам|dostapna e|достапна е|slobodna e|слободна е|seuste e dostapna|сè уште е достапна|uste e dostapna|уште е достапна|dostapni se|достапни се|seuste se dostapni|сè уште се достапни|uste se dostapni|уште се достапни|go imam uste|го имам уште|uste go imam|уште го имам|go imam seuste|го имам сè уште|seuste go imam|сè уште го имам|go imam|го имам|uste go imam|уште го имам|seuste go imam|сè уште го имам|go imam|го имам|uste go imam|уште го имам|seuste e|сè уште е|dostapen|достапен|dostapna|достапна|ne sum go prodal|не сум го продал|ne sum go prodadol|не сум го продадол|uste ne sum go prodal|уште не сум го продал|uste ne sum go prodadol|уште не сум го продадол|uste se prodava|уште се продава|se prodava uste|се продава уште|ne e prodaden|не е продаден|uste ne e prodaden|уште не е продаден|ne sum go izdal|не сум го издал|ne sum go iznajmil|не сум го изнајмил|uste se izdava|уште се издава|se izdava uste|се издава уште|ne e izdaden|не е издаден|uste ne e izdaden|уште не е издаден|ne e izdadena|не е издадена|uste ne e izdadena|уште не е издадена|ne e iznajmen|не е изнајмен|uste ne e iznajmen|уште не е изнајмен|ne e iznajmena|не е изнајмена|uste ne e iznajmena|уште не е изнајмена/i;
+
+export const AVAILABILITY_NEGATIVE_RE = /ne se prodava|не се продава|ne se izdava|не се издава|terasa|тераса|klima|клима|parking|паркинг|procent|процент|obvrski|обврски|klient|клиент|broj|број|kancelari|канцелари|sorabotka|соработка|uslovi|услови|garaza|гаража|garage|гараж|lift|лифт|m2|квадрати|kvadrati|heating|греење|parno|парно/i;
+
+/**
+ * Shared predicate: does the text say the property is STILL available?
+ * Positive vocabulary + negative guard, lowercased/trimmed. Single source of
+ * truth for both the persuasion-phase availability handler and the
+ * DATA_COLLECTION acknowledgment (data-collection.js) — the two call sites
+ * can never drift apart. NOTE: this deliberately does NOT exclude question
+ * marks — that's a pre-existing property of the availability handler; the
+ * ack path adds its own stricter guard (see confirmsAvailability).
+ */
+export function isAvailabilityConfirmation(text) {
+  const t = String(text || '').toLowerCase().trim();
+  if (!t) return false;
+  return AVAILABILITY_POSITIVE_RE.test(t) && !AVAILABILITY_NEGATIVE_RE.test(t);
+}
+
 /**
  * Run all hardcoded early-return handlers in the exact order they
  * appear in the original generateResponse.
@@ -112,7 +145,7 @@ export function runEarlyResponses({ u, isRent, session }) {
   // ========================================
   // HARDCODED: Availability confirmation (with negative lookahead to prevent false matches)
   // ========================================
-  if (!session.collectedData.cooperationAccepted &&/uste go imam|уште го имам|dostapen e|достапен е|sloboden e|слободен е|seuste e dostapen|сè уште е достапен|go imam|го имам|uste e|уште е|dostapen|достапен|da imam|да имам|uste go imam da|уште го имам да|da uste go imam|да уште го имам|seuste go imam|сè уште го имам|go imam uste|го имам уште|uste e sloboden|уште е слободен|e sloboden|е слободен|dostapno e|достапно е|seuste e dostapno|сè уште е достапно|ima uste|има уште|uste ima|уште има|go ima uste|го има уште|uste go ima|уште го има|go ima|го има|uste go imam|уште го имам|seuste e|сè уште е|seuste go imam|сè уште го имам|dostapna e|достапна е|slobodna e|слободна е|seuste e dostapna|сè уште е достапна|uste e dostapna|уште е достапна|dostapni se|достапни се|seuste se dostapni|сè уште се достапни|uste se dostapni|уште се достапни|go imam uste|го имам уште|uste go imam|уште го имам|go imam seuste|го имам сè уште|seuste go imam|сè уште го имам|go imam|го имам|uste go imam|уште го имам|seuste go imam|сè уште го имам|go imam|го имам|uste go imam|уште го имам|seuste e|сè уште е|dostapen|достапен|dostapna|достапна|ne sum go prodal|не сум го продал|ne sum go prodadol|не сум го продадол|uste ne sum go prodal|уште не сум го продал|uste ne sum go prodadol|уште не сум го продадол|uste se prodava|уште се продава|se prodava uste|се продава уште|ne e prodaden|не е продаден|uste ne e prodaden|уште не е продаден|ne sum go izdal|не сум го издал|ne sum go iznajmil|не сум го изнајмил|uste se izdava|уште се издава|se izdava uste|се издава уште|ne e izdaden|не е издаден|uste ne e izdaden|уште не е издаден|ne e izdadena|не е издадена|uste ne e izdadena|уште не е издадена|ne e iznajmen|не е изнајмен|uste ne e iznajmen|уште не е изнајмен|ne e iznajmena|не е изнајмена|uste ne e iznajmena|уште не е изнајмена/i.test(u) && !/ne se prodava|не се продава|ne se izdava|не се издава|terasa|тераса|klima|клима|parking|паркинг|procent|процент|obvrski|обврски|klient|клиент|broj|број|kancelari|канцелари|sorabotka|соработка|uslovi|услови|garaza|гаража|garage|гараж|lift|лифт|m2|квадрати|kvadrati|heating|греење|parno|парно/i.test(u)) {
+  if (!session.collectedData.cooperationAccepted && isAvailabilityConfirmation(u)) {
     const propertyLabel = session.adMemory?.propertyType === 'apartment' ? 'станот' :
                           session.adMemory?.propertyType === 'house' ? 'куќата' :
                           session.adMemory?.propertyType === 'land' ? 'плацот' :
@@ -219,7 +252,16 @@ export function runEarlyResponses({ u, isRent, session }) {
   // ========================================
 
       // Check for price quotes like "baram 156iljadi", "сакам 120000", "цена 150000"
-  const priceQuoteMatch = u.match(/\b(baram|сакам|цена|price|cena)\s*(\d{1,3}(?:[.,]\d{3})*)/i);
+      // GATED on !cooperationAccepted (reported bug): during PERSUASION the
+      // commission-rule pitch is the right reply and the sum is tracked as
+      // mentionedPrice. But during DATA_COLLECTION the owner is ANSWERING the
+      // price question — the early response would swallow the answer, store
+      // only mentionedPrice, and leave monthlyRent/cleanPrice empty, so Ana
+      // re-asked a price the owner already gave ("BARAM 350 EVRA ZA MESEC" →
+      // re-ask → "TI KAZAV 350" → re-ask). Let it fall through to the
+      // extraction pass instead, which stores the price field at HIGH.
+  const priceQuoteMatch = !session.collectedData.cooperationAccepted &&
+    u.match(/\b(baram|сакам|цена|price|cena)\s*(\d{1,3}(?:[.,]\d{3})*)/i);
   if (priceQuoteMatch) {
     let price = parseInt(priceQuoteMatch[2].replace(/[.,]/g, ''));
 
@@ -361,8 +403,14 @@ if (/kako bi sorabotuvale|како би соработувале|како да �
   // Third: Check for general commission/conditions
   if (isAskingAboutCommission(u)) {
     if (isRent && /провизи|provizija|%|procent|kolku|колку|plakjam|плаќам|zimate|земате|uslovi|услови/i.test(u)) {
+      // ROTATING (anti-bot): the rent commission rule rotates across the
+      // approved COMMISSION_NO_PROVISION_RESPONSES_RENT variants instead of
+      // returning the same static sentence every time (a Cyrillic rent
+      // "од кого земате пари" hits this branch BEFORE matchObjection — the
+      // Latin "OD KOGO ZEMATE PARI" falls through to matchObjection's
+      // rotating from_whose_pocket rent variants).
       return {
-        text: 'За издавање, провизијата зависи од месечната кирија. Доколку киријата е до 1000 евра, вие како сопственик плаќате 50% од една месечна кирија. Доколку киријата е над 1000 евра, вие плаќате една цела месечна кирија. Ние се грижиме за целокупниот процес на издавање, документација и избор на соодветен клиент.',
+        text: getRandomCommissionNoProvisionResponse(true),
         type: "NORMAL"
       };
     }

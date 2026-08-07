@@ -75,7 +75,10 @@ export function parseNumberWords(text) {
     'sedum': 7, 'седум': 7,
     'osum': 8, 'осум': 8,
     'devet': 9, 'девет': 9,
-    'deset': 10, 'десет': 10
+    'deset': 10, 'десет': 10,
+    // Truncated Viber forms for the "i {unit}" connector: "osumdeset i ses"
+    // (86) — 'ses'/'шес' are shorthand for 'sest'/'шест' (6).
+    'ses': 6, 'шес': 6
   };
 
   for (const [word, num] of Object.entries(numberWords)) {
@@ -106,7 +109,10 @@ export function parseNumberWords(text) {
     'седум': 7,
     'осум': 8,
     'девет': 9,
-    'десет': 10
+    'десет': 10,
+    // Truncated Viber forms for the "i {unit}" connector: "osumdeset i ses"
+    // (86) — 'ses'/'шес' are shorthand for 'sest'/'шест' (6).
+    'ses': 6, 'шес': 6
   };
   const rootGroup = '(eden|edna|edno|dva|dve|tri|cetiri|pet|sest|sedum|osum|devet)';
   let result = 0;
@@ -305,7 +311,18 @@ export function parseNumberWords(text) {
     // Try "i {unit}" suffix first (most common: "seeset i pet" → 60+5)
     // Both Latin and Cyrillic connector (i/и) and units are accepted:
     // "шеесет и четири" → 64, "седумдесет и осум" → 78.
-    const iBrojMatch = remaining.match(/^[iи]\s*(eden|edna|edno|dva|dve|tri|cetiri|pet|sest|sedum|osum|devet|deset|еден|една|едно|два|две|три|четири|пет|шест|седум|осум|девет|десет)\s*$/i);
+    // The unit is matched to a WORD BOUNDARY (not \s*$) so a compound-quantity
+    // mid-sentence works too: "VKUPNO IMA OSUMDESET I SES I TERASA OD 3 M2"
+    // → remaining "i ses i terasa..." → "i ses" matches → 80+6 = 86 (reported
+    // lead 5540516: 86 m² total with a 3 m² terrace). Truncated "ses"/"шес"
+    // (Viber shorthand for "sest"/"шест") are accepted as 6.
+    // Boundary is CYRILLIC-AWARE (?=$|[^a-zа-я\d]) — JS `\b` is ASCII-only and
+    // silently fails after a Cyrillic unit ("осумдесет и шес" → "и шес" could
+    // never match `\b` after the Cyrillic "шес"). The lookahead accepts
+    // end-of-string or any non-letter/non-digit (space, punctuation, "и", …)
+    // while still refusing a partial match inside a longer word ("i sesnaeset"
+    // = 16 must not read "ses" as 6).
+    const iBrojMatch = remaining.match(/^[iи]\s*(eden|edna|edno|dva|dve|tri|cetiri|pet|sest|sedum|osum|devet|deset|ses|шес|еден|една|едно|два|две|три|четири|пет|шест|седум|осум|девет|десет)(?=$|[^a-zа-я\d])/i);
     if (iBrojMatch) {
       result += rootMap[iBrojMatch[1].toLowerCase()] || 0;
     }
@@ -409,6 +426,17 @@ export function extractFirstNumber(text) {
 export function countBedrooms(text) {
   const u = text.toLowerCase();
 
+  // ORDINAL + FLOOR CONTEXT (reported): the owner is answering the FLOOR
+  // question, never bedrooms — "vtori kat", "на втори од 7" (2nd of 7
+  // floors), "osmi od deset". Two constructions:
+  //   a) ordinal + kat/sprat ("vtori kat")
+  //   b) ordinal + "od N" compound floor ("vtori od 7" / "втори од 7")
+  // Used by BOTH fallback paths below — the word-number path (parseMacedonian
+  // Number handles the Latin "vtor") AND the digit path (Cyrillic "втори" is
+  // NOT in parseMacedonianNumber's word map, so "на втори од 7" falls through
+  // to extractFirstNumber → 7, which would otherwise phantom as bedrooms=7).
+  const hasOrdinalContext = /(treti|трети|tret|трет|vtori|втори|vtor|втор|prvi|први|prv|прв|cetvrti|четврти|cetvrt|четврт|petti|петти|sesti|шести|sedmi|седми|osmi|осми|devetti|деветти)\s*(kat|кат|sprat|спрат|od\s+\d{1,3}|од\s+\d{1,3}|od\s+[a-zа-я]+|од\s+[a-zа-я]+)/i;
+
   if (/garsonjera|гарсонера|гарсоњера|garsoniera|гарсониера/i.test(u)) return 0;
   if (/dvosoben|двособен/i.test(u)) return 1;
   if (/trisoben|трисобен|trosoben/i.test(u)) return 2;
@@ -489,8 +517,11 @@ export function countBedrooms(text) {
     // Skip if the only number words are actually ordinal floor references
     // Inflected ordinal forms (vtori/втори, treti/трети, prvi/први) as well
     // as bare ordinals — "vtori kat" must never count as bedrooms=2.
-    const hasOrdinalContext = /(treti|трети|tret|трет|vtori|втори|vtor|втор|prvi|први|prv|прв|cetvrti|четврти|cetvrt|четврт|petti|петти|sesti|шести|sedmi|седми|osmi|осми|devetti|деветти)\s*(kat|кат|sprat|спрат)/i.test(u);
-    if (hasOrdinalContext) return null;
+    // COMPOUND-FLOOR FORM (reported): "NA VTORI OD 7" (2nd of 7 floors) — the
+    // ordinal is bound to "od N", not to kat/sprat, so the old guard missed it
+    // and the substring-matched "vtor"→2 leaked through as a phantom
+    // bedrooms=2. (Regex shared with the digit fallback below.)
+    if (hasOrdinalContext.test(u)) return null;
     // Skip if message contains terrace or question context (answering terrace/other follow-up)
     // Uses |teras|терас to match ALL inflected forms (terasa, terasi, terase, etc.)
     if (/terasa|тераса|teras|терас|zosto|зошто|zasto|зашто/i.test(u)) return null;
@@ -521,6 +552,11 @@ export function countBedrooms(text) {
     // bedrooms=1 from the garage LEVEL. The word-number fallback above
     // already skips parking context; the digit fallback must too.
     if (/m2|м2|кв|kvadrati|квадрати|sqm|kat|кат|sprat|спрат|teras|терас|m²|evra|евра|iljadi|илјади|parking|паркинг|garaza|гаража/i.test(u)) return null;
+    // ORDINAL + FLOOR CONTEXT (reported): "на втори од 7" (Cyrillic) reaches
+    // THIS digit fallback because parseMacedonianNumber has no Cyrillic
+    // "втор" in its word map — the word-number guard above never fired, and
+    // extractFirstNumber read "7" as bedrooms. Same ordinal-context guard.
+    if (hasOrdinalContext.test(u)) return null;
     // NEGATIVE-LEVEL GUARD (reported): "-1"/"na -1"/"на -2" is a basement
     // or parking level, never a bedroom count. extractFirstNumber strips the
     // minus ("-1" → 1), so the guard must run here.
@@ -727,6 +763,28 @@ export function extractTerraceNumber(text) {
       return null;
     };
 
+    // "OF WHICH X ARE TERRACE" / "X ARE TERRACE" COPULA (reported bug):
+    //   "VKUPNO IMA SEESET I TRI KVADRATA OD KOI 2 SE TERASA"
+    //   (63 sqm total, of which 2 are terrace) → terraceSqm must be 2, NOT 3
+    //   ("tri" from the 63-phrase) or 63. The proximity/context scan below
+    //   treats the total-sqm numbers as candidates because "kvadrata" sits
+    //   between them and terasa — so the number BOUND to terasa ("2 se
+    //   terasa" / "од кои 2 се тераса") must win, and is checked FIRST.
+    //   One disambiguator is REQUIRED (the "od koi" construction or the
+    //   "se" copula): bare "WORD terasa" ("ima terasa", "golema terasa")
+    //   must never match — parseMacedonianNumber uses substring matching,
+    //   which could read a phantom number out of an innocent word. SINGULAR
+    //   forms only (terasa/тераса/terrace): the plural forms ("ima 2 terasi"
+    //   = 2 terraces) are a COUNT, not a size, and keep the existing
+    //   plural-count guard below.
+    const boundTerraceMatch = text.match(
+      /(?:^|[^a-zа-я\d])(?:(?:(?:od\s+koi|од\s+кои)\s+)(\d{1,4}|[a-zа-я]+)\s*(?:se|се)?|(\d{1,4}|[a-zа-я]+)\s+(?:se|се)\s+)(?:terasa|тераса|terrace)(?:$|[^a-zа-я])/i
+    );
+    if (boundTerraceMatch) {
+      const n = extractWordNumber(boundTerraceMatch[1] || boundTerraceMatch[2]);
+      if (n !== null) return n;
+    }
+
     // PLURAL-FORM COUNT GUARD (reported): "imaima terasi 2" (there are 2
     // terraces) / "2 terasi" / "dve terasi" — a BARE number next to the
     // PLURAL forms (terasi/тераси/terase/терасе) is the terrace COUNT, not
@@ -779,13 +837,22 @@ export function extractTerraceNumber(text) {
         const hasSqmBetween = words.slice(start, end).some(w =>
           /kvadrati|квадрати|kvadrata|квадрата|m2|м2|kv|кв|sqm/i.test(w)
         );
-        // A number with an ATTACHED unit ("5m2") is an unambiguous SIZE even
-        // without a separate sqm word between it and the terrace word — treat
-        // it as context so "ima 2 terasi od 5m2" resolves to 5, not the count 2.
-        if ((hasSqmBetween || hasAreaUnit(words[i])) && distance < bestContextDistance) {
+        // A number with an ATTACHED unit ("5m2") OR an ADJACENT unit word
+        // ("3 M2") is an unambiguous SIZE — treat it as context so
+        // "VKUPNO IMA OSUMDESET I SES I TERASA OD 3 M2" resolves to 3 (the
+        // "OD 3 M2" terrace), not to the closer bare "ses" (6 — the tens of
+        // the 86 total). Reported lead 5540516.
+        // DISTANCE CAP: adjacent-unit is only a size signal NEAR the terrace
+        // word (≤2 words: "terasa od 3 M2") — a farther "N M2" ("ima terasa,
+        // stanot e 68 M2") is the TOTAL size, not the terrace, and must stay
+        // a bare candidate (rejected by the bare-distance ≤ 2 guard below).
+        const unitAdjacent = hasAreaUnit(words[i]) ||
+          (((i + 1 < words.length && hasAreaUnit(words[i + 1])) ||
+            (i - 1 >= 0 && hasAreaUnit(words[i - 1]))) && distance <= 2);
+        if ((hasSqmBetween || unitAdjacent) && distance < bestContextDistance) {
           bestContextDistance = distance;
           bestWithContext = result;
-        } else if (!hasSqmBetween && !hasAreaUnit(words[i]) && distance < bestBareDistance) {
+        } else if (!hasSqmBetween && !unitAdjacent && distance < bestBareDistance) {
           bestBareDistance = distance;
           bestBare = result;
         }
@@ -813,7 +880,13 @@ export function extractTerraceNumber(text) {
   if (sqmMatch) return parseInt(sqmMatch[1]);
 
   const wordCount = words.length; // reuse the top-of-function `words` split
-  const hasOtherContext = /iljadi|илјади|evra|евра|eur|evro|евро|kvadrati|квадрати|kvadrata|квадрата|m2|м2|kv|кв|sqm|kat|кат|sprat|спрат|sprata|спрата|kata|ката|katnica|катница|spalni|спални|parking|паркинг|garaza|гаража|lift|лифт|klima|клима|godina|година|izgraden|граден|renoviran|реновиран/i.test(text);
+  // OTHER-FIELD CONTEXT — a bare number in such a message is NOT a terrace
+  // size. Includes the BUILDING word ("ZGRADA OD 80TI" — a building-year
+  // answer, not a terrace) and the DECADE forms ("80ti"/"осумдесетти" — a
+  // yearBuilt decade, never a terrace size): the old list lacked them, so a
+  // "80ti" digit fell through to the bare-\d+ grab below and a phantom
+  // terraceSqm=80 was stored (reported lead 5540516).
+  const hasOtherContext = /iljadi|илјади|evra|евра|eur|evro|евро|kvadrati|квадрати|kvadrata|квадрата|m2|м2|kv|кв|sqm|kat|кат|sprat|спрат|sprata|спрата|kata|ката|katnica|катница|spalni|спални|parking|паркинг|garaza|гаража|lift|лифт|klima|клима|godina|година|izgraden|граден|renoviran|реновиран|zgrad|зград|\d{1,2}\s*[- ]?(?:ti|ти|ta|та)(?:te|те)?|осумдесет|osumdeset|осамдесет|osamdeset|девеесет|deveeset|деведесет|devedeset|седумдесет|sedumdeset|шеесет|seeset|педесет|pedeset/i.test(text);
   if (wordCount <= 3 && !hasOtherContext) {
     const wordNum = parseMacedonianNumber(text);
     if (wordNum !== null && wordNum >= 1 && wordNum <= 100) return wordNum;
@@ -851,6 +924,11 @@ export function parseYearBuilt(text) {
     // Skip if followed by sqm, price, floor, or building-story context
     const afterMatch = text.slice(twoDigit.index + twoDigit[0].length).trim();
     if (/^(m2|м2|кв|kvadrati|квадрати|kvadrata|квадрата|sqm|evra|евра|eur|iljadi|илјади|iljade|илјаде|sprat|спрат|kat|кат|katnica|катница|sprata|спрата|kata|ката|kati|кати|eta|ета|etazha|етажа|spraevi|спраеви|spratovi|спратови|katovi|катови)/i.test(afterMatch)) return null;
+    // COMPOUND-QUANTITY GUARD (reported lead 5540516): "80 i ses" is the
+    // quantity 86, not the 1980s — a 2-digit year followed by "i {unit}"
+    // is a compound number, never a decade. Boundary is CYRILLIC-AWARE
+    // (?=$|[^a-zа-я\d]) — JS `\b` is ASCII-only and fails after "шес".
+    if (/^[iи]\s+(?:eden|edna|edno|dva|dve|tri|cetiri|pet|sest|ses|sedum|osum|devet|deset|шес)(?=$|[^a-zа-я\d])/i.test(afterMatch)) return null;
     if (year >= 0 && year <= 30) return 2000 + year;
     if (year >= 70 && year <= 99) return 1900 + year;
   }
@@ -872,6 +950,16 @@ export function parseYearBuilt(text) {
   if (/60ta|60 та|60та|60-ta|шеесетта|шеесета|seesetta|seeseta/i.test(text)) return 1960;
   if (/2000ti|2000 ти|двеилјадити/i.test(text)) return 2005;
   if (/2000ta|2000 та|двеилјадита/i.test(text)) return 2000;
+
+  // COMPOUND-QUANTITY GUARD (reported lead 5540516): "osumdeset i ses" is
+  // the QUANTITY 86 ("VKUPNO IMA OSUMDESET I SES ..." = 86 m² total), NOT a
+  // decade. The bare-word blocks below would otherwise match "osumdeset" →
+  // phantom yearBuilt 1980. A decade word (or bare decade digit) followed by
+  // "i {unit}" is a compound number — never a year answer (the -ti/-ta
+  // decade forms and exact years above are unambiguous and already handled).
+  if (/(?:osumdeset|осумдесет|osemdeset|осемдесет|deveeset|девеесет|devedeset|деведесет|sedumdeset|седумдесет)\s+[iи]\s+(?:eden|edna|edno|dva|dve|tri|cetiri|pet|sest|ses|sedum|osum|devet|deset)|\b(?:90|80|70|60|50)\b\s+[iи]\s+(?:eden|edna|edno|dva|dve|tri|cetiri|pet|sest|ses|sedum|osum|devet|deset)\b/i.test(text)) {
+    return null;
+  }
 
   // Word boundary BOTH before AND after to prevent matching "deveeset"
   // inside "deveesetitri" (93). The dual `\b` requires the decade word

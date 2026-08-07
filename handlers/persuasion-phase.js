@@ -16,7 +16,7 @@
 // ========================================
 import Groq from "groq-sdk";
 import { config } from '../config.js';
-import { classifyIntent, CONV_CONTINUATION_WORDS as convContWords, parseConversationContext } from '../classifier.js';
+import { classifyIntent, CONV_CONTINUATION_WORDS as convContWords, HESITATION_GUARD_WORDS as hesitationWords, parseConversationContext } from '../classifier.js';
 import { buildPersuasionContext, buildPersuasionPrompt, postProcessPersuasionResponse } from '../persuasion.js';
 import { withRetry } from '../retry-utils.js';
 import { transitionTo } from './state-machine.js';
@@ -153,20 +153,39 @@ export function detectPhase({ u, conv, session, isRent }) {
             }
           };
         } else if (session.rejectionCount === 2) {
+          // SECOND REJECTION → GIVE UP (reported, lead 5502969). The old
+          // behavior sent a THIRD persuasion pitch, making Ana repeat the
+          // same sentence like a bot. On the second firm rejection she must
+          // STOP pitching: acknowledge the owner's decision, no sales
+          // sentence, no cooperation question. The polite goodbye + CLOSED
+          // comes on the THIRD rejection (next branch). Variants are
+          // randomized so consecutive leads don't read the same sentence.
+          const giveUpVariants = [
+            "Разбирам, ја почитувам вашата одлука.",
+            "Во ред, нема да ве притискам. Ви благодарам на разговорот.",
+            "Разбирам целосно. Ви посакувам успех во вашите планови."
+          ];
           mirrorPhase(session, 'PERSUASION');
           return {
             response: {
-              // Rent: never "без надокнада од ваша страна" (sale-only) —
-              // rent owners owe the standard 50%/100% commission.
-              text: isRent ? "Не ве разбирам. Сакате да издадете, а ние ви нудиме професионална услуга за издавање по стандардна провизија. Што велите да се обидеме?" : "Не ве разбирам. Сакате да продадете, експерти ви ја нудат својата услуга без надокнада од ваша страна, а вие одбивате. Што велите да се обидеме?",
+              text: giveUpVariants[Math.floor(Math.random() * giveUpVariants.length)],
               type: "NORMAL"
             }
           };
         } else {
+          // THIRD REJECTION → POLITE GOODBYE + CLOSED (reported, lead
+          // 5502969). All variants are rent/sale-neutral (no "без надокнада"
+          // sale-only claims).
+          const goodbyeVariants = [
+            "Ве разбирам, можете да пробате сами, но ако не успеете, ние сме тука да ви помогнеме. Ви посакуваме успех и доколку се предомислите, слободно контактирајте нѐ.",
+            "Во ред, ја почитувам вашата одлука. Ако сепак одлучите да соработувате, ние сме на располагање. Ви благодариме и ви посакуваме се најдобро.",
+            "Ве разбирам целосно. Пробајте сами, а ако ви затреба стручна помош, нашата врата е секогаш отворена. Ви благодариме и до слушање.",
+            "Разбирам, не ве притискам. Доколку не успеете сами, ние сме тука. Ви посакувам успех во вашите планови и ви благодарам на разговорот."
+          ];
           mirrorPhase(session, 'PERSUASION');
           return {
             response: {
-              text: "Разбирам. Доколку се предомислите, слободно контактирајте нѐ.",
+              text: goodbyeVariants[Math.floor(Math.random() * goodbyeVariants.length)],
               type: "CLOSED"
             }
           };
@@ -181,7 +200,13 @@ export function detectPhase({ u, conv, session, isRent }) {
         };
       } else {
         phase = "PERSUASION";
-        if (classification.intent === "INTERESTED" && classification.confidence > 0.5) {
+        // RESET-ON-ENGAGEMENT ONLY: genuine interest (a question, a strong
+        // signal) resets the rejection counter; HEDGED messages ("ke vidime",
+        // "mozebi", "razmislam") do not — otherwise an owner could dodge the
+        // polite-goodbye escalation by interleaving hedges between refusals
+        // (reported, lead 5502969).
+        if (classification.intent === "INTERESTED" && classification.confidence > 0.5 &&
+            !hesitationWords.test(u)) {
           session.rejectionCount = 0;
         }
       }
