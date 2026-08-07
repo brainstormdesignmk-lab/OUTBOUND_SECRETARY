@@ -85,6 +85,19 @@ const RETRYABLE_NO_RATE_LIMIT = DEFAULT_RETRYABLE_ERRORS.filter(p =>
 // PROVIDERS (each returns Promise<{ text: string }>)
 // ========================================
 
+/**
+ * Gemini's output-token budget, floored so the thinking model's reasoning
+ * tokens (which count against maxOutputTokens) can never starve the visible
+ * reply. Never shrinks a larger explicitly-requested budget.
+ *
+ * @param {number|string|undefined} maxTokens — requested max output tokens
+ * @returns {number}
+ */
+export const GEMINI_OUTPUT_BUDGET_FLOOR = 2048;
+export function geminiOutputBudget(maxTokens) {
+  return Math.max(Number(maxTokens) || 0, GEMINI_OUTPUT_BUDGET_FLOOR);
+}
+
 // --- Groq (primary) — lazy client, same semantics as the old code ---
 let _groqClient = null;
 function getGroqClient() {
@@ -139,19 +152,44 @@ export function buildGeminiPayload(messages, gen) {
   };
 }
 
+/**
+ * Extract the visible reply from a raw Gemini generateContent response.
+ * PURE (no network) — exported for offline tests.
+ *
+ * gemini-2.5-flash returns reasoning in usageMetadata (counted toward
+ * maxOutputTokens) and only the visible text in content.parts — so parts are
+ * joined as-is. When finishReason is MAX_TOKENS the budget was exhausted and
+ * the visible reply may be cut mid-word (reported incomplete replies); the
+ * caller gets { truncated: true } so it can decide (warn + ship the partial
+ * reply rather than throw — a cut sentence beats the technical-error
+ * escalation).
+ *
+ * @param {Object} data — raw API response
+ * @returns {{text: string, truncated: boolean}}
+ */
+export function parseGeminiResponse(data) {
+  const finishReason = data?.candidates?.[0]?.finishReason;
+  const text = data?.candidates?.[0]?.content?.parts?.map(p => p.text || '').join('').trim() || '';
+  return { text, truncated: finishReason === 'MAX_TOKENS' };
+}
+
 function geminiProvider({ messages, temperature, top_p, max_tokens }) {
   const key = process.env.GEMINI_API_KEY;
   if (!key || !key.trim()) {
     return Promise.reject(new Error('GEMINI_API_KEY missing — Gemini fallback unavailable (add to ~/.ana/ana.env)'));
   }
 
-  // THINKING-MODEL OUTPUT FLOOR (observed): gemini-2.5-flash burns output
-  // tokens on reasoning before visible text — with the persuasion budget of
-  // 150 tokens an involved objection could exhaust it and return EMPTY parts
-  // (finishReason MAX_TOKENS → my empty-content error → spurious cascade).
-  // Floor at 256 so a normal 1-2 sentence reply always has room. Free-tier
-  // RPD quota counts REQUESTS, not output tokens — this costs nothing.
-  const outputFloor = Math.max(Number(max_tokens) || 0, 256);
+  // THINKING-MODEL OUTPUT BUDGET (proven by live probe, reported incomplete
+  // replies): gemini-2.5-flash is a THINKING model — reasoning tokens count
+  // against maxOutputTokens. With the persuasion budget (150) floored to 256,
+  // the probe showed finishReason MAX_TOKENS: 241 thinking tokens consumed the
+  // budget and left ~11 for the visible reply → sentences cut mid-word
+  // ("...клиен Дали", "...работи иск"). At 1024 the same call finished STOP
+  // with a complete reply (442 thinking + 34 visible). The free-tier RPD
+  // quota counts REQUESTS, not output tokens — a generous budget costs
+  // nothing, and the prompt's "max 1-2 sentences" rule makes the model stop
+  // early anyway. 2048 leaves ~4x headroom for longer reasoning runs.
+  const outputFloor = geminiOutputBudget(max_tokens);
   const { url, body } = buildGeminiPayload(messages, {
     model: config.GEMINI_MODEL,
     temperature,
@@ -165,8 +203,14 @@ function geminiProvider({ messages, temperature, top_p, max_tokens }) {
       { params: { key }, timeout: 30000 }
     )
     .then(({ data }) => {
-      const text = data?.candidates?.[0]?.content?.parts?.map(p => p.text || '').join('').trim() || '';
+      const { text, truncated } = parseGeminiResponse(data);
       if (!text) throw new Error('Gemini returned empty content');
+      if (truncated) {
+        // Budget exhausted — the visible reply may be cut mid-word. The 2048
+        // floor makes this rare; surface it for ops instead of silently
+        // shipping an amputated sentence to an owner (reported).
+        console.warn(`[LLM gemini: MAX_TOKENS — reply possibly truncated (${text.length} chars, budget ${outputFloor})]`);
+      }
       return { text };
     })
     .catch(err => {

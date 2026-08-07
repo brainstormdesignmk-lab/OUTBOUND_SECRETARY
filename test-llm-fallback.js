@@ -21,6 +21,11 @@
 //      createSafeFallback still produces the ERROR reply + escalation path.
 //   E. isRateLimit / isTpdExhaustion unit checks.
 //   F. buildProviderChain skips providers with missing keys.
+//   G2/G3. buildGeminiPayload mapping + the thinking-model output budget
+//      (gemini-2.5-flash reasoning counts against maxOutputTokens — the
+//      150 persuasion budget floored at 256 amputated replies mid-word;
+//      the floor now guarantees room) + parseGeminiResponse truncation
+//      detection.
 //   G. runPersuasion's ANA_OFFLINE_LLM seam still short-circuits (no
 //      provider touched, battery stays offline).
 //
@@ -35,6 +40,9 @@ import {
   generateCompletion,
   buildProviderChain,
   buildGeminiPayload,
+  parseGeminiResponse,
+  geminiOutputBudget,
+  GEMINI_OUTPUT_BUDGET_FLOOR,
   isRateLimit,
   isTpdExhaustion
 } from './llm-provider.js';
@@ -236,6 +244,75 @@ assert('G2f: generationConfig carries temperature/topP/maxOutputTokens',
 // No system message → no systemInstruction key
 const noSys = buildGeminiPayload([{ role: 'user', content: 'x' }], { model: 'm', temperature: 0.2, top_p: 0.75, max_tokens: 150 });
 assert('G2g: no system message → no systemInstruction', noSys.body.systemInstruction === undefined, `got ${JSON.stringify(noSys.body.systemInstruction)}`);
+
+// ============================================================
+// PART G3 — thinking-model output budget (reported: Gemini replies cut
+// mid-word — gemini-2.5-flash reasoning tokens count against
+// maxOutputTokens, so the 150-token persuasion budget floored at 256 let
+// thinking consume the budget and amputate the visible reply).
+// ============================================================
+console.log('\n========================================');
+console.log('🧪 G3: geminiOutputBudget floors output so thinking can\'t starve the reply');
+console.log('========================================\n');
+
+// Persuasion sends max_tokens 150 → the floor must lift it well above the
+// reasoning footprint (live probe: 256 budget → 241 thinking tokens + 11
+// visible → MAX_TOKENS mid-word cut; 1024 → complete STOP reply).
+const persuasionBudget = geminiOutputBudget(150);
+assert('G3a: persuasion budget (150) floored above reasoning footprint',
+  persuasionBudget >= 1024,
+  `got ${persuasionBudget}`);
+assert('G3b: floor is exported and sane (>= 1024)',
+  GEMINI_OUTPUT_BUDGET_FLOOR >= 1024,
+  `got ${GEMINI_OUTPUT_BUDGET_FLOOR}`);
+assert('G3c: a larger explicit budget is never shrunk',
+  geminiOutputBudget(4096) === 4096,
+  `got ${geminiOutputBudget(4096)}`);
+assert('G3d: undefined/0 budgets fall back to the floor',
+  geminiOutputBudget(undefined) === GEMINI_OUTPUT_BUDGET_FLOOR &&
+  geminiOutputBudget(0) === GEMINI_OUTPUT_BUDGET_FLOOR,
+  `got ${geminiOutputBudget(undefined)}/${geminiOutputBudget(0)}`);
+
+// End-to-end: the floor feeds buildGeminiPayload's maxOutputTokens
+const floored = buildGeminiPayload(
+  [{ role: 'user', content: 'x' }],
+  { model: 'gemini-2.5-flash', temperature: 0.2, top_p: 0.75, max_tokens: persuasionBudget }
+);
+assert('G3e: payload maxOutputTokens uses the floored budget',
+  floored.body.generationConfig.maxOutputTokens === persuasionBudget,
+  `got ${floored.body.generationConfig.maxOutputTokens}`);
+
+// ============================================================
+// PART G4 — parseGeminiResponse: MAX_TOKENS truncation detection
+// (reported: amputated replies must never ship silently)
+// ============================================================
+console.log('\n========================================');
+console.log('🧪 G4: parseGeminiResponse flags MAX_TOKENS truncation');
+console.log('========================================\n');
+
+const completeResp = parseGeminiResponse({
+  candidates: [{ finishReason: 'STOP', content: { parts: [{ text: 'Ве разбирам, работиме. Дали сте расположени?' }] } }]
+});
+assert('G4a: STOP response parsed, not truncated',
+  completeResp.text === 'Ве разбирам, работиме. Дали сте расположени?' && completeResp.truncated === false,
+  `got ${JSON.stringify(completeResp)}`);
+
+const truncatedResp = parseGeminiResponse({
+  candidates: [{ finishReason: 'MAX_TOKENS', content: { parts: [{ text: 'Ве разбирам, нашата агенција работи иск' }] } }]
+});
+assert('G4b: MAX_TOKENS response flagged as truncated',
+  truncatedResp.text === 'Ве разбирам, нашата агенција работи иск' && truncatedResp.truncated === true,
+  `got ${JSON.stringify(truncatedResp)}`);
+
+const multiPart = parseGeminiResponse({
+  candidates: [{ finishReason: 'STOP', content: { parts: [{ text: 'А' }, { text: 'Б' }, { text: 'В' }] } }]
+});
+assert('G4c: multiple visible parts joined in order', multiPart.text === 'АБВ' && multiPart.truncated === false, `got ${JSON.stringify(multiPart)}`);
+
+const emptyResp = parseGeminiResponse({});
+assert('G4d: empty response → empty text, not truncated',
+  emptyResp.text === '' && emptyResp.truncated === false,
+  `got ${JSON.stringify(emptyResp)}`);
 
 // ============================================================
 // PART G — runPersuasion offline seam (battery stays offline)
