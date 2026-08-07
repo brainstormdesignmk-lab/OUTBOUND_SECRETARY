@@ -14,6 +14,7 @@
 // Public API unchanged: generateFirstMessage() and generateResponse().
 // ========================================
 import './env.js'; // side-effect: load ~/.ana/ana.env (see env.js) — never a .env* file in CWD.
+import { config } from './config.js';
 // service.js is the package.json `main` entry — running `node service.js`
 // directly must get the API key from the real env or ~/.ana/ana.env BEFORE
 // the Groq client (lazily constructed in handlers/persuasion-phase.js) reads
@@ -242,7 +243,17 @@ export async function generateResponse(session, userInput) {
         };
       }
     }
-    const conv = session.messages?.filter(m => m.text).map(m => `${m.role === 'model' ? 'Ана' : 'Сопственик'}: ${m.text}`).join('\n') || "";
+    // Conversation transcript for persuasion/classification — capped at
+    // config.MAX_HISTORY turns (reported: input tokens count toward every
+    // LLM provider's daily quota; 20+ turns + the system prompt was ~2,300
+    // tokens/call, and MAX_HISTORY was defined but never applied). Filter
+    // FIRST (drop textless rows), then take the LAST N turns so recent
+    // context — including the lastAnaMessage used by phase detection — is
+    // always present.
+    const conv = (session.messages?.filter(m => m.text) || [])
+      .slice(-config.MAX_HISTORY)
+      .map(m => `${m.role === 'model' ? 'Ана' : 'Сопственик'}: ${m.text}`)
+      .join('\n') || "";
 
     const isRent = session.adMemory?.transactionType === 'rent' || session.collectedData?.transactionType === 'rent';
 

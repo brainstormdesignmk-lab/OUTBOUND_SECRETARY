@@ -74,9 +74,23 @@ function envIntOrEmpty(name, fallback) {
 export const config = {
   // === LLM ===
   MODEL: envStr('ANA_MODEL', "llama-3.3-70b-versatile"),
+  // PROVIDER FALLBACK CHAIN (reported: Groq TPD exhaustion froze the
+  // persuasion phase). Ordered comma-separated provider names walked by
+  // llm-provider.js — Groq primary, then Gemini (independent free-tier
+  // quota), cascading on rate limits/outages. The safe fallback + human
+  // escalation remain the final net. "groq" alone restores old behavior.
+  LLM_PROVIDERS: envStr('ANA_LLM_PROVIDERS', 'groq,gemini'),
+  // Gemini fallback model (AI Studio free tier: gemini-2.5-flash-lite is
+  // cheaper, gemini-2.5-flash is the default — both ~1,500 RPD free).
+  GEMINI_MODEL: envStr('ANA_GEMINI_MODEL', 'gemini-2.5-flash'),
   TEMPERATURE: envFloat('ANA_TEMPERATURE', 0.2),
   MAX_TOKENS: envInt('ANA_MAX_TOKENS', 120),
-  MAX_HISTORY: envInt('ANA_MAX_HISTORY', 20),
+  // Conversation turns fed to the persuasion prompt. INPUT tokens count
+  // toward every provider's daily quota — 20 turns + the system prompt was
+  // ~2,300 tokens/call (reported 429: Requested 2290), and the full history
+  // was being sent regardless (MAX_HISTORY was defined but never consumed).
+  // 8 turns keeps recent context while nearly doubling daily capacity.
+  MAX_HISTORY: envInt('ANA_MAX_HISTORY', 8),
 
   // === COMMISSION ===
   SALE_COMMISSION_PERCENT: envInt('ANA_SALE_COMMISSION_PERCENT', 2),

@@ -33,6 +33,7 @@ const EXPECTED_DEFAULT_BLOCKLIST = path.join(PROJECT_DIR, 'data', 'blocked-numbe
 // the default-value assertions).
 const CONFIG_ENV_VARS = [
   'ANA_MODEL', 'ANA_TEMPERATURE', 'ANA_MAX_TOKENS', 'ANA_MAX_HISTORY',
+  'ANA_LLM_PROVIDERS', 'ANA_GEMINI_MODEL',
   'ANA_SALE_COMMISSION_PERCENT', 'ANA_RENT_COMMISSION_PERCENT',
   'ANA_REPLY_TIMEOUT_MS', 'ANA_FOLLOWUP_TIMEOUT_MS', 'ANA_GAP_BETWEEN_LEADS_MS',
   'ANA_TYPING_CHAR_MIN', 'ANA_TYPING_CHAR_MAX',
@@ -74,6 +75,8 @@ function importConfig(envPatch) {
 {
   const { config } = await importConfig({});
   assert('default MODEL preserved', config.MODEL === 'llama-3.3-70b-versatile', `got ${config.MODEL}`);
+  assert('default LLM_PROVIDERS preserved', config.LLM_PROVIDERS === 'groq,gemini', `got ${config.LLM_PROVIDERS}`);
+  assert('default GEMINI_MODEL preserved', config.GEMINI_MODEL === 'gemini-2.5-flash', `got ${config.GEMINI_MODEL}`);
   assert('default REPLY_TIMEOUT preserved', config.REPLY_TIMEOUT === 30 * 60 * 1000, `got ${config.REPLY_TIMEOUT}`);
   assert('default CSV path is project data/collected-leads.csv', config.CSV_OUTPUT_PATH === EXPECTED_DEFAULT_CSV, `got ${config.CSV_OUTPUT_PATH}`);
   assert('default PROPERTY_ROOT is project data/properties', config.PROPERTY_ROOT === EXPECTED_DEFAULT_PROPERTY_ROOT, `got ${config.PROPERTY_ROOT}`);

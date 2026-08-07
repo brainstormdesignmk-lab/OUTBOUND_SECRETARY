@@ -14,11 +14,9 @@
 //   2. runPersuasion() — the native-Macedonian LLM persuasion call with
 //      exponential-backoff retry and post-processing.
 // ========================================
-import Groq from "groq-sdk";
-import { config } from '../config.js';
 import { classifyIntent, CONV_CONTINUATION_WORDS as convContWords, HESITATION_GUARD_WORDS as hesitationWords, parseConversationContext } from '../classifier.js';
 import { buildPersuasionContext, buildPersuasionPrompt, postProcessPersuasionResponse } from '../persuasion.js';
-import { withRetry } from '../retry-utils.js';
+import { generateCompletion } from '../llm-provider.js';
 import { transitionTo } from './state-machine.js';
 
 /**
@@ -43,22 +41,12 @@ function mirrorPhase(session, phase, event = 'phase_detected') {
 // kernel < 4.11) whenever a .env* file exists in the CWD, because it
 // calls statx() which is missing on kernels older than 4.11. Keeping
 // the env file in the user's home dir sidesteps that entirely.
-
-// LAZY GROQ CLIENT — constructed on FIRST persuasion call, never at module
-// load. The Groq SDK constructor THROWS when GROQ_API_KEY is missing/empty,
-// which would crash every suite that imports service.js (→ this module) at
-// import time — breaking the offline test battery that must run with no key
-// (the ANA_OFFLINE_LLM seam above returns before construction is reached).
-// Production is unaffected: the key is read from process.env (populated by
-// env.js / ~/.ana/ana.env at entry-point startup) at construction time,
-// exactly as before.
-let _groqClient = null;
-function getGroqClient() {
-  if (!_groqClient) {
-    _groqClient = new Groq({ apiKey: process.env.GROQ_API_KEY });
-  }
-  return _groqClient;
-}
+//
+// LLM PROVIDERS: the actual chat call now lives in ../llm-provider.js
+// (Groq → Gemini fallback chain, rate-limit circuit breaker — reported
+// Groq TPD exhaustion froze persuasion). All provider clients are
+// constructed lazily there, never at module load, so the offline test
+// battery (ANA_OFFLINE_LLM seam below returns first) still needs no key.
 
 /**
  * Phase detection — decide PERSUASION vs DATA_COLLECTION and handle
@@ -252,41 +240,27 @@ export async function runPersuasion({ conv, userInput, classification, isRent })
   const persuasionContext = buildPersuasionContext(classification);
   const prompt = buildPersuasionPrompt(conv, userInput, persuasionContext, isRent);
 
-  // Construct the client BEFORE the retry wrapper: a missing/empty API key is a
-  // configuration error, not a transient failure — it must fail fast (and be
-  // caught by service.js's outer recovery → safe fallback) instead of being
-  // retried 3x with exponential backoff. Only the API CALL itself is retried.
-  const groqClient = getGroqClient();
+  // LLM PROVIDER CHAIN (reported, lead-level outage: Groq 429 TPD exhaustion
+  // froze persuasion and escalated live leads). llm-provider.js owns every
+  // provider + the cascade: Groq first (config.MODEL), Gemini 2.5 Flash on
+  // rate limit/outage, and the existing service.js safe fallback + human
+  // escalation stay the final net. A missing API key is surfaced by
+  // buildProviderChain's skip + generateCompletion's no-providers error.
+  const result = await generateCompletion({
+    messages: [
+      {
+        role: "system",
+        content: "Ти си Ана. Бидете природни, професионални и кратки на македонски. Секогаш завршувај со прашање за соработка. Не биди наметлива. Користи стандарден македонски книжевен јазик."
+      },
+      { role: "user", content: prompt }
+    ],
+    temperature: 0.20,
+    top_p: 0.75,
+    frequency_penalty: 0.15,
+    max_tokens: 150
+  });
 
-  // WRAP LLM CALL WITH RETRY LOGIC (exponential backoff, max 3 retries)
-  // Handles transient failures: network blips, rate limits, 5xx errors.
-  // Non-retryable errors (SyntaxError, TypeError) fail immediately.
-  const result = await withRetry(
-    () => groqClient.chat.completions.create({
-      messages: [
-        {
-          role: "system",
-          content: "Ти си Ана. Бидете природни, професионални и кратки на македонски. Секогаш завршувај со прашање за соработка. Не биди наметлива. Користи стандарден македонски книжевен јазик."
-        },
-        { role: "user", content: prompt }
-      ],
-      model: config.MODEL,
-      temperature: 0.20,
-      top_p: 0.75,
-      frequency_penalty: 0.15,
-      max_tokens: 150
-    }),
-    {
-      maxRetries: 3,
-      baseDelayMs: 2000,
-      maxDelayMs: 20000,
-      onRetry: (err, attempt) => {
-        console.log(`[LLM RETRY ${attempt}/3] ${err.message.substring(0, 100)}`);
-      }
-    }
-  );
-
-  let response = result.choices[0]?.message?.content?.trim() || "";
+  let response = (result?.text || "").trim();
   response = postProcessPersuasionResponse(response, isRent);
 
   return { text: response, type: "NORMAL" };
