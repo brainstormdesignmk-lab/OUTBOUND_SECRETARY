@@ -66,6 +66,91 @@ export function isAvailabilityConfirmation(text) {
 }
 
 /**
+ * BARE AVAILABILITY-AMBIGUOUS POSITIVE — the short "yes" family that reads
+ * as the AVAILABILITY answer when it arrives together with an availability
+ * confirmation: "da"/"да", "ok"/"ок", "okej"/"океј" (reported, lead
+ * 3571074: "DA" + "DOSTAPEN E"). DELIBERATELY NARROW: stronger or
+ * cooperation-flavored short positives ("moze" = ok/let's, "vazi" =
+ * agreed, "ajde" = let's go, "super", "sorabotuvame" = we cooperate,
+ * "da probame" = let's try) stay on the short-positive → cooperation path
+ * even in an availability batch — "vazi" + "dostapen e" means the owner
+ * confirmed availability AND agreed. Only the plain affirmatives are
+ * ambiguous enough to be the availability half of the greeting's double
+ * question.
+ */
+const BARE_AVAILABILITY_POSITIVE_RE = /^(?:da|да|ok|ок|okej|океј)$/i;
+
+/**
+ * Does the owner's CURRENT TURN confirm availability?
+ * Scans session.messages backwards from the end, stopping at Ana's last
+ * reply. The engine's grace batch appends every owner text to
+ * session.messages immediately (onOwnerMessage → addReply runs at receipt),
+ * so by the time ANY message of a batch is processed, the WHOLE batch is
+ * visible — "DA" + "DOSTAPEN E" in one window is detected from either
+ * message.
+ *
+ * DELIBERATE DIFFERENCE from data-collection.js's hasRecentAvailability-
+ * Confirmation (the DATA_COLLECTION acknowledgment path): this one uses the
+ * LOOSE isAvailabilityConfirmation (question marks allowed), because even an
+ * owner QUESTION ("dali e dostapen?") in the same batch means the follow-up
+ * "DA" is answering availability, not committing to cooperate. Do NOT
+ * "unify" the two helpers — importing data-collection's would also create a
+ * circular import (data-collection.js imports isAvailabilityConfirmation
+ * from THIS module).
+ */
+function hasRecentAvailabilityConfirmation(session) {
+  const msgs = session.messages || [];
+  for (let i = msgs.length - 1; i >= 0; i--) {
+    const m = msgs[i];
+    if (m.role === 'model') break; // stop at Ana's last reply
+    if (isAvailabilityConfirmation(m.text)) return true;
+  }
+  return false;
+}
+
+/**
+ * Build the still-available acknowledgment template (rent vs sale wording,
+ * "без провизија за вас" is sale-only). Shared by the availability handler
+ * and the bare-positive-in-availability-batch guard below — the two call
+ * sites can never drift apart. Marks session.availabilityAcknowledged.
+ */
+function buildAvailabilityResponse(session, isRent) {
+  const propertyLabel = session.adMemory?.propertyType === 'apartment' ? 'станот' :
+                        session.adMemory?.propertyType === 'house' ? 'куќата' :
+                        session.adMemory?.propertyType === 'land' ? 'плацот' :
+                        session.adMemory?.propertyType === 'commercial' ? 'локалот' : 'имотот';
+
+  let response;
+  if (isRent) {
+    // IMPORTANT: rent owners DO pay the standard commission (50% of one
+    // month's rent, 100% above €1000) — so the rent variants must NEVER
+    // promise "без провизија за вас" / "без никакви давачки" / "без
+    // обврски" (that phrasing is sale-only).
+    const rentResponses = [
+      `Драго ми е што ${propertyLabel} е сè уште достапен. Дали би сакале да го понудиме на нашите клиенти за издавање?`,
+      `Драго ми е што ${propertyLabel} е сè уште достапен. Дали би сакале да го издадеме во најкраток можен рок?`,
+      `Драго ми е што ${propertyLabel} е сè уште достапен. Дали би сакале нашата агенција да се погрижи за професионално издавање?`
+    ];
+    response = rentResponses[Math.floor(Math.random() * rentResponses.length)];
+  } else {
+    const saleResponses = [
+      `Драго ми е што ${propertyLabel} е сè уште достапен. Дали би сакале да го понудиме на нашите клиенти, без провизија за вас?`,
+      `Драго ми е што ${propertyLabel} е сè уште достапен. Дали би сакале да го продадеме во најкраток можен рок, без никакви давачки за вас?`,
+      `Драго ми е што ${propertyLabel} е сè уште достапен. Дали би сакале нашата агенција да се погрижи за професионална продажба, без никакви обврски од ваша страна?`
+    ];
+    response = saleResponses[Math.floor(Math.random() * saleResponses.length)];
+  }
+
+  // Store that we already acknowledged availability
+  session.availabilityAcknowledged = true;
+
+  return {
+    text: response,
+    type: "NORMAL"
+  };
+}
+
+/**
  * Run all hardcoded early-return handlers in the exact order they
  * appear in the original generateResponse.
  *
@@ -145,40 +230,29 @@ export function runEarlyResponses({ u, isRent, session }) {
   // ========================================
   // HARDCODED: Availability confirmation (with negative lookahead to prevent false matches)
   // ========================================
+  // BARE POSITIVE + AVAILABILITY BATCH GUARD (reported, lead 3571074): the
+  // greeting asks a DOUBLE question — "Дали е се уште достапен И дали сте
+  // заинтересирани за соработка?" An owner who fires "DA" and "DOSTAPEN E"
+  // in one quickfire batch is answering the AVAILABILITY half twice. Reading
+  // the bare "DA" as a short-positive cooperation acceptance jumps the
+  // session into DATA_COLLECTION and Ana demands the rent from an owner who
+  // never agreed to cooperate. When the current turn (any user message since
+  // Ana's last reply) already confirms availability, a bare short positive
+  // gets the availability template (which asks the cooperation question)
+  // instead of cooperation acceptance. A SOLO "DA" (no availability
+  // confirmation in the turn) keeps the short-positive → DATA_COLLECTION
+  // path. Runs BEFORE the availability handler below — the two are mutually
+  // exclusive per message (a message is either a bare positive or an
+  // availability phrase, never both).
+  if (!session.collectedData.cooperationAccepted &&
+      BARE_AVAILABILITY_POSITIVE_RE.test(u) &&
+      hasRecentAvailabilityConfirmation(session)) {
+    console.log('[AVAILABILITY: bare positive + availability confirmation in the same turn — availability, NOT cooperation]');
+    return buildAvailabilityResponse(session, isRent);
+  }
+
   if (!session.collectedData.cooperationAccepted && isAvailabilityConfirmation(u)) {
-    const propertyLabel = session.adMemory?.propertyType === 'apartment' ? 'станот' :
-                          session.adMemory?.propertyType === 'house' ? 'куќата' :
-                          session.adMemory?.propertyType === 'land' ? 'плацот' :
-                          session.adMemory?.propertyType === 'commercial' ? 'локалот' : 'имотот';
-
-    let response;
-    if (isRent) {
-      // IMPORTANT: rent owners DO pay the standard commission (50% of one
-      // month's rent, 100% above €1000) — so the rent variants must NEVER
-      // promise "без провизија за вас" / "без никакви давачки" / "без
-      // обврски" (that phrasing is sale-only).
-      const rentResponses = [
-        `Драго ми е што ${propertyLabel} е сè уште достапен. Дали би сакале да го понудиме на нашите клиенти за издавање?`,
-        `Драго ми е што ${propertyLabel} е сè уште достапен. Дали би сакале да го издадеме во најкраток можен рок?`,
-        `Драго ми е што ${propertyLabel} е сè уште достапен. Дали би сакале нашата агенција да се погрижи за професионално издавање?`
-      ];
-      response = rentResponses[Math.floor(Math.random() * rentResponses.length)];
-    } else {
-      const saleResponses = [
-        `Драго ми е што ${propertyLabel} е сè уште достапен. Дали би сакале да го понудиме на нашите клиенти, без провизија за вас?`,
-        `Драго ми е што ${propertyLabel} е сè уште достапен. Дали би сакале да го продадеме во најкраток можен рок, без никакви давачки за вас?`,
-        `Драго ми е што ${propertyLabel} е сè уште достапен. Дали би сакале нашата агенција да се погрижи за професионална продажба, без никакви обврски од ваша страна?`
-      ];
-      response = saleResponses[Math.floor(Math.random() * saleResponses.length)];
-    }
-
-    // Store that we already acknowledged availability
-    session.availabilityAcknowledged = true;
-
-    return {
-      text: response,
-      type: "NORMAL"
-    };
+    return buildAvailabilityResponse(session, isRent);
   }
 
   // ========================================
