@@ -167,7 +167,20 @@ const OBJECTION_RESPONSES = {
     response: 'Разликата меѓу вашата чиста цена и постигнатата купопродажна цена е провизија за агенцијата. Дали ви е појасно?'
   },
   'who_pays': {
-    pattern: /кој ве плаќа|koj ve plakja|кој ви плаќа|кој ви дава пари|koj vi plakja|koj vi dava pari|kako vi plakjaat|како ви плаќаат|kako se naplakjate|како се наплаќате|koj ve plakja vas|кој ве плаќа вас|koj plakja|кој плаќа|koj vi plakja za uslugata|кој ви плаќа за услугата|koi vi plakjaat|кои ви плаќаат|koj vi dava pari|кој ви дава пари|koj vi gi dava parite|кој ви ги дава парите|koj ve plakja|кој ве плаќа|koj vi e platnikot|кој ви е платникот|koi se platnicite|кои се платниците|kako vi se naplakja|како ви се наплаќа|kako vi naplakjate|како ви наплаќате|koj vi e klientot|кој ви е клиентот|koi vi se klientite|кои ви се клиентите/i,
+    // CLITIC-TOLERANT WHO-PAYS (requested): the owner may put an object
+    // clitic between the who-word and the verb — "KOJ GO PLAKJA?" (who
+    // pays HIM), "KOJ JA PLAKJA?" (who pays HER — the commission),
+    // "KOJ GI PLAKJA?", "KOJ NEGO PLAKJA?", "ko go plakja?", with or
+    // without a tense marker ("koj ke go plakja?"). The plain "koj plakja"
+    // (adjacent) below already matched, but the clitic broke adjacency, so
+    // these fell through to the LLM. The who-word must be a STANDALONE
+    // token ((?:^|\s) boundary) — "kako" (how) and "koga" (when) contain
+    // "ko" as a substring but are NOT who-questions. NOTE: the legal-costs
+    // handler in early-responses.js runs BEFORE this commission gate, so
+    // "KOJ GO PLAKJA NEGO ?" with a notary in context still gets the
+    // who-pays-the-notary answer; the clitic forms only reach here when
+    // there is NO legal referent (i.e. they are commission questions).
+    pattern: /кој ве плаќа|koj ve plakja|кој ви плаќа|кој ви дава пари|koj vi plakja|koj vi dava pari|kako vi plakjaat|како ви плаќаат|kako se naplakjate|како се наплаќате|koj ve plakja vas|кој ве плаќа вас|koj plakja|кој плаќа|(?:^|\s)(?:koj|кој|ko|ко)\s+(?:(?:ke|ќе)\s+)?(?:go|го|ja|ја|gi|ги|nego|него)\s+(?:plakja|плаќа|плака|plaka)(?![,;\s]*(?:kirij|кириј|smetk|сметк|depozit|депозит|struj|струј|komunal|комунал|trosoc|трошоц|trosok|трошок|gree|грее|vod|вод|parking|паркинг))|koj vi plakja za uslugata|кој ви плаќа за услугата|koi vi plakjaat|кои ви плаќаат|koj vi dava pari|кој ви дава пари|koj vi gi dava parite|кој ви ги дава парите|koj ve plakja|кој ве плаќа|koj vi e platnikot|кој ви е платникот|koi se platnicite|кои се платниците|kako vi se naplakja|како ви се наплаќа|kako vi naplakjate|како ви наплаќате|koj vi e klientot|кој ви е клиентот|koi vi se klientite|кои ви се клиентите/i,
     response: 'Разликата меѓу вашата чиста цена и постигнатата купопродажна цена е провизија за агенцијата. Дали ви се разјасни принципот?'
   },
   'from_whose_pocket': {
@@ -274,7 +287,12 @@ function isAskingAboutRentCommission(text) {
 }
 
 function isAskingAboutCommission(text) {
-  return /провизи|provizija|koj vi|кој ви|kako vi|како ви|komisija|комисија|koj plakja|кој плаќа|koj ve plakja|кој ве плаќа|od kade se pari|од каде се пари|od kade vi se pari|од каде ви се пари|kade se pari|каде се пари|od koj dzeb|од кој џеб|cii se pari|чии се пари|cii pari|чии пари|od kade pa tie pari|од каде па тие пари|od kade vam pari|од каде вам пари|kako vie zemate|како вие земате|kako vie ke naplakjate|како вие ќе наплаќате|kolku zimate|колку земате|sto zimate|што земате|dali vi plakjam|дали ви плаќам|uslovi|услови|condition|terms|vasi uslovi|ваши услови|kako rabotite|како работите|sorabotka|соработка|kakva vi e provizijata|каква ви е провизијата|kakvi se uslovite|какви се условите|koi vi se uslovite|кои ви се условите|kakvi se vasi|какви се ваши|nisto ne zemate|ништо не земате|ne zemate|не земате|od mojot del|од мојот дел|vie zemate|вие земате|sto zemate|што земате|dali zimate|дали земате|vie naplakjate|вие наплаќате|kako se naplakjate|како се наплаќате|kako vi e provizijata|како ви е провизијата|znaci nisto|значи ништо|znaci ne|значи не|znaci bez|значи без|kakvi drugi obvrski|какви други обврски|drugi obvrski|други обврски|obvrski kon vas|обврски кон вас|sto treba da vi platam|што треба да ви платам|kolku procenti|колку проценти|kolku %|колку %|kolku e provizijata|колку е провизијата|kolku iznesuva provizijata|колку изнесува провизијата|kolku se naplakjate|колку се наплаќате|kolku e vashata provizija|колку е вашата провизија|kolku zimate|колку земате|kolku vi e provizijata|колку ви е провизијата|kolku vi naplakjate|колку ви наплаќате|kolku procenti zimate|колку проценти земате|kolku dodavate|колку додавате|kolku e vasiot del|колку е вашиот дел|kolku nad cenata|колку над цената|koja vi e provizijata|која ви е провизијата|kolku e vashata naknada|колку е вашата надокнада|kolku procenti vi e|колку проценти ви е|kolku se naplakja|колку се наплаќа|kolku vi se|колку ви се|od kogo zemate|од кого земате|od kogo gi zemate|од кого ги земате|od kogo zemate pari|од кого земате пари|kogo zemate|кого земате|kazi od kogo|кажи од кого|kazi mi od kogo|кажи ми од кого|pa kazi od kogo|па кажи од кого|pa od kogo|па од кого|od kogo se parite|од кого се парите|od kogo vi se parite|од кого ви се парите|od kogo\s*[?]|од кого\s*[?]/i.test(text);
+  // CLITIC-TOLERANT WHO-PAYS (requested): "koj go/ja/gi/nego plakja" — the
+  // object clitic between the who-word and the verb must open the gate so
+  // the who_pays objection is reached (previously fell through to the LLM).
+  // Same standalone-token boundary as the who_pays pattern — "kako" (how)
+  // and "koga" (when) contain "ko" but are NOT commission questions.
+  return /провизи|provizija|koj vi|кој ви|kako vi|како ви|komisija|комисија|koj plakja|кој плаќа|(?:^|\s)(?:koj|кој|ko|ко)\s+(?:(?:ke|ќе)\s+)?(?:go|го|ja|ја|gi|ги|nego|него)\s+(?:plakja|плаќа|плака|plaka)(?![,;\s]*(?:kirij|кириј|smetk|сметк|depozit|депозит|struj|струј|komunal|комунал|trosoc|трошоц|trosok|трошок|gree|грее|vod|вод|parking|паркинг))|koj ve plakja|кој ве плаќа|od kade se pari|од каде се пари|od kade vi se pari|од каде ви се пари|kade se pari|каде се пари|od koj dzeb|од кој џеб|cii se pari|чии се пари|cii pari|чии пари|od kade pa tie pari|од каде па тие пари|od kade vam pari|од каде вам пари|kako vie zemate|како вие земате|kako vie ke naplakjate|како вие ќе наплаќате|kolku zimate|колку земате|sto zimate|што земате|dali vi plakjam|дали ви плаќам|uslovi|услови|condition|terms|vasi uslovi|ваши услови|kako rabotite|како работите|sorabotka|соработка|kakva vi e provizijata|каква ви е провизијата|kakvi se uslovite|какви се условите|koi vi se uslovite|кои ви се условите|kakvi se vasi|какви се ваши|nisto ne zemate|ништо не земате|ne zemate|не земате|od mojot del|од мојот дел|vie zemate|вие земате|sto zemate|што земате|dali zimate|дали земате|vie naplakjate|вие наплаќате|kako se naplakjate|како се наплаќате|kako vi e provizijata|како ви е провизијата|znaci nisto|значи ништо|znaci ne|значи не|znaci bez|значи без|kakvi drugi obvrski|какви други обврски|drugi obvrski|други обврски|obvrski kon vas|обврски кон вас|sto treba da vi platam|што треба да ви платам|kolku procenti|колку проценти|kolku %|колку %|kolku e provizijata|колку е провизијата|kolku iznesuva provizijata|колку изнесува провизијата|kolku se naplakjate|колку се наплаќате|kolku e vashata provizija|колку е вашата провизија|kolku zimate|колку земате|kolku vi e provizijata|колку ви е провизијата|kolku vi naplakjate|колку ви наплаќате|kolku procenti zimate|колку проценти земате|kolku dodavate|колку додавате|kolku e vasiot del|колку е вашиот дел|kolku nad cenata|колку над цената|koja vi e provizijata|која ви е провизијата|kolku e vashata naknada|колку е вашата надокнада|kolku procenti vi e|колку проценти ви е|kolku se naplakja|колку се наплаќа|kolku vi se|колку ви се|od kogo zemate|од кого земате|od kogo gi zemate|од кого ги земате|od kogo zemate pari|од кого земате пари|kogo zemate|кого земате|kazi od kogo|кажи од кого|kazi mi od kogo|кажи ми од кого|pa kazi od kogo|па кажи од кого|pa od kogo|па од кого|od kogo se parite|од кого се парите|od kogo vi se parite|од кого ви се парите|od kogo\s*[?]|од кого\s*[?]/i.test(text);
 }
 
 function isAskingForExplanation(text) {
@@ -477,6 +495,63 @@ function isAskingAboutLegalCosts(text) {
 }
 
 // ========================================
+// HELPER: Who-pays-the-NOTARY follow-up — "KOJ GO PLAKJA NEGO ?" ("who
+// pays HIM/it?") after the owner said "SAKAM DOGOVOR NA NOTAR" ("I want a
+// notary contract"). The MASCULINE object clitic (go/nego = him) refers
+// back to the notary mentioned in the PRECEDING message of the same
+// quickfire batch (reported, lead 3571074: the follow-up fell through
+// every hardcoded gate — the who_pays pattern needs "koj plakja"
+// ADJACENT, and the clitic GO between them breaks it — so the LLM
+// answered with the generic commission pitch instead of who-pays-the-
+// notary).
+//
+// Returns true ONLY when BOTH hold:
+//   1. A who-pays question shape with a masculine/plural object clitic
+//      (go/nego/gi — "koj go plakja", "ko gi plakja", "koj plakja nego").
+//      Deliberately EXCLUDES "ja" (feminine): "koj ja plakja kirijata?"
+//      (who pays the RENT?) and "koj ja plakja provizijata?" (who pays
+//      the commission?) must stay on the rent/commission path, never be
+//      hijacked as legal costs.
+//   2. A legal-costs keyword (notar/advokat/danok) in the message itself
+//      OR the recent conversation context (covers same-batch pronouns AND
+//      follow-ups after Ana already answered a notary question).
+// NEGATIVE GUARD: if the message names a rent/utility object (depozit,
+// kirija, provizija, smetki, struja, voda...) it is rent economics, NOT
+// the notary — never route it to legal costs even with legal context
+// present ("koj go plakja depozitot?" = who pays the deposit).
+// ========================================
+function isAskingWhoPaysForLegalCosts(text, contextText) {
+  const t = String(text || '').toLowerCase().trim();
+  if (!t) return false;
+  // Who-pays shapes (both scripts). The who-word must be a STANDALONE token
+  // ((?:^|\s) boundary): "kako" (how) contains "ko" as a substring but is
+  // NOT a who-question — "kako ke go plakja?" (how will he pay) must never
+  // match.
+  // BRANCH 1 — clitic BEFORE the verb: "koj (ke/treba da) (go/nego/gi)
+  // plakja" — the reported "KOJ GO PLAKJA NEGO ?". The tense markers must
+  // cover BOTH scripts for the conjunction (da|да): the Latin-only "da"
+  // silently missed the Cyrillic "КОЈ ТРЕБА ДА ГО ПЛАЌА?" (treba+да).
+  // BRANCH 2 — object AFTER the verb: "koj (ke/treba da) plakja (za)?
+  // (nego|него|notarot|advokatot|danokot)" — covers "КОЈ ПЛАЌА ЗА
+  // НОТАРОТ?", "КОЈ ЌЕ ПЛАЌА ЗА НОТАРОТ?", "КОЈ ТРЕБА ДА ПЛАЌА ЗА
+  // НОТАРОТ?" and the pronoun follow-up "кој плаќа за него?". The trailing
+  // pronoun/noun is INSIDE the alternation ((?:nego|него|...)) — a
+  // top-level "|него" would match ANY message containing "него" (e.g.
+  // "Сакам него да го издадам"), which combined with a notary in context
+  // would hijack unrelated messages into the legal-costs answer.
+  const whoPaysClitic =
+    /(?:^|\s)(?:koj|кој|ko|ко)\s+(?:(?:(?:ke|ќе|treba|треба)\s+(?:da|да)\s+)|(?:ke|ќе)\s+)?(?:go|го|nego|него|gi|ги)\s*(?:plakja|плаќа|плака|plaka)/i.test(t) ||
+    /(?:^|\s)(?:koj|кој|ko|ко)\s+(?:(?:(?:ke|ќе|treba|треба)\s+(?:da|да)\s+)|(?:ke|ќе)\s+)?(?:plakja|плаќа|плака|plaka)\s+(?:za|за)?\s*(?:nego|него|notarot|нотарот|notar|нотар|advokatot|адвокатот|advokat|адвокат|danokot|данокот|danok|данок)/i.test(t);
+  if (!whoPaysClitic) return false;
+  // RENT/UTILITY OBJECT GUARD — "who pays X" about rent economics is NOT
+  // the notary, even when a notary was mentioned nearby.
+  if (/kirija|кирија|depozit|депозит|provizij|провизиј|komisi|комиси|smetk|сметк|struja|струја|komunal|комунал|greenje|греење|voda|вода/i.test(t)) return false;
+  // Legal-costs referent: in the message or the recent context.
+  const ctx = String(contextText || '').toLowerCase();
+  return /advokat|адвокат|notar|нотар|danok|данок/i.test(`${t} ${ctx}`);
+}
+
+// ========================================
 // HELPER: Check if asking about ANA's personal age
 // "kolku godini imas (ana)?", "kolku si stara?", "koja godina si rodena?",
 // "koga si rodena?" — Ana deflects professionally instead of answering.
@@ -553,5 +628,6 @@ export {
   isAskingAboutClients,
   isAskingWhereToSendPhotos,
   isAskingAboutLegalCosts,
+  isAskingWhoPaysForLegalCosts,
   isAskingAboutAgency
 };

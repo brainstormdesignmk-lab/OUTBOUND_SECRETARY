@@ -28,6 +28,7 @@ import {
   AGENCY_WORKFLOW_RESPONSES_RENT,
   OWNER_PAYS_RESPONSES_SALE,
   isAskingAboutNoAgencyExperience,
+  isAskingAboutCommission,
   NO_AGENCY_EXPERIENCE_RESPONSES_SALE,
   NO_AGENCY_EXPERIENCE_RESPONSES_RENT,
   matchObjection
@@ -177,6 +178,97 @@ for (const q of ['KOJ VE PLAKJA VAS ?', 'koj ve plakja?', 'кој ве плаќ�
 const whoPaysRentSession = createSession('rent');
 const whoPaysRentRes = await generateResponse(whoPaysRentSession, 'KOJ VE PLAKJA VAS ?');
 assert(`e2e rent "KOJ VE PLAKJA VAS ?" → NORMAL + rent commission rule`, whoPaysRentRes.type === 'NORMAL' && /50% од (?:една )?месечна(?:та)? кирија/.test(whoPaysRentRes.text), `got [${whoPaysRentRes.type}] "${(whoPaysRentRes.text || '').substring(0, 80)}"`);
+
+// ========================================
+// CLITIC-TOLERANT WHO-PAYS (requested): the owner may put an object clitic
+// between the who-word and the verb — "KOJ GO PLAKJA?" (who pays HIM),
+// "KOJ JA PLAKJA?" (who pays HER — the commission, feminine), "KOJ GI
+// PLAKJA?", "KOJ NEGO PLAKJA?", future "KOJ KE GO PLAKJA?". These used to
+// fail BOTH the isAskingAboutCommission gate and the who_pays pattern
+// (both required "koj plakja" adjacency) and fell through to the LLM's
+// generic pitch. The clitic-tolerant fragment must route them to who_pays
+// while kako/koga (how/when) stay on their own paths.
+// ========================================
+console.log('\n=== TEST: clitic-tolerant who_pays (KOJ GO/JA/GI/NEGO PLAKJA) ===');
+
+// Unit: matchObjection must key who_pays for every clitic shape
+const cliticMatches = [
+  'KOJ GO PLAKJA ?',
+  'KOJ JA PLAKJA ?',
+  'KOJ GI PLAKJA ?',
+  'KOJ NEGO PLAKJA ?',
+  'KOJ KE GO PLAKJA ?',
+  'KOJ KE JA PLAKJA ?',
+  'ko go plakja?',
+  'кој го плаќа',
+  'кој ја плаќа',
+  'кој ги плаќа',
+  'КОЈ ЌЕ ГО ПЛАЌА?',
+  'КОЈ ЌЕ ЈА ПЛАЌА?'
+];
+for (const q of cliticMatches) {
+  const m = matchObjection(q, true);
+  assert(`clitic who_pays match: "${q}" → who_pays`, m && m.key === 'who_pays', `got ${JSON.stringify(m)}`);
+}
+
+// Unit: gate must open for the same shapes (this is what routes e2e)
+for (const q of cliticMatches) {
+  assert(`gate opens: "${q}"`, isAskingAboutCommission(q) === true);
+}
+
+// Guard: kako/koga (how/when) with the SAME clitic structure are NOT
+// who-pays questions — the who-word must be a standalone "koj/кој/ko/ко".
+const cliticNoMatch = [
+  'kako go plakja?',
+  'koga go plakja?',
+  'kako ja plakja?',
+  'како го плаќа?',
+  'кога го плаќа?'
+];
+for (const q of cliticNoMatch) {
+  assert(`clitic no-match guard: "${q}"`, matchObjection(q, true)?.key !== 'who_pays' && isAskingAboutCommission(q) === false);
+}
+
+// Guard (code review): ja/gi clitics with RENT/UTILITY objects are NOT
+// commission questions — "KOJ JA PLAKJA KIRIJATA?" (who pays the RENT?)
+// and "KOJ GI PLAKJA SMETKITE?" (who pays the BILLS?) must NOT route to
+// who_pays. Only the bare clitic (referring to provizijata) or an explicit
+// provizija object is a commission question.
+const cliticRentUtilityNoMatch = [
+  'KOJ JA PLAKJA KIRIJATA ?',
+  'KOJ GI PLAKJA SMETKITE ?',
+  'koj ja plakja depozitot?',
+  'koj gi plakja strujata?',
+  'koj gi plakja komunalnite?',
+  'KOJ JA PLAKJA VODATA ?',
+  'ko gi plakja trosocite?',
+  'кој ги плаќа трошоците?',
+  'КОЈ ЈА ПЛАЌА КИРИЈАТА?'
+];
+for (const q of cliticRentUtilityNoMatch) {
+  assert(`clitic rent/utility no-match: "${q}"`, matchObjection(q, true)?.key !== 'who_pays' && isAskingAboutCommission(q) === false);
+}
+// And the SAME shapes stay un-blocked when the object IS the commission:
+const cliticCommissionYesMatch = [
+  'KOJ JA PLAKJA PROVIZIJATA ?',
+  'KOJ JA PLAKJA ?',
+  'KOJ GO PLAKJA ?'
+];
+for (const q of cliticCommissionYesMatch) {
+  assert(`clitic commission still matches: "${q}"`, matchObjection(q, true)?.key === 'who_pays' && isAskingAboutCommission(q) === true);
+}
+
+// e2e SALE: "KOJ GO PLAKJA ?" → commission-difference answer
+const cliticSaleSession = createSession('sale');
+for (const q of ['KOJ GO PLAKJA ?', 'KOJ JA PLAKJA ?', 'KOJ GI PLAKJA ?', 'КОЈ ЌЕ ГО ПЛАЌА?']) {
+  const res = await generateResponse(cliticSaleSession, q);
+  assert(`e2e sale "${q}" → NORMAL + commission-difference answer`, res.type === 'NORMAL' && /чиста цена/.test(res.text), `got [${res.type}] "${(res.text || '').substring(0, 80)}"`);
+}
+
+// e2e RENT: "KOJ GO PLAKJA ?" → rent commission rule
+const cliticRentSession = createSession('rent');
+const cliticRentRes = await generateResponse(cliticRentSession, 'KOJ GO PLAKJA ?');
+assert(`e2e rent "KOJ GO PLAKJA ?" → NORMAL + rent commission rule`, cliticRentRes.type === 'NORMAL' && /50% од (?:една )?месечна(?:та)? кирија/.test(cliticRentRes.text), `got [${cliticRentRes.type}] "${(cliticRentRes.text || '').substring(0, 80)}"`);
 
 // ========================================
 // NO-AGENCY-EXPERIENCE family: "ne sum sorabotuval so agencii do sega"

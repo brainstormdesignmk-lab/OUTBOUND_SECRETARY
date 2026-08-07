@@ -29,7 +29,8 @@ import {
   getRandomOwnerMustPayResponse,
   isAskingAboutNoAgencyExperience,
   getRandomNoAgencyExperienceResponse,
-  isAskingAboutClients
+  isAskingAboutClients,
+  isAskingWhoPaysForLegalCosts
 } from '../objections.js';
 
 // ========================================
@@ -148,6 +149,22 @@ function buildAvailabilityResponse(session, isRent) {
     text: response,
     type: "NORMAL"
   };
+}
+
+/**
+ * Recent-conversation text — the last few messages (both roles) joined.
+ * Used by the who-pays-the-notary gate below: "KOJ GO PLAKJA NEGO ?" (who
+ * pays HIM?) refers back to the notary mentioned in the PRECEDING message
+ * of the same quickfire batch (reported, lead 3571074: "SAKAM DOGOVOR NA
+ * NOTAR" + "KOJ GO PLAKJA NEGO ?") — the referent is only resolvable from
+ * context, never from the current message alone. The engine appends every
+ * owner text to session.messages at receipt, so the whole batch is visible
+ * when any message is processed (same property the availability helper
+ * relies on).
+ */
+function recentContextText(session) {
+  const msgs = session.messages || [];
+  return msgs.slice(-8).map(m => m.text || '').join(' ');
 }
 
 /**
@@ -367,7 +384,15 @@ export function runEarlyResponses({ u, isRent, session }) {
   }
 
   // HARDCODED: Koj plakja Advokat / Notar / Danok? (any one → answer all three)
-  if (isAskingAboutLegalCosts(u)) {
+  // CONTEXT-AWARE WHO-PAYS FOLLOW-UP (reported, lead 3571074): the owner
+  // said "SAKAM DOGOVOR NA NOTAR" (I want a notary contract) then asked
+  // "KOJ GO PLAKJA NEGO ?" (who pays HIM/it?) — the masculine clitic
+  // refers to the notary, but the plain isAskingAboutLegalCosts needs the
+  // keyword IN this message, and the who_pays objection needs "koj plakja"
+  // adjacent (the clitic GO breaks it). Without this gate the follow-up
+  // fell to the LLM, which answered with the generic rent commission pitch
+  // instead of who-pays-the-notary.
+  if (isAskingAboutLegalCosts(u) || isAskingWhoPaysForLegalCosts(u, recentContextText(session))) {
     const saleAnswers = [
       'Адвокатот и Нотарот се обврска на Купувачот. Данокот исто така го плаќа Купувачот во Град Скопје. Вие ја добивате вашата чиста цена.',
       'Сите давачки за Адвокат, Нотар и Данок се на товар на Купувачот. Вашата обврска е само да го продадете имотот.',
