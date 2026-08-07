@@ -10,6 +10,7 @@ import {
   parseMacedonianNumber,
   parseNumberWords,
   parseOrdinalFloor,
+  parseViberOrdinalSuffix,
   extractFirstNumber,
   countBedrooms,
   extractPrice,
@@ -121,8 +122,14 @@ function extractBedrooms(u, data) {
 // answers in a single turn and skip the totalFloors question entirely.
 // ========================================
 function extractCompoundFloor(u, data) {
+  // VIBER ORDINAL-SUFFIX NORMALIZATION (reported, lead pz186272900): Viber
+  // owners type "5TI"/"13TI" (merged) and occasionally "5 TI"/"13 TI"
+  // (spaced) for floors. Collapse the space so every compound pattern below
+  // matches both shapes. Digit+suffix is unambiguous (never a price/sqm
+  // number), so normalizing inside compound matching is safe.
+  const v = u.replace(/(\d{1,2})\s+(ti|ти|vi|ви|ri|ри|mi|ми)(?=\s|$)/gi, '$1$2');
   // Pattern 1: "na 8 od 10" or "8 od 10" — digit "od" digit (bilingual od/од)
-  const digitOdMatch = u.match(/(?:na\s+|на\s+)?(\d{1,2})\s+(?:od|од)\s+(\d{1,3})/i);
+  const digitOdMatch = v.match(/(?:na\s+|на\s+)?(\d{1,2})\s+(?:od|од)\s+(\d{1,3})/i);
   if (digitOdMatch) {
     const floor = parseInt(digitOdMatch[1]);
     const total = parseInt(digitOdMatch[2]);
@@ -151,17 +158,20 @@ function extractCompoundFloor(u, data) {
   // let the terrace phrase "93 kvadrati so 2 TERASI od 5m2" match as
   // floor=2/totalFloors=5 (reported P10 regression) — "terasi" is not a
   // floor word, so that construction is rejected and stays a terrace answer.
-  const wordOdMatch = u.match(/(?:na\s+|на\s+)?([a-zа-я\d]+)\s+(?:(?:kat|кат|sprat|спрат|kata|ката|floor|етаж|eta|ета)\s+)?(?:od|од)\s+(?:vkupno\s+|вкупно\s+)?(\d{1,3}|[a-zа-я]{2,})/i);
+  const wordOdMatch = v.match(/(?:na\s+|на\s+)?([a-zа-я\d]+)\s+(?:(?:kat|кат|sprat|спрат|kata|ката|floor|етаж|eta|ета)\s+)?(?:od|од)\s+(?:vkupno\s+|вкупно\s+)?(\d{1,3}|[a-zа-я]{2,})/i);
   if (wordOdMatch) {
     const floorWord = wordOdMatch[1].toLowerCase();
     const totalWord = wordOdMatch[2].toLowerCase();
-    // Parse floor word as ordinal or digit
+    // Parse floor word as ordinal, digit, or Viber ordinal suffix ("5TI" → 5)
     let floor = parseOrdinalFloor(floorWord);
     if (floor === null) {
-      floor = /^\d+$/.test(floorWord) ? parseInt(floorWord) : null;
+      floor = /^\d+$/.test(floorWord) ? parseInt(floorWord) : parseViberOrdinalSuffix(floorWord);
     }
     // Parse total word as digit, word-number, or extracted from compound like "desetka"
-    let total = /^\d+$/.test(totalWord) ? parseInt(totalWord) : parseMacedonianNumber(totalWord);
+    // VIBER ORDINAL-SUFFIX TOTAL (reported, lead pz186272900): "5TI OD 13TI" —
+    // the total is also typed with the ordinal suffix; strip it like the floor
+    // side so the compound still fires (total 13TI → 13).
+    let total = /^\d+$/.test(totalWord) ? parseInt(totalWord) : (parseMacedonianNumber(totalWord) ?? parseViberOrdinalSuffix(totalWord));
     if (floor !== null && floor >= 0 && floor <= 50 && total !== null && total >= 2 && total <= 50) {
       return { floor, totalFloors: total };
     }
@@ -265,6 +275,28 @@ function extractFloor(u, data) {
       return { floor: ordinal };
     }
     console.log(`[FLOOR: skip — ordinal "${uNoTimeCount.trim().slice(0, 40)}" without floor context]`);
+  }
+  // VIBER ORDINAL-SUFFIX FLOORS (reported, lead pz186272900): Viber owners
+  // type digit+ordinal-suffix shorthand for the floor answer — "5TI", "13TI",
+  // "7MI", "1VI", "2RI", also "5 TI" (spaced). Same direct-answer guard as
+  // word ordinals: floor keyword, short reply, or "na"/"на" prefix. The
+  // compound "5TI OD 13" is already handled above by extractCompoundFloor.
+  const viberOrdMatch = uNoTimeCount.match(/(?:^|\s)(\d{1,2})\s*(ti|ти|vi|ви|ri|ри|mi|ми)(?:\s|$)/i);
+  if (viberOrdMatch) {
+    const viberOrd = parseInt(viberOrdMatch[1], 10);
+    if (viberOrd >= 0 && viberOrd <= 50) {
+      // TOTAL-FLOORS CONTEXT GUARD (mirrors the digit path below): "ima 13TI
+      // sprata" states the building's TOTAL, never the apartment's floor.
+      const isTotalContext = /(?:zgradata|зградата|zgradava|зградава|ima|има|e|е|se|се|vkupno|вкупно)\s+\d{1,2}\s*(?:ti|ти|vi|ви|ri|ри|mi|ми)\s+(?:sprata|спрата|kata|ката|katnica|катница)/i.test(u);
+      if (!isTotalContext) {
+        const floorWordsV = uNoTimeCount.split(/\s+/).filter(Boolean);
+        const hasFloorKeywordV = /(?:kat(?!nica)|кат(?!ница)|kata|ката|sprat(?!a)(?!а)|спрат(?!а)(?!a)|floor|eta|ета|katnica|катница|sprata|спрата|katovi|катови|spratovi|спратови)/i.test(u);
+        const isDirectAnswerV = floorWordsV.length <= 3 || /(?:^|\s)(?:na|на)\s+/.test(u);
+        if (hasFloorKeywordV || isDirectAnswerV) {
+          return { floor: viberOrd };
+        }
+      }
+    }
   }
   // Digit floor — find number adjacent to floor context words.
   // Uses (?!nica) negative lookahead to prevent "kat" from matching
@@ -404,6 +436,12 @@ function extractTotalFloors(u, data) {
     const num = parseInt(bareDigit[1]);
     if (num >= 1 && num <= 50) return { totalFloors: num };
   }
+  // NOTE: bare Viber ordinal suffixes ("9TI", "13TI") are deliberately NOT
+  // handled here — a suffixed ordinal is an ORDINAL (answers "на кој кат?" =
+  // which floor), never a total. extractFloor's compound path already captures
+  // "5TI OD 13" → floor 5 + totalFloors 13 and "5TI OD 13TI" → total 13 in
+  // the same turn; letting this fallback fire on bare "9TI" would fabricate
+  // totalFloors=9 from a mere floor answer (reported, lead pz186272900).
   // Bare word number: "deset" → 10
   const bareWord = uRepeatStripped.trim();
   if (!/\s/.test(bareWord) && bareWord.length > 0) {
@@ -937,15 +975,16 @@ function assessConfidence(field, value, input) {
     return 'HIGH';
   }
 
-  // BARE DIRECT ANSWERS for floor, totalFloors & totalSqm are HIGH — the
-  // owner is directly answering the question just asked:
+  // BARE DIRECT ANSWERS for floor, totalFloors, totalSqm & bedrooms are
+  // HIGH — the owner is directly answering the question just asked:
   //   - ORDINAL FLOOR WORDS ("vtori", "na vtori", "tret sprat", "osmi") — a
   //     bare ordinal can only be a floor value. Fixes reported bug:
   //     "TI KAZAV NA VTORI" was REJECTED as context mismatch and the floor
   //     question looped forever (→ owner insulted Ana).
-  //   - BARE CARDINAL WORDS ("SEDUM" = 7, "deset" = 10) — a single number
-  //     word answering "Колку спрата има вкупно?" is unambiguous.
-  //   - BARE DIGITS ("7") — same, in the floor/totalFloors question context.
+  //   - BARE CARDINAL WORDS ("SEDUM" = 7, "deset" = 10, "TRI" = 3) — a single
+  //     number word answering "Колку спрата има вкупно?" or "Колку спални
+  //     соби има станот?" is unambiguous.
+  //   - BARE DIGITS ("7", "3") — same, in the question context.
   //   - BARE SQM DIGITS ("86") — a 2-3 digit number can only be a totalSqm
   //     answer to "Колкава е вкупната квадратура?".
   //   - FRUSTRATED REPEATS ("7 TI KAZAV" = "7, I told you") — the owner
@@ -953,10 +992,27 @@ function assessConfidence(field, value, input) {
   //     extractTotalFloors' strip) so the repeat collects at HIGH on the
   //     FIRST attempt, no needless "Дали точната вредност е 7?" re-ask
   //     (reported: "SEDUM" extracted at 0.60 → re-ask → "DA" accepted).
-  if (field === 'floor' || field === 'totalFloors' || field === 'totalSqm') {
+  //   - BEDROOMS (reported, lead 3571074): "TRI" answering "Колку спални
+  //     соби има станот?" used to score MEDIUM (0.60) → needless
+  //     "Дали точната вредност е 3?" re-ask → the owner repeated "TRI" →
+  //     the word repeat wasn't recognized (digit-only matcher) → re-pended →
+  //     infinite loop. A bare bedroom count (digit 0-20 or number word 1-20)
+  //     is a direct answer to the just-asked question — HIGH, no re-ask.
+  if (field === 'floor' || field === 'totalFloors' || field === 'totalSqm' || field === 'bedrooms') {
     const stripped = input.trim().replace(ANNOYED_REPEAT_RE, ' ').replace(/[.,:;!?\-]+$/, '').trim();
     if (parseOrdinalFloor(stripped) !== null) return 'HIGH';
+    // VIBER ORDINAL-SUFFIX SHORTHAND (reported, lead pz186272900): "5TI",
+    // "13TI", "7MI" — digit + ordinal suffix — is a direct FLOOR answer, HIGH
+    // like a bare word ordinal ("NA 5TI" too, mirroring the "NA VTORI"
+    // ordinal rule). Deliberately floor-only: a suffixed ordinal is never a
+    // bedroom count, sqm value, or total floor count (extractTotalFloors
+    // never produces one, so a totalFloors HIGH would be dead code). The
+    // helper is anchored (whole-message), so a leading "na"/"на" is
+    // stripped first — exactly the standard answer shape for both.
+    const viberStripped = stripped.replace(/^(?:na|на)\s+/i, '');
+    if (field === 'floor' && parseViberOrdinalSuffix(viberStripped) !== null) return 'HIGH';
     // Bare digit: 0-50 for floor/totalFloors (0 = приземје for floor),
+    // 0-20 for bedrooms (a bare digit answering the bedroom question),
     // 10-999 for totalSqm (a 1-digit number is never a sqm value).
     // Effectively inert for the floor FIELD itself (extractFloor requires
     // kat/sprat context and never extracts bare digits — only
@@ -965,11 +1021,40 @@ function assessConfidence(field, value, input) {
     if (/^\d{1,3}$/.test(stripped)) {
       const n = parseInt(stripped, 10);
       if ((field === 'totalSqm' && n >= 10 && n <= 999) ||
-          (field !== 'totalSqm' && n >= 0 && n <= 50)) return 'HIGH';
+          (field === 'bedrooms' && n >= 0 && n <= 20) ||
+          (field !== 'totalSqm' && field !== 'bedrooms' && n >= 0 && n <= 50)) return 'HIGH';
+    }
+    // PLUS-ARITHMETIC DIRECT ANSWER (reported, lead 3571074): "EDNA PLUS
+    // DVE" (one plus two = 3) answering "Колку спални соби има станот?" is
+    // a direct multi-word answer — HIGH, no re-ask. Same extractor-
+    // consistency rule as the single-word branch: countBedrooms (which now
+    // sums plus-phrases) is the single source of truth, so HIGH fires only
+    // on a value extraction would produce.
+    if (field === 'bedrooms' && /\s*(?:plus|плус|\+)\s*/i.test(stripped)) {
+      const bcPlus = countBedrooms(stripped);
+      if (bcPlus !== null && bcPlus >= 1 && bcPlus <= 20) return 'HIGH';
     }
     if (!/\s/.test(stripped) && stripped.length > 0) {
       const w = parseMacedonianNumber(stripped);
-      if (w !== null && w >= 1 && w <= 50) return 'HIGH';
+      // Bedrooms are capped at 20 (mirrors extractBedrooms' range): a bare
+      // word like "triest" (30) is NOT a bedroom count, so it must not be
+      // HIGH for bedrooms (falls through to the MEDIUM number-word fallback).
+      // The branch is EXCLUSIVE — the generic 1-50 line below must not fire
+      // for bedrooms.
+      if (field === 'bedrooms') {
+        // EXACT-EXTRACTOR CONSISTENCY: validate against countBedrooms — the
+        // very function extractBedrooms uses — not parseMacedonianNumber.
+        // parseMacedonianNumber's includes-matching misreads merged tens
+        // ("trideset"→10, "dvadeset"→10), so judging HIGH on it could
+        // silently accept a value the extractor would never produce.
+        // countBedrooms is the single source of truth: HIGH fires iff
+        // extraction would extract the same value (verified: "TRI"→3 HIGH,
+        // "triest"→null not HIGH).
+        const bc = countBedrooms(stripped);
+        if (bc !== null && bc >= 1 && bc <= 20) return 'HIGH';
+      } else {
+        if (w !== null && w >= 1 && w <= 50) return 'HIGH';
+      }
       if (field === 'totalSqm' && w !== null && w >= 10 && w <= 999) return 'HIGH';
     }
     // Multi-word number phrases ("OSUMDESET I SEST" = 86) parse only via

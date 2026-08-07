@@ -65,7 +65,26 @@ const shouldMatch = [
   // pronoun follow-up with "za": "кој плаќа за него?" (who pays for
   // him/it) — referent resolved from context
   ['кој плаќа за него?', 'сакам договор на нотар'],
-  ['кој ќе плаќа за него?', 'сакам договор на нотар']
+  ['кој ќе плаќа за него?', 'сакам договор на нотар'],
+  // BEAR-THE-COSTS VERB FAMILY (requested): the owner asks who will BEAR
+  // the costs, not who PAYS them — "кој ќе ги сноси трошоците?" (who
+  // will bear the costs?), with/without an explicit legal referent. The
+  // snosi/nese/nosi/podnesuva verbs are NOT the plakja family, so branches
+  // 1-2 missed them entirely.
+  ['КОЈ ЌЕ ГО ПЛАЌА ДАНОКОТ?', ''],                            // clitic + explicit danok
+  ['кој ги плаќа трошоците за нотар?', ''],                    // pay + costs + notary
+  ['кој ќе ги сноси трошоците?', 'сакам договор на нотар'],    // bear costs, referent in ctx
+  ['кој ќе ги сноси трошоците за нотарот?', ''],               // bear costs + explicit notary
+  ['кој ги сноси трошоците?', 'сакам договор на нотар'],       // bare snosi, ctx referent
+  ['кој ги сноси трошоците за нотарот?', ''],
+  ['кој ќе ги плаќа трошоците?', 'сакам договор на нотар'],
+  ['кој плаќа трошоци за нотар?', 'сакам договор на нотар'],  // pay + costs + za notar
+  ['КОЈ ЌЕ ГИ СНОСИ ТРОШОЦИТЕ?', 'сакам договор на нотар'],    // ALL-CAPS Viber
+  ['кој ги поднесува трошоците?', 'сакам договор на нотар'],   // podnesuva (undertake)
+  ['кој ќе ги поднесе трошоците?', 'сакам договор на нотар'],   // podnese (3rd-person future)
+  ['кој ќе ги носи трошоците?', 'сакам договор на нотар'],     // nosi (carry)
+  ['кој ќе ги сноси трошоците за адвокатот?', ''],             // lawyer referent
+  ['кој ќе ги сноси трошоците за данокот?', '']                // tax referent
 ];
 for (const [u, ctx] of shouldMatch) {
   const r = isAskingWhoPaysForLegalCosts(u, ctx);
@@ -97,7 +116,17 @@ const shouldNotMatch = [
   ['КОЈ ПЛАЌА ЗА ДЕПОЗИТОТ?', 'сакам договор на нотар'],
   // HOW/WHEN with the explicit object must NOT match either.
   ['како ќе плаќа за нотарот?', ''],
-  ['кога ќе плаќа за нотарот?', '']
+  ['кога ќе плаќа за нотарот?', ''],
+  // BEAR-THE-COSTS guards: no legal referent → NOT legal costs; rent
+  // economics (kirija, provizija, smetki) stay on their own paths even
+  // with a notary in context; kako/koga (how/when) never match.
+  ['кој ќе ги сноси трошоците?', ''],
+  ['кој ги сноси трошоците?', 'kako rabotite so provizija'],   // commission ctx, no legal
+  ['кој ќе ги сноси киријата?', 'сакам договор на нотар'],     // rent economics
+  ['кој ќе ги сноси провизијата?', 'сакам договор на нотар'],  // commission economics
+  ['кој ќе ги сноси сметките?', 'сакам договор на нотар'],     // utility bills
+  ['како ќе ги сноси трошоците?', 'сакам договор на нотар'],   // HOW, not WHO
+  ['кога ќе ги сноси трошоците?', 'сакам договор на нотар']    // WHEN, not WHO
 ];
 for (const [u, ctx] of shouldNotMatch) {
   const r = isAskingWhoPaysForLegalCosts(u, ctx);
@@ -160,6 +189,16 @@ const cyrTenseRes = await generateResponse(cyrTenseSession, 'КОЈ ТРЕБА �
 assert(`e2e rent batch "КОЈ ТРЕБА ДА ГО ПЛАЌА?" → NORMAL + who-pays-the-notary`, 
   cyrTenseRes.type === 'NORMAL' && /Адвокат|Нотар|адвокат|нотар/.test(cyrTenseRes.text),
   `got [${cyrTenseRes.type}] "${(cyrTenseRes.text || '').substring(0, 140)}"`);
+
+// E2E BEAR-THE-COSTS (requested): "кој ќе ги сноси трошоците?" with the
+// notary in the batch context → who-pays-the-notary answer, never the
+// generic commission pitch.
+const snosiSession = createSession('rent');
+snosiSession.messages.push({ role: 'user', text: 'SAKAM DOGOVOR NA NOTAR' });
+const snosiRes = await generateResponse(snosiSession, 'кој ќе ги сноси трошоците?');
+assert(`e2e rent batch "кој ќе ги сноси трошоците?" → NORMAL + who-pays-the-notary`,
+  snosiRes.type === 'NORMAL' && /Адвокат|Нотар|адвокат|нотар/.test(snosiRes.text) && /половина|по договор/.test(snosiRes.text),
+  `got [${snosiRes.type}] "${(snosiRes.text || '').substring(0, 140)}"`);
 
 // GUARD: a bare "KOJ GO PLAKJA NEGO ?" with NO notary context must NOT be
 // forced into the legal-costs answer. With the clitic-tolerant who_pays

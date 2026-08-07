@@ -25,7 +25,10 @@ export function parseMacedonianNumber(text) {
   }
 
   const words = {
-    'еден': 1, 'edna': 1, 'eden': 1,
+    // Cyrillic feminine/neuter "one" (една/едно) were MISSING — only the
+    // masculine еден was mapped, so "една плус две" (1+2=3) parsed as 2
+    // (две only) and the plus-sum died (reported lead 3571074 bedrooms loop).
+    'еден': 1, 'една': 1, 'едно': 1, 'edna': 1, 'eden': 1,
     'два': 2, 'dva': 2,
     'две': 2, 'dve': 2,
     'три': 3, 'tri': 3,
@@ -57,6 +60,32 @@ export function parseMacedonianNumber(text) {
     if (trimmed.includes(word)) return num;
   }
   return null;
+}
+
+// ========================================
+// PLUS-ARITHMETIC NUMBER PHRASE — "EDNA PLUS DVE" (one plus two = 3)
+// The owner sometimes states a count as a SUM (reported, lead 3571074):
+// "EDNA PLUS DVE" answering "Колку спални соби има станот?" means 1+2 = 3
+// bedrooms, but parseMacedonianNumber's includes() grabs only the FIRST
+// word ("edna"→1) and countBedrooms stored 1 — the "3" was silently lost
+// and the confirmation loop re-pended the wrong value. Split on the plus
+// markers (плус/plus/+), parse each part, and SUM. Returns null unless the
+// phrase has at least two parts AND every part parses — so "edna plus
+// terasa" (a terrace mention, not a sum) and plain single words are never
+// misread as arithmetic.
+// ========================================
+export function parsePlusSum(text) {
+  const parts = String(text || '').trim().split(/\s*(?:plus|плус|\+)\s*/i);
+  if (parts.length < 2) return null;
+  let sum = 0;
+  for (const part of parts) {
+    const n = parseMacedonianNumber(part);
+    const nw = n === null ? parseNumberWords(part) : null;
+    const v = nw !== null ? nw : n;
+    if (v === null) return null;   // any non-number part kills the sum
+    sum += v;
+  }
+  return sum;
 }
 
 // ========================================
@@ -225,7 +254,18 @@ export function parseNumberWords(text) {
       const wordStart = pMatch.index + (pMatch[0].length - pMatch[1].length);
       let tensFound = false;
       for (const tw of tensWords) {
-        if (afterHundreds.startsWith(tw) && !/[a-zа-я]/.test(afterHundreds[tw.length] || '')) {
+        // MERGED-CONNECTOR BOUNDARY (reported, lead 5502969): the owner merged
+        // hundreds + tens + the "i {unit}" connector into ONE word —
+        // "tristaseesetiosum" = "trista seeset i osum" (300+60+8 = 368). The
+        // tens word "seeset" is followed DIRECTLY by the connector "i" (no
+        // space), which the old boundary check rejected as a letter — so the
+        // whole "trista" prefix was dropped and only "seeset" (60) survived
+        // via irregularTens → 68,000 instead of 368,000 (reported: WRONG PRICE
+        // COLLECTED). Allow i/и right after the tens word — the iBrojMatch
+        // suffix handler below consumes it + the unit. Same connector
+        // tolerance as the !tensFound fallback ("tristailjadi" = trista +
+        // iljadi).
+        if (afterHundreds.startsWith(tw) && (!/[a-zа-я]/.test(afterHundreds[tw.length] || '') || /^[iи]/.test(afterHundreds[tw.length] || ''))) {
           const tensVal = tensDirectMap[tw] !== undefined ? tensDirectMap[tw] : parseNumberWords(tw);
           if (tensVal !== null && tensVal >= 10) {
             result = hVal + tensVal;
@@ -399,6 +439,25 @@ export function parseOrdinalFloor(text) {
 }
 
 // ========================================
+// Viber ordinal-suffix numbers — "5TI" = 5th, "13TI" = 13th, "1VI" = 1st,
+// "2RI" = 2nd, "7MI" = 7th, "8MI" = 8th, "20TI" = 20th (reported, lead
+// pz186272900: owner answered "5TI OD 13" and the floor was NOT recognized
+// — Ana re-asked). Viber/SMS owners abbreviate Macedonian ordinals as a
+// digit + the ordinal suffix (ти/ti, ви/vi, ри/ri, ми/mi — matching the
+// word forms петти/втори/седми/осми). The digit IS the ordinal value, so
+// "5TI" → 5. Returns null unless the whole token is exactly digit + one of
+// the known suffixes (no boundary tricks) — a bare digit "5" and a spelled
+// ordinal "петти" keep their own paths, and "5ti" can never leak into
+// unrelated words because the token must be ENTIRELY the digit+suffix.
+// ========================================
+export function parseViberOrdinalSuffix(text) {
+  const m = String(text || '').trim().match(/^(\d{1,2})(?:ti|ти|vi|ви|ri|ри|mi|ми)$/i);
+  if (!m) return null;
+  const n = parseInt(m[1], 10);
+  return (n >= 0 && n <= 50) ? n : null;
+}
+
+// ========================================
 // Positive/Negative answer detection
 // ========================================
 export function isPositive(text) {
@@ -431,11 +490,16 @@ export function countBedrooms(text) {
   // floors), "osmi od deset". Two constructions:
   //   a) ordinal + kat/sprat ("vtori kat")
   //   b) ordinal + "od N" compound floor ("vtori od 7" / "втори од 7")
+  //   c) VIBER ORDINAL-SUFFIX (reported, lead pz186272900): digit+ordinal
+  //      suffix — "5TI OD 13" (5th of 13 floors), bare "13TI" — the suffix
+  //      TI/ти/VI/ви/RI/ри/MI/ми marks an ORDINAL floor, never a bedroom
+  //      count, so "5TI OD 13" must not phantom as bedrooms=5 (extractFirst
+  //      Number reads the "5" via the digit fallback below).
   // Used by BOTH fallback paths below — the word-number path (parseMacedonian
   // Number handles the Latin "vtor") AND the digit path (Cyrillic "втори" is
   // NOT in parseMacedonianNumber's word map, so "на втори од 7" falls through
   // to extractFirstNumber → 7, which would otherwise phantom as bedrooms=7).
-  const hasOrdinalContext = /(treti|трети|tret|трет|vtori|втори|vtor|втор|prvi|први|prv|прв|cetvrti|четврти|cetvrt|четврт|petti|петти|sesti|шести|sedmi|седми|osmi|осми|devetti|деветти)\s*(kat|кат|sprat|спрат|od\s+\d{1,3}|од\s+\d{1,3}|od\s+[a-zа-я]+|од\s+[a-zа-я]+)/i;
+  const hasOrdinalContext = /(treti|трети|tret|трет|vtori|втори|vtor|втор|prvi|први|prv|прв|cetvrti|четврти|cetvrt|четврт|petti|петти|sesti|шести|sedmi|седми|osmi|осми|devetti|деветти)\s*(kat|кат|sprat|спрат|od\s+\d{1,3}|од\s+\d{1,3}|od\s+[a-zа-я]+|од\s+[a-zа-я]+)|\d{1,2}\s*(ti|ти|vi|ви|ri|ри|mi|ми)(?![a-zа-я\d])/i;
 
   if (/garsonjera|гарсонера|гарсоњера|garsoniera|гарсониера/i.test(u)) return 0;
   if (/dvosoben|двособен/i.test(u)) return 1;
@@ -496,22 +560,43 @@ export function countBedrooms(text) {
     }
   }
 
+  // TIME-SPAN GUARD (shared by the plus-arithmetic branch AND the word
+  // fallback below): the owner may talk about HOW LONG something takes
+  // ("mesec dva" = a month or two, "nedela dve" = a week or two, "dva dena"
+  // = two days, "tri meseci" = three months). Those number words are TIME
+  // amounts, NOT bedroom counts. Only ADJACENT unit+number / number+unit
+  // pairs trigger, so a genuine bedroom answer that merely mentions time
+  // elsewhere in the sentence is left alone. Declared here so the plus
+  // branch above the word fallback can use it too (a const in the TDZ
+  // would throw — reviewer finding: "mesec dva plus edna nedela" summed to 3).
+  const timeSpanRe = /(?:mesec|месец|meseci|месеци|nedela|недела|nedeli|недели|dena|дена|denovi|денови|cas|час|casovi|часови|sati|сати|godina|година|godini|години)\s+(?:\d+|eden|edna|edno|dva|dve|tri|cetiri|pet|sest|sedum|osum|devet|deset|еден|една|едно|два|две|три|четири|пет|шест|седум|осум|девет|десет)|(?:\d+|eden|edna|edno|dva|dve|tri|cetiri|pet|sest|sedum|osum|devet|deset|еден|една|едно|два|две|три|четири|пет|шест|седум|осум|девет|десет)\s+(?:meseca|месеца|meseci|месеци|nedela|недела|nedeli|недели|dena|дена|denovi|денови|cas|час|casa|часа|sati|сати|godina|година|godini|години)/i;
+
+  // PLUS-ARITHMETIC (reported, lead 3571074): "EDNA PLUS DVE" (one plus two
+  // = 3) — the owner states the bedroom count as a SUM. parseMacedonianNumber
+  // below grabs only the first word ("edna"→1) and the "3" was lost (stored
+  // 1 → wrong confirmation loop). parsePlusSum splits on plus/плус/+ and sums
+  // the parts; it returns null unless every part parses, so "edna plus
+  // terasa" and other non-sum phrases fall through untouched.
+  const plusSum = parsePlusSum(u);
+  if (plusSum !== null && plusSum >= 1 && plusSum <= 20) {
+    // Reuse the word-fallback context guards (terrace, year, other-field
+    // units, TIME-SPAN) — a plus phrase inside an sqm/price sentence or a
+    // time amount ("mesec dva plus edna nedela" = a month or two plus a
+    // week, NOT bedrooms) is NOT a bedroom count. timeSpanRe is required
+    // here exactly like the word fallback below (reviewer finding: its
+    // absence let "mesec dva plus edna nedela" sum to 3).
+    if (/terasa|тераса|teras|терас|zosto|зошто|zasto|зашто/i.test(u)) return null;
+    if (/izgraden|граден|osumdesti|осумдесетти|osumdeseti|осумдесети|osumdeset|осумдесет|godina|година|gradba|градба|graden|граден|pedesetti|педесетти|deveesetti|девеесетти|deveeseti|девеесети|deveeset|девеесет|devedeseti|деведесети|sedumdesetti|седумдесетти|sedumdeseti|седумдесети|sedumdeset|седумдесет/i.test(u)) return null;
+    if (/m2|м2|кв|kvadrati|квадрати|kvadrata|квадрата|kvadrat|квадрат|sqm|kat|кат|sprat|спрат|evra|евра|iljadi|илјади|parking|паркинг|garaza|гаража|lift|лифт|klima|клима/i.test(u)) return null;
+    if (timeSpanRe.test(u)) return null;
+    return plusSum;
+  }
+
   // Fallback: parse word number (e.g. 'dve spalni' → 2, 'tri' → 3)
   // BUT skip if the word number is actually an ordinal floor reference (tret kat, vtor sprat)
   // OR if the message is about a different field (terrace follow-up, question words)
   // OR if the message has year/decade context ("osumdesti" → 1980s, not 8 bedrooms)
   //
-  // TIME-SPAN GUARD: the owner may talk about HOW LONG something takes
-  // ("mesec dva" = a month or two, "nedela dve" = a week or two, "dva dena"
-  // = two days, "tri meseci" = three months). Those number words are TIME
-  // amounts, NOT bedroom counts. "PA AKO MOZE DA SE PRODADE ZA MESEC DVA BI
-  // BILO SUPER" (if it could sell in a month or two, that'd be great)
-  // previously grabbed "dva" as bedrooms=2 — harmless when rejected at LOW,
-  // but "...mesec dva, golem e" would store it at HIGH (golem is a bedroom
-  // keyword). Only ADJACENT unit+number / number+unit pairs trigger, so a
-  // genuine bedroom answer that merely mentions time elsewhere in the
-  // sentence is left alone.
-  const timeSpanRe = /(?:mesec|месец|meseci|месеци|nedela|недела|nedeli|недели|dena|дена|denovi|денови|cas|час|casovi|часови|sati|сати|godina|година|godini|години)\s+(?:\d+|eden|edna|edno|dva|dve|tri|cetiri|pet|sest|sedum|osum|devet|deset|еден|една|едно|два|две|три|четири|пет|шест|седум|осум|девет|десет)|(?:\d+|eden|edna|edno|dva|dve|tri|cetiri|pet|sest|sedum|osum|devet|deset|еден|една|едно|два|две|три|четири|пет|шест|седум|осум|девет|десет)\s+(?:meseca|месеца|meseci|месеци|nedela|недела|nedeli|недели|dena|дена|denovi|денови|cas|час|casa|часа|sati|сати|godina|година|godini|години)/i;
   const wordNum = parseMacedonianNumber(u);
   if (wordNum !== null && wordNum >= 0 && wordNum <= 10) {
     // Skip if the only number words are actually ordinal floor references

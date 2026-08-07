@@ -794,6 +794,20 @@ assert("BUG1: cleanPrice=358000 (tristapeeset=350 + osum=8, mid-sentence merged)
 result = runGlobalExtraction("tristapeeset iljadi evra", {});
 assert("BUG1b: cleanPrice=350000 (tristapeeset alone)", result.cleanPrice === 350000, `got ${result.cleanPrice}`);
 
+// Bug 1c: MERGED HUNDREDS+TENS+CONNECTOR+UNIT — "tristaseesetiosum" =
+// "trista seeset i osum" (300+60+8 = 368). Reported, lead 5502969: the owner
+// typed the WHOLE number as one merged word and the parser dropped the
+// "trista" prefix — the mergedHT tens boundary rejected "seeset" because the
+// connector "i" followed it directly (letter), then the !tensFound fallback
+// skipped "trista" (nextCh 's' is a letter too), so only "seeset" (60)
+// survived via irregularTens → cleanPrice=68000 instead of 368000.
+result = runGlobalExtraction("TRISTASEESETIOSUM ILJADI", {});
+assert("BUG1c: cleanPrice=368000 (tristaseesetiosum = trista+seeset+i+osum, merged connector)", result.cleanPrice === 368000, `got ${result.cleanPrice}`);
+result = runGlobalExtraction("dvestaseesetiosum iljadi", {});
+assert("BUG1d: cleanPrice=268000 (dvestaseesetiosum = 200+60+8)", result.cleanPrice === 268000, `got ${result.cleanPrice}`);
+result = runGlobalExtraction("tristaseesetidevet iljadi", {});
+assert("BUG1e: cleanPrice=369000 (tristaseesetidevet = 300+60+9)", result.cleanPrice === 369000, `got ${result.cleanPrice}`);
+
 // Bugs 2+3+4: THE user's exact production message — price + volunteered
 // floor (vtori kat) + year (nova zgrada od 2024) + private parking (so nego).
 // preferredField='cleanPrice' simulates the live data-collection question.

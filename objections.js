@@ -541,7 +541,32 @@ function isAskingWhoPaysForLegalCosts(text, contextText) {
   // would hijack unrelated messages into the legal-costs answer.
   const whoPaysClitic =
     /(?:^|\s)(?:koj|кој|ko|ко)\s+(?:(?:(?:ke|ќе|treba|треба)\s+(?:da|да)\s+)|(?:ke|ќе)\s+)?(?:go|го|nego|него|gi|ги)\s*(?:plakja|плаќа|плака|plaka)/i.test(t) ||
-    /(?:^|\s)(?:koj|кој|ko|ко)\s+(?:(?:(?:ke|ќе|treba|треба)\s+(?:da|да)\s+)|(?:ke|ќе)\s+)?(?:plakja|плаќа|плака|plaka)\s+(?:za|за)?\s*(?:nego|него|notarot|нотарот|notar|нотар|advokatot|адвокатот|advokat|адвокат|danokot|данокот|danok|данок)/i.test(t);
+    /(?:^|\s)(?:koj|кој|ko|ко)\s+(?:(?:(?:ke|ќе|treba|треба)\s+(?:da|да)\s+)|(?:ke|ќе)\s+)?(?:plakja|плаќа|плака|plaka)\s+(?:za|за)?\s*(?:nego|него|notarot|нотарот|notar|нотар|advokatot|адвокатот|advokat|адвокат|danokot|данокот|danok|данок)/i.test(t) ||
+    // BRANCH 3 — BEAR-THE-COSTS VERB FAMILY (requested): the owner may ask
+    // who will BEAR the costs instead of who PAYS them — "кој ќе ги сноси
+    // трошоците?" (who will bear the costs?), "кој ќе ги сноси трошоците
+    // за нотарот?", "кој ги поднесува трошоците?" (who bears/undertakes
+    // the costs), "кој ги носи трошоците?". The verb is sноси/nese/
+    // podnesuva, NOT plakja, so branches 1-2 (which require the plakja
+    // family) miss it entirely. Same standalone who-word boundary, same
+    // optional tense markers, same clitic gi/go before the verb. The costs
+    // object (trosoci/trosok) may be in the message or the referent comes
+    // from the notary context. TROSOC ROOT: matches трошоците (the costs),
+    // трошоци (costs), трошок (cost) — the [цc] alternation covers both
+    // Latin "trosoc" and Cyrillic "трошоц" spellings.
+    /(?:^|\s)(?:koj|кој|ko|ко)\s+(?:(?:(?:ke|ќе|treba|треба)\s+(?:da|да)\s+)|(?:ke|ќе)\s+)?(?:gi|ги|go|го)?\s*(?:snosi|сноси|nese|несе|nosi|носи|podnesuva|поднесува|podnesi|поднеси|podnese|поднесе)\s+(?:trosoc|трошоц|trosok|трошок)/i.test(t) ||
+    // BRANCH 3b — "кој ги сноси трошоците за нотарот?" — the costs object
+    // is followed by an explicit legal referent ("трошоците за нотарот" =
+    // the costs FOR THE NOTARY). The legal-noun alternation after the
+    // connector za/за makes the referent explicit in-message, so no context
+    // is needed.
+    /(?:^|\s)(?:koj|кој|ko|ко)\s+(?:(?:(?:ke|ќе|treba|треба)\s+(?:da|да)\s+)|(?:ke|ќе)\s+)?(?:gi|ги|go|го)?\s*(?:snosi|сноси|nese|несе|nosi|носи|podnesuva|поднесува|podnesi|поднеси|podnese|поднесе)\s+(?:trosoc|трошоц|trosok|трошок|trosoci|трошоци)\s+(?:za|за)\s*(?:nego|него|notarot|нотарот|notar|нотар|advokatot|адвокатот|advokat|адвокат|danokot|данокот|danok|данок)/i.test(t) ||
+    // BRANCH 3c — PLATI-COSTS + EXPLICIT LEGAL REFERENT (requested): "кој
+    // плаќа трошоци за нотар?" — the PAY verb (plakja family) with a costs
+    // object followed by an explicit legal noun. Branch 2 only matched a
+    // legal noun IMMEDIATELY after the verb ("кој плаќа нотар?"), so the
+    // costs object in between ("плаќа трошоци за нотар") fell through.
+    /(?:^|\s)(?:koj|кој|ko|ко)\s+(?:(?:(?:ke|ќе|treba|треба)\s+(?:da|да)\s+)|(?:ke|ќе)\s+)?(?:gi|ги|go|го)?\s*(?:plakja|плаќа|плака|plaka)\s+(?:trosoc|трошоц|trosok|трошок|trosoci|трошоци)\s+(?:za|за)?\s*(?:nego|него|notarot|нотарот|notar|нотар|advokatot|адвокатот|advokat|адвокат|danokot|данокот|danok|данок)/i.test(t);
   if (!whoPaysClitic) return false;
   // RENT/UTILITY OBJECT GUARD — "who pays X" about rent economics is NOT
   // the notary, even when a notary was mentioned nearby.
