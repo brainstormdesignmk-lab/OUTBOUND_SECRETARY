@@ -99,21 +99,45 @@ available right now ("не е достапен, од 1 јануари е сло�
 
 - `available: false`, `blocked_until: "2026-01-01"`
 
-The public listings query must hide the property until that date:
+The public listings query hides the property until that date. This is
+implemented by the **public-properties** edge function
+(`hermes/public-properties/index.ts`, Phase 3):
 
 ```sql
 -- PUBLIC listings (the ONLY place Hermes touches business logic — a filter)
-where published = true
-  and (blocked_until is null or blocked_until <= now())
+where blocked_until is null or blocked_until <= current_date
 ```
 
-Test the three concrete cases from the risk plan:
+Deploy: `supabase functions deploy public-properties` — it is a **public**
+endpoint (NO API key — it serves the customer page) and returns
+`PUBLIC_FIELDS` only, so the internal `broker_comment`, `price_warning`,
+`lead_phone`, `tenant_preferences` and source internals never leak to
+customers. Optional `?listing_type=` and `?city=` filters.
+
+```
+GET {base}/public-properties            → 200 { properties: [...] }
+GET {base}/public-properties?listing_type=sale&city=Skopje
+```
+
+Test the three concrete cases from the risk plan (covered offline by
+`test-public-properties.js`, 45 asserts):
 1. property free today (`blocked_until is null`) → **shown**
 2. `blocked_until` in the future → **hidden**
 3. `blocked_until` already passed → **shown again**
 
-Use `>=`/`<=` consistently (a same-day availability must show immediately)
-and store dates as `date` (not `timestamptz`) to avoid timezone off-by-one.
+Boundary + leak cases also covered: same-day `blocked_until` shows
+immediately (`<=`, not `<` — a same-day availability must show); dates
+stored as `date` (not `timestamptz`) so the calendar-day comparison has no
+UTC off-by-one; and the leak guard (internal fields never in the response).
+The runnable local counterpart is `GET /public-properties` on
+`hermes-server.js` (same filter, same PUBLIC_FIELDS).
+
+Date note: the cutoff "today" defaults to the **UTC calendar date** on both
+the local server and the deployed edge function (the edge function runs in
+UTC), so the two behave identically. Tests pin a fixed day via the
+`?today=YYYY-MM-DD` query param (local server only — the edge function
+never accepts it). A Skopje-local cutoff would shift the boundary ~1h
+before/after UTC midnight; the UTC default avoids that drift entirely.
 
 ---
 
@@ -138,10 +162,11 @@ property can always be traced:
 
 ## 4. Rollout phases (from LOVABLE_HERMES_INTEGRATION_PLAN.txt)
 
-- **Phase 1 (this deliverable):** API key + create-property endpoint only →
-  test with one real property from Ana.
+- **Phase 1:** API key + create-property endpoint → tested with a real
+  property from Ana (done — `hermes/create-property` + `hermes-server.js`).
 - **Phase 2:** update / delete / photos endpoints.
-- **Phase 3:** appointments + `blocked_until` filter on public listings.
+- **Phase 3:** appointments + `blocked_until` filter on public listings
+  (done — `hermes/public-properties` + `test-public-properties.js`).
 - **Phase 4:** documents.
 
 Additive changes only — new edge functions, nullable columns

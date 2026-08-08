@@ -55,6 +55,53 @@ const ALLOWED_FIELDS = new Set([
   'property_id', 'lead_phone', 'source_portal', 'source_ad_url'
 ]);
 
+// ============================================================
+// PUBLIC LISTINGS VISIBILITY (Phase 3) — the ONLY place Hermes touches
+// business logic. A property is visible to customers when it has NO
+// blocked_until, or when the block date has PASSED ("THE PROPERTY IS
+// HIDDEN UNTILL THAT DATE AND SHOWS UP ON THE CUSTOMERS WEB PAGE WHEN
+// ITS FREE"). Pure + injectable `today` so the 3 risk-plan cases are
+// testable. MUST stay in lockstep with hermes/public-properties/index.ts
+// and the documented SQL filter:
+//   where blocked_until is null or blocked_until <= current_date
+// ============================================================
+export function isPropertyVisible(blockedUntil, today = defaultToday()) {
+  if (!blockedUntil) return true; // no block → free now
+  const block = new Date(`${blockedUntil}T00:00:00Z`);
+  const now = new Date(`${today}T00:00:00Z`);
+  // <= (not <): a same-day availability must show immediately (risk plan).
+  return block <= now;
+}
+
+// Cutoff day for the public query. Default: UTC date (the edge function
+// runs in UTC, so this keeps the local server parity-exact). Testable via
+// the ?today=YYYY-MM-DD query param.
+function defaultToday() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+// Public fields ONLY — never leaks the internal broker_comment,
+// price_warning, owner phone, tenant-preference notes or source internals.
+// `id` (the row uuid) IS public: the customer page needs it to deep-link
+// to a property-detail view (code-review finding — a listings endpoint
+// whose objects carry no id can't link anywhere).
+const PUBLIC_FIELDS = [
+  'id',
+  'listing_type', 'available', 'blocked_until',
+  'city', 'municipality',
+  'sqm', 'floor', 'heating', 'elevator', 'garage', 'garage_price',
+  'owner_price_per_sqm', 'owner_price', 'agency_percent', 'selling_price', 'monthly_rent',
+  'description_public'
+];
+
+function pickPublic(row) {
+  const out = {};
+  for (const f of PUBLIC_FIELDS) {
+    if (row[f] !== undefined) out[f] = row[f];
+  }
+  return out;
+}
+
 // Minimal schema validation — range sanity only, NEVER value rewriting
 // (all business rules already ran on Ana's side).
 function validate(payload) {
@@ -203,6 +250,30 @@ export function createHermesApp(opts = {}) {
   app.all('/create-property', guard);
   app.all('/properties', guard); // spec-name alias
   app.get('/health', (req, res) => res.json({ status: 'Hermes OK' }));
+
+  // PUBLIC LISTINGS (Phase 3) — customer-facing, NO auth (it backs the
+  // public page). Filters by blocked_until visibility; optional
+  // listing_type / city filters; ?today=YYYY-MM-DD injects the cutoff for
+  // tests (default = UTC date). Returns PUBLIC_FIELDS only.
+  app.get('/public-properties', (req, res) => {
+    const today = typeof req.query.today === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(req.query.today)
+      ? req.query.today
+      : defaultToday();
+    // Parity with the edge function: listing_type filter only applies to
+    // valid values; anything else is ignored (returns the full list).
+    const listingType = typeof req.query.listing_type === 'string' &&
+      (req.query.listing_type === 'sale' || req.query.listing_type === 'rent')
+      ? req.query.listing_type
+      : null;
+    const city = typeof req.query.city === 'string' ? req.query.city : null;
+    const rows = readLines(join(options.storeDir, 'properties.jsonl'));
+    const visible = rows
+      .filter((p) => isPropertyVisible(p.blocked_until, today))
+      .filter((p) => !listingType || p.listing_type === listingType)
+      .filter((p) => !city || (p.city || '').toLowerCase() === city.toLowerCase())
+      .map(pickPublic);
+    return res.json({ properties: visible, today });
+  });
 
   // Malformed-JSON bodies → body-parser error → Express's default HTML 400.
   // Return the same JSON contract as the edge function (invalid_json).
