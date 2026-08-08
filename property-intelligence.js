@@ -331,6 +331,10 @@ export function buildPropertyJson(data, adMemory = {}, phone = '', propertyId = 
     owner_price: data.ownerPrice ?? data.cleanPrice ?? null,
     agency_percent: data.agencyPercent ?? null,
     selling_price: data.sellingPrice ?? null,
+    // RENT price — owner_price/selling_price are sale-side fields; a rent
+    // payload carries the monthly rent here (code-review finding: the rent
+    // amount used to survive ONLY inside broker_comment).
+    monthly_rent: isRent ? (data.monthlyRent ?? null) : null,
 
     description_public: data.descriptionPublic || '',
     broker_comment: data.brokerComment || '',

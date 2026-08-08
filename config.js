@@ -103,6 +103,10 @@ export const config = {
   // Hermes/Lovable property database reachable. No port default: the URL
   // must be a full base URL (https://hermes.example.com).
   HERMES_URL: envStr('HERMES_URL', ''),
+  // API key for the Hermes create-property edge function (X-Hermes-Key
+  // header). Optional — when unset the client POSTs without auth (useful
+  // against a local mock; production Hermes deployments require it).
+  HERMES_API_KEY: envStr('HERMES_API_KEY', ''),
 
   // === TIMING (ms) ===
   REPLY_TIMEOUT: envInt('ANA_REPLY_TIMEOUT_MS', 30 * 60 * 1000),

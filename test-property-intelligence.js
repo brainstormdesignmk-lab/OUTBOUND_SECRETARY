@@ -211,6 +211,7 @@ assert('PJ garage_price=15000', pj.garage_price === 15000, '');
 assert('PJ owner_price_per_sqm=2500', pj.owner_price_per_sqm === 2500, '');
 assert('PJ owner_price=200000', pj.owner_price === 200000, '');
 assert('PJ selling_price=204000', pj.selling_price === 204000, '');
+assert('PJ monthly_rent=null for sale', pj.monthly_rent === null, `got ${pj.monthly_rent}`);
 assert('PJ tenant_preferences kept', pj.tenant_preferences?.preferred[0] === 'families', '');
 assert('PJ broker_comment passthrough', pj.broker_comment === 'коментар', '');
 assert('PJ source_portal', pj.source_portal === 'reklama5', '');
@@ -219,9 +220,11 @@ assert('PJ source_portal', pj.source_portal === 'reklama5', '');
 const pjBlocked = buildPropertyJson({ transactionType: 'rent', monthlyRent: 500, availableFrom: '2026-01-01' });
 assert('PJ blocked: available=false', pjBlocked.available === false, '');
 assert('PJ blocked: blocked_until=2026-01-01', pjBlocked.blocked_until === '2026-01-01', `got ${pjBlocked.blocked_until}`);
+assert('PJ rent monthly_rent=500 (not lost to broker_comment only)', pjBlocked.monthly_rent === 500, `got ${pjBlocked.monthly_rent}`);
 const pjImmediate = buildPropertyJson({ transactionType: 'rent', monthlyRent: 500, availableFrom: 'immediate' });
 assert('PJ immediate → available=true', pjImmediate.available === true, '');
 assert('PJ immediate → blocked_until=null', pjImmediate.blocked_until === null, '');
+assert('PJ immediate rent monthly_rent=500', pjImmediate.monthly_rent === 500, `got ${pjImmediate.monthly_rent}`);
 
 // ============================================================
 // 6. EXTRACTION WIRING — pricePerSqm vs cleanPrice
