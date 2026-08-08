@@ -159,7 +159,8 @@ const sqmSession = {
   adMemory: { transactionType: 'rent', propertyType: 'apartment', propertyLabel: 'станот' },
   collectedData: {
     cooperationAccepted: true, transactionType: 'rent',
-    monthlyRent: 350, monthlyRentConfidence: 0.95
+    monthlyRent: 350, monthlyRentConfidence: 0.95,
+    availableFrom: '2026-06-01', availableFromConfidence: 0.95
   },
   messages: [{ role: 'model', text: 'Одлично. Колкава е вкупната квадратура по имотен лист?' }],
   phone: '+38970123456'
@@ -202,8 +203,8 @@ assert('E6: stored at HIGH (no confirmation round-trip)',
 assert('E7: no pendingConfirmation left behind',
   priceSession.pendingConfirmation === null || priceSession.pendingConfirmation === undefined,
   `got pending=${JSON.stringify(priceSession.pendingConfirmation)}`);
-assert('E8: reply moves ON to totalSqm — NOT a monthlyRent re-ask',
-  res.type === 'QUESTION' && res.nextField === 'totalSqm' && !/кириј|точно/.test(res.text || ''),
+assert('E8: reply moves ON to availableFrom (rent order) — NOT a monthlyRent re-ask',
+  res.type === 'QUESTION' && res.nextField === 'availableFrom' && !/кириј|точно/.test(res.text || ''),
   `got type=${res.type} next=${res.nextField} text=${JSON.stringify((res.text || '').slice(0, 70))}`);
 
 // "350 TI KAZAV" (number-first order) behaves identically

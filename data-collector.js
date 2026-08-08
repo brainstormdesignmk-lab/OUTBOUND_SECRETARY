@@ -15,7 +15,8 @@ import {
   countBedrooms,
   extractPrice,
   parseYearBuilt,
-  parseOrientation
+  parseOrientation,
+  parseAvailableFromDate
 } from './property-extractor.js';
 
 // ========================================
@@ -48,6 +49,17 @@ function extractMonthlyRent(u, data) {
   cleaned = cleaned.replace(/\d+(?:\s*(?:evra|евра|eur|evro|евро))?\s*(?:za|на|na|за)?\s*(?:reziski|режиски|trosoci|трошоци)/gi, ' ');
   const price = extractPrice(cleaned);
   return price !== null ? { monthlyRent: price } : null;
+}
+
+function extractAvailableFrom(u, data) {
+  // RENT-ONLY (reported requirement): the available-from date question fires
+  // for rent leads right after availability is confirmed. Sale leads never
+  // ask it, so a date-like phrase in a sale message (e.g. "od 2015" as a
+  // year) must not create the field.
+  if (data.transactionType !== 'rent') return null;
+  if (data.availableFrom !== undefined && data.availableFrom !== null) return null;
+  const d = parseAvailableFromDate(u);
+  return d !== null ? { availableFrom: d } : null;
 }
 
 function extractTotalSqm(u, data) {
@@ -833,6 +845,7 @@ function extractDocumentationClean(u, data) {
 const EXTRACTION_RULES = [
   extractCleanPrice,
   extractMonthlyRent,
+  extractAvailableFrom,
   extractTotalSqm,
   extractBedrooms,
   extractCompoundFloor,  // Standalone — NOT in NUMBER_SNIFFING so it runs even for bare numbers
@@ -919,6 +932,12 @@ const FIELD_CONFIDENCE_KEYWORDS = {
   // price keeps its own currency keywords on cleanPrice. A bare "350" (no
   // currency word) still scores MEDIUM → confirmation re-ask (unchanged).
   'monthlyRent': /kirija|кирија|mesecno|месечно|izdavam|издавам|izdava|издава|iznajmuvam|изнајмувам|iznajmuva|изнајмува|pod kirija|под кирија|evra|евра|evro|евро|eur|reziski|режиски/i,
+  // AVAILABLE-FROM DATE — month names, day markers, and immediate words are
+  // unambiguous date answers to "Од кога ќе биде слободен?". The parser only
+  // fires on real date context (od/од + number, a month word, or immediate
+  // vocabulary), so a HIGH here can't be a false positive from unrelated
+  // numbers (sqm, price, floor).
+  'availableFrom': /januar|јануар|fevruar|февруар|mart|март|april|април|maj|мај|juni|јуни|juli|јули|avgust|август|septemvri|септември|oktomvri|октомври|noemvri|ноември|dekemvri|декември|odma|одма|sega|сега|vednash|веднаш|sledniot|следниот|mesec|месец|od \d|од \d/i,
   'orientation': /orientacija|ориентација|strana|страна|jug|север|istok|запад|zapad|sever|jugoistok|jugozapad|severoistok|severozapad|исток|југ|североисток|северозапад|југоисток|југозапад|pravec|правец/i,
   'terraceSqm': /terasa|тераса|teras|терас|тераси|terrace|m2|м2|kvadrati|квадрати/i
 };
@@ -1177,6 +1196,7 @@ function extractTerrace(u, data) {
 const FIELD_TO_EXTRACTOR = {
   cleanPrice: extractCleanPrice,
   monthlyRent: extractMonthlyRent,
+  availableFrom: extractAvailableFrom,
   totalSqm: extractTotalSqm,
   bedrooms: extractBedrooms,
   floor: extractFloor,

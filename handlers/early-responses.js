@@ -32,6 +32,7 @@ import {
   isAskingAboutClients,
   isAskingWhoPaysForLegalCosts
 } from '../objections.js';
+import { parseAvailableFromDate, formatAvailableFromDate } from '../property-extractor.js';
 
 // ========================================
 // AVAILABILITY-POSITIVE PHRASES (shared)
@@ -231,6 +232,84 @@ export function runEarlyResponses({ u, isRent, session }) {
   // ties "dostapen" to a phone/line/number word. (The availability handler
   // below no longer contains the gone-phrases, so this falls through cleanly.)
   const PHONE_UNAVAIL_RE = /(?:broj|број|linija|линија|telefon|телефон)\s*[^.]{0,20}?dostapen|dostapen\s*[^.]{0,20}?(?:broj|број|linija|линија|telefon|телефон)/i;
+  // RENT TEMPORARILY-UNAVAILABLE (reported, your decision): "не е достапен,
+  // од 1 јануари е слободен" (not available NOW, free from January 1st) and
+  // the bare "ОД 1 ЈАНУАРИ Е СЛОБОДЕН" (free from Jan 1st) are LIVE leads —
+  // the property goes HIDDEN until that date and shows on the customer page
+  // when free — NOT the permanently-gone close ("го издадов веќе" = already
+  // rented out, done → still CLOSED). The guard's condition: RENT + a
+  // temporary-unavailable phrase OR a parseable future date (the date answer
+  // to "Од кога ќе биде слободен?"). It MUST run BEFORE the GONE close below
+  // ("не е достапен" is in PROPERTY_GONE_RE and would close the lead) and
+  // BEFORE the availability handler ("ОД 1 ЈАНУАРИ Е СЛОБОДЕН" contains
+  // "е слободен", which is in AVAILABILITY_POSITIVE_RE — the handler would
+  // reply "glad it's still available", the exact opposite of the truth).
+  const RENT_TEMP_UNAVAIL_RE = /ne e dostapen|не е достапен|ne e veke dostapen|не е веќе достапен|veke ne e dostapen|веќе не е достапен|ne e sloboden|не е слободен|zafaten|зафатен|zaferan|momentano|моментално|momentno|моментно|pod kirija|под кирија|ke bide sloboden|ќе биде слободен|ke bide dostapen|ќе биде достапен|izdaden e|издаден е|iznajmen e|изнајмен е|izdadena e|издадена е|iznajmena e|изнајмена е/i;
+  // DATE-WITH-AVAILABILITY-CONTEXT: "ОД 1 ЈАНУАРИ Е СЛОБОДЕН" (free from
+  // January 1st) — a date phrase carrying a free/available word is a
+  // TEMPORARY-UNAVAILABILITY statement (the property becomes free on that
+  // date), even without an explicit "не е достапен". REQUIRES the
+  // availability word so a pure date answer to the flow's "Од кога ќе биде
+  // слободен?" question ("od 15ti") is NOT intercepted here — it falls
+  // through to the extraction pass, which captures availableFrom normally.
+  // EXCEPTION: when ANA HERSELF just asked the date question in persuasion
+  // (session.awaitingAvailableFrom, set below), a pure date answer ("od 1
+  // januari", "од 15ти") carries no availability word and would otherwise
+  // fall through to persuasion classification and be LOST — the marker
+  // admits it. Cleared on capture; only honored pre-cooperation (in
+  // DATA_COLLECTION the field-order question + extraction pass own the
+  // answer).
+  const RENT_DATE_CONTEXT_RE = /sloboden|слободен|dostapen|достапен|ke bide|ќе биде|oslobodi|ослободи|prazno|празно|se prazni|се празни/i;
+  const rentTempUnavailable = isRent && !PHONE_UNAVAIL_RE.test(u) &&
+    (RENT_TEMP_UNAVAIL_RE.test(u) ||
+     (parseAvailableFromDate(u) !== null &&
+      (RENT_DATE_CONTEXT_RE.test(u) ||
+       (session.awaitingAvailableFrom === true && !session.collectedData.cooperationAccepted))));
+  if (rentTempUnavailable) {
+    const parsedDate = parseAvailableFromDate(u);
+    if (parsedDate) {
+      session.collectedData.availableFrom = parsedDate;
+      session.collectedData.availableFromConfidence = 0.95;
+      session.availabilityAcknowledged = true; // availability half answered (with a date)
+      session.awaitingAvailableFrom = false;   // date answer received — marker consumed
+      console.log(`[AVAILABLE-FROM: captured ${parsedDate} — rent temporarily unavailable]`);
+      // Already cooperating → capture silently and let the flow continue
+      // (the next field question follows; availableFrom is already filled).
+      if (session.collectedData.cooperationAccepted) return null;
+      const tempLabel = session.adMemory?.propertyType === 'apartment' ? 'станот' :
+                        session.adMemory?.propertyType === 'house' ? 'куќата' :
+                        session.adMemory?.propertyType === 'land' ? 'плацот' :
+                        session.adMemory?.propertyType === 'commercial' ? 'локалот' : 'имотот';
+      // "ОДМА" (immediately) → the property is free right away — different
+      // reply shape than a future date.
+      if (parsedDate === 'immediate') {
+        return {
+          text: `Разбирам, ${tempLabel} е достапен веднаш. Дали би сакале да го понудиме на нашите клиенти за издавање?`,
+          type: "NORMAL"
+        };
+      }
+      return {
+        text: `Разбирам, ${tempLabel} ќе биде слободен од ${formatAvailableFromDate(parsedDate)}. Дали би сакале да го понудиме на нашите клиенти за издавање?`,
+        type: "NORMAL"
+      };
+    }
+    // No date volunteered yet → ask the date question directly.
+    if (session.collectedData.cooperationAccepted) return null; // the flow asks availableFrom in rent order
+    const tempLabel2 = session.adMemory?.propertyType === 'apartment' ? 'станот' :
+                       session.adMemory?.propertyType === 'house' ? 'куќата' :
+                       session.adMemory?.propertyType === 'land' ? 'плацот' :
+                       session.adMemory?.propertyType === 'commercial' ? 'локалот' : 'имотот';
+    // Mark that ANA asked the date question — a follow-up pure date answer
+    // ("od 1 januari") must be captured as availableFrom, not classified as
+    // a persuasion intent (see the rentTempUnavailable marker above).
+    session.awaitingAvailableFrom = true;
+    return {
+      text: `Разбирам. Од кога ќе биде слободен ${tempLabel2}?`,
+      type: "QUESTION",
+      nextField: "availableFrom"
+    };
+  }
+
   if (PROPERTY_GONE_RE.test(u) && !NOT_GONE_RE.test(u) && !PHONE_UNAVAIL_RE.test(u)) {
     // Mark for traceability (the operator sees the closed state in the TUI;
     // the message below already explains WHY to the owner).

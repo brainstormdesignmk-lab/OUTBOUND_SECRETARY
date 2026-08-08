@@ -1389,8 +1389,8 @@ assert('turn2 NOT the same confirm question (loop broken)',
 assert('turn2 pendingConfirmation cleared',
   priceLoopSession.pendingConfirmation === null || priceLoopSession.pendingConfirmation === undefined,
   `Got: ${JSON.stringify(priceLoopSession.pendingConfirmation)}`);
-assert('turn2 advances to next field (totalSqm, rent order)',
-  t2.type === 'QUESTION' && t2.nextField === 'totalSqm',
+assert('turn2 advances to next field (availableFrom, rent order)',
+  t2.type === 'QUESTION' && t2.nextField === 'availableFrom',
   `Got: ${t2.type} — nextField=${t2.nextField} — "${t2.text}"`);
 
 console.log('\n========================================');

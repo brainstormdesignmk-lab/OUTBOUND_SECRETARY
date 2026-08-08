@@ -128,7 +128,7 @@ console.log('\n=== C: e2e price correction ===');
 function freshRentSession() {
   return {
     adMemory: { transactionType: 'rent', propertyType: 'apartment', propertyLabel: 'станот' },
-    collectedData: { cooperationAccepted: true, transactionType: 'rent', monthlyRent: 350, monthlyRentConfidence: 0.95 },
+    collectedData: { cooperationAccepted: true, transactionType: 'rent', monthlyRent: 350, monthlyRentConfidence: 0.95, availableFrom: '2026-06-01', availableFromConfidence: 0.95 },
     messages: [{ role: 'model', text: 'Одлично. Колкава е вкупната квадратура по имотен лист?' }],
     phone: '+38970123456'
   };
@@ -238,7 +238,7 @@ console.log('\n=== D: correction during another field\'s pending confirmation ==
 {
   const s = {
     adMemory: { transactionType: 'rent', propertyType: 'apartment', propertyLabel: 'станот' },
-    collectedData: { cooperationAccepted: true, transactionType: 'rent', monthlyRent: 350, monthlyRentConfidence: 0.95 },
+    collectedData: { cooperationAccepted: true, transactionType: 'rent', monthlyRent: 350, monthlyRentConfidence: 0.95, availableFrom: '2026-06-01', availableFromConfidence: 0.95 },
     questionAttempts: {},
     pendingFollowUp: null,
     pendingConfirmation: { field: 'totalSqm', value: 63 },
@@ -274,7 +274,7 @@ console.log('\n=== D: correction during another field\'s pending confirmation ==
 {
   const s = {
     adMemory: { transactionType: 'rent', propertyType: 'apartment', propertyLabel: 'станот' },
-    collectedData: { cooperationAccepted: true, transactionType: 'rent', monthlyRent: 350, monthlyRentConfidence: 0.95 },
+    collectedData: { cooperationAccepted: true, transactionType: 'rent', monthlyRent: 350, monthlyRentConfidence: 0.95, availableFrom: '2026-06-01', availableFromConfidence: 0.95 },
     questionAttempts: {},
     pendingFollowUp: null,
     pendingConfirmation: { field: 'totalSqm', value: 63 },

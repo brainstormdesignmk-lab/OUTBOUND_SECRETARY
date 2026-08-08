@@ -70,6 +70,7 @@ export function getNextMissingField(data) {
 
   const rentOrder = [
     "monthlyRent",
+    "availableFrom",
     "totalSqm",
     "terraceSqm",
     "bedrooms",
@@ -159,6 +160,7 @@ export function getQuestion(field, propertyType, hasScraperPhotos = false, photo
     available: `Дали ${typeLabel} е се уште достапен?`,
     cleanPrice: `Која би била последната чиста цена за ${typeLabel}?`,
     monthlyRent: `Која е месечната кирија за ${typeLabel}?`,
+    availableFrom: `Од кога ќе биде слободен ${typeLabel}?`,
     totalSqm: `Колкава е вкупната квадратура по имотен лист?`,
     terraceSqm: `Дали има тераса и колку м2 е?`,
     bedrooms: `Колку спални соби има ${typeLabel}?`,

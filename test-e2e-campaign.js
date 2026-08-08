@@ -365,9 +365,15 @@ async function runScenario3() {
   // Turn 1: Monthly rent
   res = await sendMessage(session, "500 evra mesecno");
   assert("S3-T1: type=QUESTION", res.type === "QUESTION", `got ${res.type}`);
-  assert("S3-T1: nextField=totalSqm", res.nextField === "totalSqm", `got ${res.nextField}`);
+  assert("S3-T1: nextField=availableFrom (rent order: monthlyRent → availableFrom → totalSqm)", res.nextField === "availableFrom", `got ${res.nextField}`);
   assert("S3-T1: monthlyRent=500", session.collectedData.monthlyRent === 500, `got ${session.collectedData.monthlyRent}`);
   assert("S3-T1: cleanPrice NOT extracted", session.collectedData.cleanPrice === undefined, `got ${session.collectedData.cleanPrice}`);
+
+  // Turn 1b: Available-from date
+  res = await sendMessage(session, "od 1.6.2026");
+  assert("S3-T1b: type=QUESTION", res.type === "QUESTION", `got ${res.type}`);
+  assert("S3-T1b: nextField=totalSqm", res.nextField === "totalSqm", `got ${res.nextField}`);
+  assert("S3-T1b: availableFrom=2026-06-01", session.collectedData.availableFrom === "2026-06-01", `got ${session.collectedData.availableFrom}`);
 
   // Turn 2: Total sqm
   res = await sendMessage(session, "55 kvadrati");

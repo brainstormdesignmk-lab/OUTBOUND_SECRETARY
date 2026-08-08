@@ -101,6 +101,7 @@ function bedroomSession() {
       cooperationAccepted: true,
       transactionType: 'rent',
       monthlyRent: 350,
+      availableFrom: '2026-06-01',
       totalSqm: 55,
       hasTerrace: true,
       terraceSqm: 3

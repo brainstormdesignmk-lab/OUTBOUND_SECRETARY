@@ -607,8 +607,8 @@ assert('GR11: accept batch asked the first rent field (monthlyRent)',
   `got ${JSON.stringify(e12AnaMsgs)}`);
 await e12.onOwnerMessage('3571074', '350 evra mesecno'); // answer price (sent)
 await new Promise(r => setTimeout(r, 90));
-assert('GR11: price answer moved on to the totalSqm question (sent)',
-  e12AnaMsgs.length === 3 && /квадратур/.test(e12AnaMsgs[2]),
+assert('GR11: price answer moved on to the availableFrom question (sent)',
+  e12AnaMsgs.length === 3 && /слободен/.test(e12AnaMsgs[2]),
   `got ${JSON.stringify(e12AnaMsgs)}`);
 // The phantom-attempt batch: 3 no-answer messages within ONE grace window.
 // Pre-fix each intermediate one asked (and dropped) a totalSqm question,
@@ -618,14 +618,14 @@ await e12.onOwnerMessage('3571074', 'super');
 await e12.onOwnerMessage('3571074', 'odlicno');
 await new Promise(r => setTimeout(r, 90));          // batch: only last reply sent
 const s12 = e12.getSession('3571074');
-assert('GR11: dropped intermediate asks did NOT skip totalSqm',
-  s12.collectedData.totalSqmSkipped !== true,
-  `totalSqmSkipped=${JSON.stringify(s12.collectedData.totalSqmSkipped)}`);
-assert('GR11: no phantom attempts leaked to later fields (terraceSqm untouched)',
-  (s12.questionAttempts.terraceSqm || 0) === 0,
+assert('GR11: dropped intermediate asks did NOT skip availableFrom',
+  s12.collectedData.availableFromSkipped !== true,
+  `availableFromSkipped=${JSON.stringify(s12.collectedData.availableFromSkipped)}`);
+assert('GR11: no phantom attempts leaked to later fields (totalSqm untouched)',
+  (s12.questionAttempts.totalSqm || 0) === 0,
   `attempts=${JSON.stringify(s12.questionAttempts)}`);
-assert('GR11: the final batch reply still asks the total square meters',
-  e12AnaMsgs.length === 4 && /квадратур/.test(e12AnaMsgs[3]),
+assert('GR11: the final batch reply still asks the available-from date',
+  e12AnaMsgs.length === 4 && /слободен/.test(e12AnaMsgs[3]),
   `got ${JSON.stringify(e12AnaMsgs)}`);
 
 // ============================================================

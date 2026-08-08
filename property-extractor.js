@@ -988,6 +988,32 @@ export function extractTerraceNumber(text) {
 // Parse year built
 // ========================================
 export function parseYearBuilt(text) {
+  // DATE-YEAR GUARD (reported with the available-from feature): a year that is
+  // the THIRD component of a numeric date ("од 1.6.2026" — move-in/available-
+  // from date, "15/03/2027") is the year OF A DATE, NOT the construction year.
+  // scanHistoryForField joins ALL owner messages and re-runs the yearBuilt
+  // extractor — without this guard, the owner's availableFrom answer would
+  // backfill yearBuilt=2026 from "od 1.6.2026" and the construction-year
+  // question would be silently skipped. Construction years are NEVER written
+  // as day.month.year, so the date segment is safely removed before the year
+  // patterns below run. (A thousands-separated price "85.000" can't match:
+  // the third group needs a separator + 2-4 digits, i.e. exactly a date.)
+  // ALSO stripped: "od 15.09." / "од 1.6." — the availableFrom answer in
+  // day.month form (no year) would otherwise leak through the 2-digit year
+  // fallback as 2015/2001. Day.month WITHOUT the od/од marker is NOT stripped
+  // — "8/10" is a compound floor answer and keeps its pre-existing path.
+  const dateYearMatch = text.match(/(?:^|[^.\d/-])\d{1,2}[.\-/]\d{1,2}[.\-/](\d{2,4})(?![.\d/-])/);
+  if (dateYearMatch) {
+    text = text.replace(dateYearMatch[0], ' ');
+  } else {
+    // "od 15.09." ends with a trailing dot (the sentence-final period) —
+    // allow one optional trailing separator after day.month, then a
+    // non-digit boundary. "od 15.09.2026" was already stripped above.
+    const odDayMonth = text.match(/(?:od|од)\s*\d{1,2}[.\-/]\d{1,2}(?:[.\-/]|$)(?!\d)/i);
+    if (odDayMonth) {
+      text = text.replace(odDayMonth[0], ' ');
+    }
+  }
   // Try word-boundary year first: "2015 godina", "izgradena 2015", "2015 година"
   // The \b ensures we match standalone year numbers, not part of a larger number.
   const exactYearMatch = text.match(/\b(19\d{2}|20\d{2})\b/);
@@ -1184,4 +1210,167 @@ export function parseOrientation(text) {
   if (/istok|исток|east/i.test(normalized)) orientations.push('istok');
   if (/zapad|запад|west/i.test(normalized)) orientations.push('zapad');
   return orientations.length > 0 ? orientations : null;
+}
+
+// ========================================
+// AVAILABLE-FROM DATE PARSING (reported requirement, rent leads)
+// The rent flow asks "Од кога ќе биде слободен?" right after availability is
+// confirmed (and even when the property is NOT available now — "не е
+// достапен, од 1 јануари е слободен" — the listing goes HIDDEN until that
+// date, then shows on the customer page). Owner answers:
+//   "ОД 1 ЈАНУАРИ Е СЛОБОДЕН" → next January 1st
+//   "слободен од март"        → next March 1st
+//   "od 15ti" / "од 15"       → next occurrence of day 15
+//   "од 1.6.2026" / "1.6."    → June 1st (day.month[.year] — Macedonian
+//                                numeric date order)
+//   "sledniot mesec"          → first of next month
+//   "одма" / "сега" / "веднаш" → 'immediate' (free right away)
+// Returns an ISO date string (YYYY-MM-DD), the literal 'immediate', or null
+// when no date is present. All date/days roll FORWARD to the next occurrence
+// (a date in the past means next year/month — "од 1 јануари" said in August
+// is next January). This is the one genuinely new parsing category in the
+// codebase (nothing else parses Macedonian dates/months).
+// ========================================
+const AVAILABLE_FROM_MONTH_NUM = {
+  januari: 1, 'јануари': 1,
+  fevruari: 2, 'февруари': 2,
+  mart: 3, 'март': 3,
+  april: 4, 'април': 4,
+  maj: 5, 'мај': 5,
+  juni: 6, 'јуни': 6,
+  juli: 7, 'јули': 7,
+  avgust: 8, 'август': 8,
+  septemvri: 9, 'септември': 9,
+  oktomvri: 10, 'октомври': 10,
+  noemvri: 11, 'ноември': 11,
+  dekemvri: 12, 'декември': 12
+};
+
+const AVAILABLE_FROM_MONTH_RE = /januari|јануари|fevruari|февруари|mart|март|april|април|maj|мај|juni|јуни|juli|јули|avgust|август|septemvri|септември|oktomvri|октомври|noemvri|ноември|dekemvri|декември/i;
+
+function _isoDate(d) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+// Next occurrence of (day, month) — rolls to next year when the candidate is
+// in the past. month is 1-12, day 1-31.
+function _nextMonthDay(day, month) {
+  const today = new Date();
+  const now = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  let candidate = new Date(today.getFullYear(), month - 1, day);
+  if (candidate < now) candidate = new Date(today.getFullYear() + 1, month - 1, day);
+  return _isoDate(candidate);
+}
+
+// Next occurrence of a bare day-of-month ("od 15ti") — this month if still
+// ahead, else next month. Handles month-length overflow naturally via Date.
+function _nextDay(day) {
+  const today = new Date();
+  const now = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  let candidate = new Date(today.getFullYear(), today.getMonth(), day);
+  if (candidate < now) candidate = new Date(today.getFullYear(), today.getMonth() + 1, day);
+  return _isoDate(candidate);
+}
+
+export function parseAvailableFromDate(text) {
+  const t = String(text || '').trim();
+  if (!t) return null;
+
+  // 1. IMMEDIATE — the property is free right away (no blocked_until needed).
+  if (/(?:^|[^a-zа-я])(?:odma|одма|sega|сега|vednash|веднаш|od denes|од денес|denes|денес)(?:$|[^a-zа-я])/i.test(t)) {
+    return 'immediate';
+  }
+
+  // 2. NEXT MONTH — "sledniot mesec" / "следниот месец" → 1st of next month.
+  if (/(?:sledniot|следниот)\s+(?:mesec|месец)/i.test(t)) {
+    const today = new Date();
+    return _isoDate(new Date(today.getFullYear(), today.getMonth() + 1, 1));
+  }
+
+  // QUANTITY-UNIT LOOKAHEAD (reviewer finding): "од N <unit>" — "тераса од
+  // 3 m2", "од 3.5 m2" (decimal terrace size), "од 12 месеци" (rent term),
+  // "од 2 спрата" (floors) — is a QUANTITY phrase, NOT an available-from
+  // date. Without the guard, the day-only and numeric rules below read the
+  // "N" as a day-of-month and phantom-extract availableFrom (wrong
+  // blocked_until in the CSV). Stems catch all inflections. Only true date
+  // answers ("od 15ti", "od 15 ќе биде слободен", "од 1.6.2026") survive.
+  const AVAILABLE_FROM_UNIT_LOOKAHEAD = '(?!\\s*(?:m2|м2|kv|кв|kvadrat|квадрат|kvadr|квадр|teras|терас|evr|евр|iljad|илјад|mesec|месец|nedel|недел|godin|годин|sprat|спрат|kat|кат|kata|ката|kati|кати|den|ден|cas|час|sati|сати))';
+
+  // 3. NUMERIC DATE — "od 1.6.2026", "од 15.06", "od 1.6." (day.month[.year]).
+  //    REQUIRES the od/од marker so a floor answer ("8/10") or a bare number
+  //    can never become a date. Two separators (. or / or -) accepted.
+  const numMatch = t.match(new RegExp('(?:od|од)\\s*(\\d{1,2})[.\\-/](\\d{1,2})(?:[.\\-/](\\d{2,4}))?' + AVAILABLE_FROM_UNIT_LOOKAHEAD, 'i'));
+  if (numMatch) {
+    const day = parseInt(numMatch[1], 10);
+    const month = parseInt(numMatch[2], 10);
+    if (day >= 1 && day <= 31 && month >= 1 && month <= 12) {
+      if (numMatch[3]) {
+        const year = parseInt(numMatch[3], 10);
+        if (year >= 2020 && year <= 2100) {
+          // Respect the explicit year (no roll-forward for a clearly stated
+          // past date — the owner said that year on purpose).
+          return _isoDate(new Date(year, month - 1, day));
+        }
+      }
+      return _nextMonthDay(day, month);
+    }
+  }
+
+  // 4. DAY + MONTH — "od 1 januari", "1vi јануари", "15ти март",
+  //    "од 15 ти септември" (digit + optional ordinal suffix + month word).
+  //    The (?!\d) lookahead keeps a 4-digit year ("od 2026") from matching
+  //    as day 20. Requires a REAL month word after the day.
+  //    SUFFIX SET is bilingual: Latin "vi/ti/ri/mi" ("15ti mart") AND Cyrillic
+  //    "ви/ти/ри/ми" ("15ти март") — Viber owners type both scripts.
+  const dayMonth = t.match(/(?:od|од)?\s*(\d{1,2})(?!\d)\s*(?:vi|ви|ri|ри|ti|ти|mi|ми|и|ot|от)?\s*([a-zа-я]{2,})/i);
+  if (dayMonth) {
+    const monthNum = AVAILABLE_FROM_MONTH_NUM[dayMonth[2].toLowerCase()];
+    if (monthNum) {
+      const day = parseInt(dayMonth[1], 10);
+      if (day >= 1 && day <= 31) return _nextMonthDay(day, monthNum);
+    }
+  }
+
+  // 5. MONTH ONLY — "od mart", "слободен од март", "од септември" → 1st.
+  //    Month word must be a standalone token (letter-boundary) so "март"
+  //    never matches inside "мартин" (a name) or "марта".
+  const monthOnly = t.match(new RegExp('(?:^|[^a-zа-я])(' + AVAILABLE_FROM_MONTH_RE.source + ')(?:$|[^a-zа-я])', 'i'));
+  if (monthOnly) {
+    const monthNum = AVAILABLE_FROM_MONTH_NUM[monthOnly[1].toLowerCase()];
+    if (monthNum) return _nextMonthDay(1, monthNum);
+  }
+
+  // 6. DAY ONLY — "od 15ti" / "од 15" / "од 15-ти" → next occurrence of
+  //    that day. Requires the od/од marker AND (?!\d) so "od 2026" (year)
+  //    never matches as day 20. Day 1-31 only. BILINGUAL suffix set (Latin
+  //    "15ti" AND Cyrillic "15ти" — Viber owners type both scripts): the
+  //    suffix must be followed by end-of-string or a non-letter, so the
+  //    Latin "ti" in "15ti" (end of token) matches while "15t" never does.
+  //    UNIT GUARD: "od 3 m2"/"од 12 месеци" are quantities, not dates.
+  //    DECIMAL GUARD: "од 3.5 m2" (terrace size) — rule 3 rejects it as a
+  //    date (unit guard) and rule 6 must not re-read "od 3" as a day. A
+  //    bare-day answer is NEVER followed by a decimal point + digit, and
+  //    day.month forms are already consumed by rule 3, so rejecting is safe.
+  const dayOnly = t.match(new RegExp('(?:od|од)\\s*(\\d{1,2})(?!\\d)(?!\\s*[.,]\\d)' + AVAILABLE_FROM_UNIT_LOOKAHEAD + '\\s*(?:vi|ви|ri|ри|ti|ти|mi|ми|и|ot|от)?(?:$|[^a-zа-я])', 'i'));
+  if (dayOnly) {
+    const day = parseInt(dayOnly[1], 10);
+    if (day >= 1 && day <= 31) return _nextDay(day);
+  }
+
+  return null;
+}
+
+// Format an availableFrom value (ISO date or 'immediate') for Ana's reply
+// text — "2027-01-01" → "1 јануари 2027", "immediate" → "веднаш".
+const AVAILABLE_FROM_MONTH_NAMES = ['', 'јануари', 'февруари', 'март', 'април', 'мај', 'јуни', 'јули', 'август', 'септември', 'октомври', 'ноември', 'декември'];
+export function formatAvailableFromDate(value) {
+  if (value === 'immediate') return 'веднаш';
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(value || ''));
+  if (!m) return String(value || '');
+  const day = parseInt(m[3], 10);
+  const monthName = AVAILABLE_FROM_MONTH_NAMES[parseInt(m[2], 10)] || '';
+  return `${day} ${monthName} ${m[1]}`;
 }

@@ -104,6 +104,7 @@ export function saveToCSV(data, phone, propertyId) {
   if (isRent) {
     headers = headers.concat([
       'monthlyRent',
+      'availableFrom',
       'depositMonths',
       'minimumStayMonths',
       'advanceRentMonths',
@@ -125,7 +126,7 @@ export function saveToCSV(data, phone, propertyId) {
     'furnished', 'furnishedLevel',
     'yearBuilt', 'renovated', 'renovationYear',
     'documentationClean', 'documentationIssues',
-    'photosPermission', 'photosSource', 'photosStatus', 'photosPending',
+    'photosPermission', 'photosSource', 'photosStatus', 'photosPending', 'photosManagerReview',
     'ownerName', 'address'
   ]);
 
@@ -141,6 +142,7 @@ export function saveToCSV(data, phone, propertyId) {
     const commission = data.monthlyRent ? calculateRentCommission(data.monthlyRent) : null;
     row = row.concat([
       data.monthlyRent || '',
+      data.availableFrom || '',
       data.depositMonths || rentDefaults.depositMonths,
       data.minimumStayMonths || rentDefaults.minimumStayMonths,
       data.advanceRentMonths || rentDefaults.advanceRentMonths,
@@ -182,6 +184,7 @@ export function saveToCSV(data, phone, propertyId) {
     data.photosSource || '',
     data.photosStatus || '',
     csvBool(data.photosPending),
+    csvBool(data.photosManagerReview),
     data.ownerName || '',
     data.address || ''
   ]);
@@ -196,8 +199,17 @@ export function saveToCSV(data, phone, propertyId) {
     const existing = fs.readFileSync(csvPath, 'utf8');
     const existingLines = existing.split('\n');
     const firstLine = existingLines[0] || '';
-    if (firstLine.includes('parkingSeparate') && firstLine.includes('parkingPrice')) {
-      // Header already has the new columns — append normally
+    // TYPE-AWARE HEADER COMPATIBILITY (reported): the append check must test
+    // the CURRENT call's header columns — the rent and sale layouts differ
+    // (rent: monthlyRent/availableFrom/deposit…; sale: a single price column).
+    // A RENT-header file receiving a SALE row (or vice versa) must go through
+    // migration, otherwise the row misaligns with the on-disk header. Checking
+    // only a few known column names let a rent header (which contains
+    // availableFrom too) pass for a SALE write and append a misaligned row.
+    const existingHeaderCols = firstLine.split(',');
+    const headerCompatible = headers.every(h => existingHeaderCols.includes(h));
+    if (headerCompatible) {
+      // Header already has ALL current columns — append normally
       fs.appendFileSync(csvPath, line);
     } else if (existing.trim() === '') {
       // File exists but is empty (0 bytes / blank) — write header + line
@@ -205,11 +217,12 @@ export function saveToCSV(data, phone, propertyId) {
       fs.writeFileSync(csvPath, headerLine + '\n' + line);
     } else {
       // Header migration: the existing CSV was written before the CURRENT
-      // header gained columns — parkingSeparate/parkingPrice now, and
-      // photosPending in an earlier change (the on-disk file predates it).
-      // Rewrite with the new header and re-map every old row BY COLUMN NAME,
+      // header gained columns — parkingSeparate/parkingPrice, availableFrom,
+      // and photosPending in earlier changes (the on-disk file predates
+      // them). Rewrite with the new header and re-map every old row BY
+      // COLUMN NAME,
       // so any column missing from the old file becomes empty. This stays
-      // correct for sale (old 32 cols → new 35), rent (old 40 → new 42) and
+      // correct for sale (old 32 cols → new 35), rent (old 40 → new 43) and
       // any column added at any point in time. Rows whose part count deviates
       // from the OLD header length (e.g. a comma inside an address value)
       // are left byte-identical to avoid misalignment.

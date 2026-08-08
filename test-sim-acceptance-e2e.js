@@ -422,11 +422,18 @@ async function runPartE() {
   // вредност е 250?" — the reported unnecessary re-ask). The reply is still a
   // QUESTION — the NEXT field (totalSqm) — proving the flow advanced.
   assert('E2: first reply advances to the next field (evra price = HIGH, no confirm re-ask)',
-    e2res1.type === 'QUESTION' && e2res1.nextField === 'totalSqm',
+    e2res1.type === 'QUESTION' && e2res1.nextField === 'availableFrom',
     `got ${e2res1.type} — nextField=${e2res1.nextField} — "${e2res1.text}"`);
   assert('E2: monthlyRent stored on first turn (no confirmation pending)',
     e2.collectedData.monthlyRent === 250 && !e2.pendingConfirmation,
     `got monthlyRent=${JSON.stringify(e2.collectedData.monthlyRent)}, pending=${JSON.stringify(e2.pendingConfirmation)}`);
+  // availableFrom sits right after monthlyRent in the rent field order —
+  // answer the date question, then the flow advances to totalSqm.
+  const e2resDate = await sendMessage(e2, 'od 1 januari');
+  assert('E2: availableFrom captured after rent answer (rent order → totalSqm)',
+    e2.collectedData.availableFrom === '2027-01-01' &&
+      e2resDate.type === 'QUESTION' && e2resDate.nextField === 'totalSqm',
+    `got availableFrom=${JSON.stringify(e2.collectedData.availableFrom)}, next=${e2resDate.nextField}, "${(e2resDate.text || '').slice(0, 60)}"`);
   const e2res2 = await sendMessage(e2, 'da');
   assert('E2: flow advanced after first turn (not stuck)',
     e2res2.type === 'QUESTION',

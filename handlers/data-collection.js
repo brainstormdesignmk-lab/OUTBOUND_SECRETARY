@@ -42,6 +42,7 @@ function confirmsAvailability(text) {
 const CONFIRMATORY_QUESTIONS = {
   cleanPrice: (label) => `Само да потврдам, која би била последната чиста цена за ${label}?`,
   monthlyRent: (label) => `Само да потврдам, колкава е месечната кирија за ${label}?`,
+  availableFrom: (label) => `Само да потврдам, од кога ќе биде слободен ${label}?`,
   totalSqm: () => `Само да потврдам, колкава е вкупната квадратура?`,
   terraceSqm: () => `Само да потврдам, дали има тераса?`,
   bedrooms: (label) => `Само да потврдам, колку спални соби има ${label}?`,

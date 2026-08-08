@@ -65,8 +65,8 @@ assert('A1: stored at HIGH confidence (no confirmation round-trip)',
 assert('A1: no pending confirmation left behind',
   rentSession.pendingConfirmation === null || rentSession.pendingConfirmation === undefined,
   `got pending=${JSON.stringify(rentSession.pendingConfirmation)}`);
-assert('A1: reply moves ON to totalSqm — NOT a monthlyRent re-ask',
-  r1.type === 'QUESTION' && r1.nextField === 'totalSqm' && !/кириј/.test(r1.text || ''),
+assert('A1: reply moves ON to availableFrom (rent order) — NOT a monthlyRent re-ask',
+  r1.type === 'QUESTION' && r1.nextField === 'availableFrom' && !/кириј/.test(r1.text || ''),
   `got type=${r1.type} next=${r1.nextField} text=${JSON.stringify((r1.text || '').slice(0, 70))}`);
 assert('A1: no commission pitch in the reply',
   !/барате/.test(r1.text || ''),
@@ -149,8 +149,8 @@ assert('D1: "da" accepts cooperation',
 assert('D1: monthlyRent backfilled from mentionedPrice (no price re-ask)',
   backfillRent.collectedData.monthlyRent === 350,
   `got monthlyRent=${JSON.stringify(backfillRent.collectedData.monthlyRent)}`);
-assert('D1: next question is totalSqm, NOT a monthlyRent re-ask',
-  d1.type === 'QUESTION' && d1.nextField === 'totalSqm' && !/кириј/.test(d1.text || ''),
+assert('D1: next question is availableFrom (rent order), NOT a monthlyRent re-ask',
+  d1.type === 'QUESTION' && d1.nextField === 'availableFrom' && !/кириј/.test(d1.text || ''),
   `got type=${d1.type} next=${d1.nextField} text=${JSON.stringify((d1.text || '').slice(0, 70))}`);
 
 // Backfill must never overwrite an already-collected price
@@ -216,8 +216,8 @@ assert('E1: exactly ONE Ana reply for the 4-message batch',
 assert('E1: monthlyRent=350 stored from the batch (owner clearly said it)',
   s.collectedData.monthlyRent === 350,
   `got monthlyRent=${JSON.stringify(s.collectedData.monthlyRent)}`);
-assert('E1: visible reply asks totalSqm — NOT a monthlyRent re-ask',
-  /квадратур/.test(sent[2]) && !/кириј/.test(sent[2]),
+assert('E1: visible reply asks availableFrom (rent order) — NOT a monthlyRent re-ask',
+  /слободен/.test(sent[2]) && !/кириј/.test(sent[2]),
   `got reply=${JSON.stringify(sent[2])}`);
 assert('E1: no commission pitch in the reply',
   !/барате/.test(sent[2]),
