@@ -100,6 +100,7 @@ function bedroomSession() {
     collectedData: {
       cooperationAccepted: true,
       transactionType: 'rent',
+      tenantPreferences: { preferred: [], excluded: [], notes: '' },
       monthlyRent: 350,
       availableFrom: '2026-06-01',
       totalSqm: 55,

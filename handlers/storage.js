@@ -127,7 +127,16 @@ export function saveToCSV(data, phone, propertyId) {
     'yearBuilt', 'renovated', 'renovationYear',
     'documentationClean', 'documentationIssues',
     'photosPermission', 'photosSource', 'photosStatus', 'photosPending', 'photosManagerReview',
-    'ownerName', 'address'
+    'ownerName', 'address',
+    // INTELLIGENCE LAYER (reported requirement): tenant preferences,
+    // per-m² price, derived owner/selling price, price-warning flag,
+    // broker comment + public description. brokerComment/descriptionPublic
+    // contain free text (may include commas) — the migration re-mapper
+    // leaves misaligned rows byte-identical (pre-existing comma-in-address
+    // convention), and these are the LAST columns so they never shift
+    // earlier values.
+    'tenantPreferences', 'pricePerSqm', 'ownerPrice', 'sellingPrice', 'priceWarning',
+    'brokerComment', 'descriptionPublic'
   ]);
 
   let row = [
@@ -186,7 +195,19 @@ export function saveToCSV(data, phone, propertyId) {
     csvBool(data.photosPending),
     csvBool(data.photosManagerReview),
     data.ownerName || '',
-    data.address || ''
+    data.address || '',
+    // INTELLIGENCE LAYER columns — tenantPreferences serialized compactly
+    // (JSON with commas would split the CSV row; the semicolon form keeps
+    // the row parseable and the notes preserve the owner's exact wording).
+    data.tenantPreferences
+      ? `pref:${(data.tenantPreferences.preferred || []).join(';')};excl:${(data.tenantPreferences.excluded || []).join(';')};${data.tenantPreferences.notes || ''}`
+      : '',
+    csvNum(data.pricePerSqm),
+    csvNum(data.ownerPrice),
+    csvNum(data.sellingPrice),
+    csvBool(data.priceWarning),
+    String(data.brokerComment || '').replace(/\n/g, ' '),
+    String(data.descriptionPublic || '').replace(/\n/g, ' ')
   ]);
 
   const exists = fs.existsSync(csvPath);

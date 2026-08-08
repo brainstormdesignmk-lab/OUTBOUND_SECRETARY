@@ -81,7 +81,7 @@ console.log('========================================\n');
 
 const rentSession = {
   adMemory: { transactionType: 'rent', propertyType: 'apartment', propertyLabel: 'станот' },
-  collectedData: { cooperationAccepted: true, transactionType: 'rent', monthlyRent: 350, monthlyRentConfidence: 0.95, availableFrom: '2026-06-01', availableFromConfidence: 0.95 },
+  collectedData: { cooperationAccepted: true, transactionType: 'rent', tenantPreferences: { preferred: [], excluded: [], notes: '' }, monthlyRent: 350, monthlyRentConfidence: 0.95, availableFrom: '2026-06-01', availableFromConfidence: 0.95 },
   messages: [
     { role: 'model', text: 'Одлично. Ќе ми бидат потребни неколку информации за внес на вашата недвижност во системот. Колкава е вкупната квадратура по имотен лист?' }
   ],

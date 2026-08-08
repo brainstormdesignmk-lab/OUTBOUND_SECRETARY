@@ -41,7 +41,11 @@ function createSession(scenario = 'sale', { preAccept = false } = {}) {
     collectedData: {
       cooperationAccepted: preAccept ? false : true,
       transactionType: isRent ? 'rent' : 'sale',
-      propertyType: 'apartment'
+      propertyType: 'apartment',
+      // tenantPreferences pre-filled so rent-flow suites keep their original
+      // question sequences (the tenant-pref flow is covered by
+      // test-property-intelligence.js); inert for sale leads.
+      tenantPreferences: { preferred: [], excluded: [], notes: '' }
     },
     messages: preAccept ? [
       { role: 'model', text: isRent

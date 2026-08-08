@@ -14,10 +14,12 @@ import {
   extractFirstNumber,
   countBedrooms,
   extractPrice,
+  extractPricePerSqm,
   parseYearBuilt,
   parseOrientation,
   parseAvailableFromDate
 } from './property-extractor.js';
+import { extractTenantPreferences } from './property-intelligence.js';
 
 // ========================================
 // EXTRACTION RULES
@@ -28,8 +30,41 @@ function extractCleanPrice(u, data) {
   // Skip if this is a rental (transactionType='rent') OR if monthlyRent already captured
   // (handles case during persuasion when transactionType isn't set yet but price is rent amount)
   if (data.transactionType === 'rent' || data.monthlyRent !== undefined) return null;
+  // PER-SQM PRICE GUARD (reported requirement): "2000 e za m2" / "2000 evra
+  // za m2" quotes the price PER M², not the total — extractPrice would grab
+  // 2000 as cleanPrice (wrong; the intelligence layer derives the owner
+  // price as sqm × pricePerSqm). A per-m² phrase must NEVER become
+  // cleanPrice — extractPricePerSqm owns those messages. "2000 e za m2,
+  // vkupno 185000" still extracts the total via extractPrice below.
+  if (extractPricePerSqm(u) !== null && !/vkupno|вкупно|total|ukupno/i.test(u)) return null;
   const price = extractPrice(u);
   return price !== null ? { cleanPrice: price } : null;
+}
+
+// ========================================
+// TENANT PREFERENCES (reported requirement, rent leads): "НЕ САКАМ МИЛЕНИЦИ
+// И САМОХРАНИ МАЈКИ" (the type of clientele should be MEMORIZED — students,
+// families, foreigners, singles, employed, single parents, pensioners,
+// pets allowed/no-pets). Asked in DATA_COLLECTION right after availability;
+// the answer is stored as { preferred[], excluded[], notes } and written
+// into the broker-comment section (property-intelligence.js). Rent-only:
+// sale leads never ask tenant-profile questions.
+// ========================================
+function extractTenantPrefs(u, data) {
+  if (data.transactionType !== 'rent') return null;
+  if (data.tenantPreferences !== undefined && data.tenantPreferences !== null) return null;
+  const tp = extractTenantPreferences(u);
+  return tp !== null ? { tenantPreferences: tp } : null;
+}
+
+function extractPricePerSqmField(u, data) {
+  // SALE-ONLY (the per-m² price is a SALE concept; rent asks monthly rent).
+  // Skip if transactionType is rent — a rent message "2000 e za m2" would
+  // be the owner describing the listing, not a monthly rent.
+  if (data.transactionType === 'rent') return null;
+  if (data.pricePerSqm !== undefined && data.pricePerSqm !== null) return null;
+  const p = extractPricePerSqm(u);
+  return p !== null ? { pricePerSqm: p } : null;
 }
 
 function extractMonthlyRent(u, data) {
@@ -844,7 +879,9 @@ function extractDocumentationClean(u, data) {
 // ========================================
 const EXTRACTION_RULES = [
   extractCleanPrice,
+  extractPricePerSqmField,
   extractMonthlyRent,
+  extractTenantPrefs,
   extractAvailableFrom,
   extractTotalSqm,
   extractBedrooms,
@@ -939,7 +976,13 @@ const FIELD_CONFIDENCE_KEYWORDS = {
   // numbers (sqm, price, floor).
   'availableFrom': /januar|јануар|fevruar|февруар|mart|март|april|април|maj|мај|juni|јуни|juli|јули|avgust|август|septemvri|септември|oktomvri|октомври|noemvri|ноември|dekemvri|декември|odma|одма|sega|сега|vednash|веднаш|sledniot|следниот|mesec|месец|od \d|од \d/i,
   'orientation': /orientacija|ориентација|strana|страна|jug|север|istok|запад|zapad|sever|jugoistok|jugozapad|severoistok|severozapad|исток|југ|североисток|северозапад|југоисток|југозапад|pravec|правец/i,
-  'terraceSqm': /terasa|тераса|teras|терас|тераси|terrace|m2|м2|kvadrati|квадрати/i
+  'terraceSqm': /terasa|тераса|teras|терас|тераси|terrace|m2|м2|kvadrati|квадрати/i,
+  // TENANT PREFERENCES — tenant-profile vocabulary is unambiguous: the
+  // extractor only fires on a matched category, so any extraction is a
+  // direct answer to "Каков тип на станари преферирате?" → HIGH.
+  'tenantPreferences': /stanari|станари|zakupci|закупци|klienti|клиенти|milenici|миленици|semejst|семејст|studenti|студенти|vraboten|вработен|samohran|самохран|penzioner|пензионер|stranci|странци|samci|самци|pensioner|пенсионер/i,
+  // PRICE PER M² — "e/е za m2" phrasings are an explicit per-sqm answer.
+  'pricePerSqm': /m2|м2|kvadrat|квадрат|kvadrata|квадрата/i
 };
 
 // Binary fields that require explicit keyword match for HIGH confidence
@@ -1195,7 +1238,9 @@ function extractTerrace(u, data) {
 // service.js and are not included here.
 const FIELD_TO_EXTRACTOR = {
   cleanPrice: extractCleanPrice,
+  pricePerSqm: extractPricePerSqmField,
   monthlyRent: extractMonthlyRent,
+  tenantPreferences: extractTenantPrefs,
   availableFrom: extractAvailableFrom,
   totalSqm: extractTotalSqm,
   bedrooms: extractBedrooms,

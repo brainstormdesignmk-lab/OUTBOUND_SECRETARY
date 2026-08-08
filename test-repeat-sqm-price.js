@@ -159,6 +159,7 @@ const sqmSession = {
   adMemory: { transactionType: 'rent', propertyType: 'apartment', propertyLabel: 'станот' },
   collectedData: {
     cooperationAccepted: true, transactionType: 'rent',
+    tenantPreferences: { preferred: [], excluded: [], notes: '' },
     monthlyRent: 350, monthlyRentConfidence: 0.95,
     availableFrom: '2026-06-01', availableFromConfidence: 0.95
   },
@@ -187,7 +188,7 @@ console.log('========================================\n');
 
 const priceSession = {
   adMemory: { transactionType: 'rent', propertyType: 'apartment', propertyLabel: 'станот' },
-  collectedData: { cooperationAccepted: true, transactionType: 'rent' },
+  collectedData: { cooperationAccepted: true, transactionType: 'rent', tenantPreferences: { preferred: [], excluded: [], notes: '' } },
   messages: [{ role: 'model', text: 'Која е месечната кирија за станот?' }],
   phone: '+38970123456'
 };
@@ -210,7 +211,7 @@ assert('E8: reply moves ON to availableFrom (rent order) — NOT a monthlyRent r
 // "350 TI KAZAV" (number-first order) behaves identically
 const priceSession2 = {
   adMemory: { transactionType: 'rent', propertyType: 'apartment', propertyLabel: 'станот' },
-  collectedData: { cooperationAccepted: true, transactionType: 'rent' },
+  collectedData: { cooperationAccepted: true, transactionType: 'rent', tenantPreferences: { preferred: [], excluded: [], notes: '' } },
   messages: [{ role: 'model', text: 'Која е месечната кирија за станот?' }],
   phone: '+38970123456'
 };

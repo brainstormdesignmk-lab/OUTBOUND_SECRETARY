@@ -71,6 +71,7 @@ export function getNextMissingField(data) {
   const rentOrder = [
     "monthlyRent",
     "availableFrom",
+    "tenantPreferences",
     "totalSqm",
     "terraceSqm",
     "bedrooms",
@@ -109,6 +110,13 @@ export function getNextMissingField(data) {
     if (isCommercial(data) && !isCommercialField(f)) return false;
     if (data.renovated === false && f === 'renovationYear') return false;
     if (data.hasTerrace === true && f === 'terraceSqm') return false;
+    // PER-SQM PRICE → cleanPrice derivable (spec requirement): when the
+    // owner quoted a €/m² price ("2000 e za m2"), the total owner price is
+    // DERIVED by the intelligence layer (sqm × pricePerSqm) — asking the
+    // cleanPrice question as well would be redundant. The per-sqm question
+    // itself is never a workflow field (extraction-only); totalSqm is still
+    // collected so the derivation has its second operand.
+    if (data.pricePerSqm !== undefined && data.pricePerSqm !== null && f === 'cleanPrice') return false;
     // FIELD CONFIDENCE: if field has value but confidence < 0.7, it's considered missing
     const fieldConf = data[f + 'Confidence'];
     if (fieldConf !== undefined && fieldConf < 0.7) return true;
@@ -132,6 +140,9 @@ export function getNextMissingField(data) {
 
     // When terrace is confirmed but size unknown, skip terraceSqm
     if (data.hasTerrace === true && field === 'terraceSqm') continue;
+
+    // PER-SQM PRICE → cleanPrice derivable (mirror of the missing-check).
+    if (data.pricePerSqm !== undefined && data.pricePerSqm !== null && field === 'cleanPrice') continue;
 
     // FIELD CONFIDENCE SYSTEM (Priority 7):
     // If a field has a value BUT its confidence < 0.7, treat it as missing
@@ -177,11 +188,29 @@ export function getQuestion(field, propertyType, hasScraperPhotos = false, photo
     renovationYear: 'Која година е реновиран?',
     documentationClean: 'Дали имате чист имотен лист?',
     photos: getPhotosQuestion(propertyType, hasScraperPhotos, photosStatus),
+    // TENANT PREFERENCES (reported requirement): the rent category asks
+    // about the preferred tenant profile right after availability. Several
+    // question variants exist (handlers/data-collection.js rotates them so
+    // the owner is not asked identically on a re-ask).
+    tenantPreferences: 'Каков тип на станари преферирате?',
     ownerName: 'Како да ве запишам?',
     address: 'Која е точната адреса?'
   };
+
   return questions[field] || null;
 }
+
+// ========================================
+// TENANT-PREFERENCE QUESTION VARIANTS (reported requirement: "couple of
+// variations of the type of clients preferred"). The DATA_COLLECTION flow
+// rotates these on repeated attempts so a re-ask never sounds robotic.
+// ========================================
+export const TENANT_PREF_QUESTIONS = [
+  'Каков тип на станари преферирате?',
+  'Дали имате преференци за профилот на закупците?',
+  'На какви лица би сакале да се издаде станот?',
+  'Дали постојат категории на станари што ги преферирате или не ги преферирате?'
+];
 
 function getPhotosQuestion(propertyType, hasScraperPhotos, photosStatus) {
   // If photos are already set, we shouldn't be asking this

@@ -8,7 +8,7 @@
 //   3. Complex stateful handlers (terrace, heating, photos, ownerName, address)
 //   4. History scan + close flow + field question flow (with re-ask phrasings)
 // ========================================
-import { getNextMissingField, getQuestion } from '../workflow.js';
+import { getNextMissingField, getQuestion, TENANT_PREF_QUESTIONS } from '../workflow.js';
 import { runGlobalExtraction, assessConfidence, confidenceToNumeric, scanHistoryForField, isExplicitPriceCorrection } from '../data-collector.js';
 import {
   extractTerraceNumber,
@@ -23,6 +23,14 @@ import { getNextPropertyId, createPropertyFolder, saveToCSV } from './storage.js
 import { transition } from './state-machine.js';
 import { isAvailabilityConfirmation } from './early-responses.js';
 import { photosMessages, isPhotosWorthManagerReview } from './awaiting-photos.js';
+import {
+  calculateSellingPrice,
+  buildBrokerComment,
+  buildEnhancedDescription,
+  buildPropertyJson
+} from '../property-intelligence.js';
+import { config } from '../config.js';
+import { submitPropertyToHermes } from '../hermes-client.js';
 
 // ========================================
 // STILL-AVAILABLE ACKNOWLEDGMENT — shared vocabulary, stricter guard
@@ -63,6 +71,7 @@ const CONFIRMATORY_QUESTIONS = {
   renovationYear: () => `Само да потврдам, која година е реновиран?`,
   documentationClean: () => `Само да потврдам, дали имате чист имотен лист?`,
   photos: () => `Само да потврдам, дали имате фотографии?`,
+  tenantPreferences: () => `Само да потврдам, каков тип на станари преферирате?`,
   ownerName: () => `Само да потврдам, како да ве запишам?`,
   address: () => `Само да потврдам, која е точната адреса?`
 };
@@ -1097,8 +1106,55 @@ function buildCloseResponse(session) {
     }
   }
 
+  // ========================================
+  // INTELLIGENCE LAYER (reported requirement — Ana = intelligence layer):
+  // 1. SELLING PRICE CALCULATOR — owner price + 2% agency, rounded UP to
+  //    500€ increments. Three scenarios: total price given, €/m² given
+  //    (ownerPrice = sqm × pricePerSqm), both given → price_warning flag
+  //    on mismatch. Garage sold separately is added to the owner price.
+  // 2. BROKER COMMENT — internal note (agency-staff only) with the pricing
+  //    breakdown + tenant preferences ("Сопственик бара: ...").
+  // 3. PUBLIC DESCRIPTION — scraped ad text + collected facts merged.
+  // 4. NORMALIZED PROPERTY JSON — the single structured object handed to
+  //    Hermes (POST /properties: validate/store, NO calculations there).
+  //    env-gated: only submitted when HERMES_URL is configured.
+  // ========================================
+  if (!isRent && (propertyData.cleanPrice || propertyData.pricePerSqm)) {
+    const pricing = calculateSellingPrice({
+      sqm: propertyData.totalSqm,
+      pricePerSqm: propertyData.pricePerSqm,
+      totalPrice: propertyData.cleanPrice,
+      garagePrice: propertyData.parkingSeparate ? propertyData.parkingPrice : undefined,
+      agencyPercent: config.SALE_COMMISSION_PERCENT
+    });
+    if (pricing) {
+      propertyData.ownerPrice = pricing.ownerPrice;
+      propertyData.agencyPercent = pricing.agencyPercent;
+      propertyData.commission = pricing.commission;
+      propertyData.sellingPrice = pricing.sellingPrice;
+      propertyData.priceWarning = pricing.priceWarning;
+      console.log(`[PRICING: owner=${pricing.ownerPrice}, commission=${pricing.commission}, selling=${pricing.sellingPrice} (scenario=${pricing.scenario}, warning=${pricing.priceWarning})]`);
+    }
+  }
+  propertyData.brokerComment = buildBrokerComment(propertyData);
+  propertyData.descriptionPublic = buildEnhancedDescription(propertyData, session.adMemory?.title || '');
+  propertyData.hermesPayload = buildPropertyJson(propertyData, session.adMemory, phone, propertyId);
+  // Fire-and-forget Hermes submission (no-op when HERMES_URL unset).
+  submitPropertyToHermes(propertyData.hermesPayload);
+
+  // Mirror the derived intelligence fields back onto the in-memory session
+  // so the lead state matches what was saved to the folder/CSV (the flow
+  // tests and any later follow-up read session.collectedData).
+  for (const k of ['ownerPrice', 'agencyPercent', 'sellingPrice', 'priceWarning',
+                   'brokerComment', 'descriptionPublic', 'hermesPayload']) {
+    if (propertyData[k] !== undefined) session.collectedData[k] = propertyData[k];
+  }
+
   createPropertyFolder(propertyId, propertyData);
-  saveToCSV(session.collectedData, phone, propertyId);
+  // Pass the ENRICHED propertyData (intelligence fields: ownerPrice,
+  // sellingPrice, brokerComment, tenantPreferences...) so the CSV row gets
+  // the derived columns — session.collectedData alone would lack them.
+  saveToCSV(propertyData, phone, propertyId);
 
   let closeMessage = "";
   if (session.collectedData.photosStatus === 'VIBER_PENDING') {
@@ -1294,9 +1350,22 @@ export function runDataCollectionFlow({ u, userInput, session, adMemory, hasScra
       // question (stale question-text bug).
       const question = getQuestion(nextField, known.propertyType || 'apartment', hasScraperPhotos, session.collectedData.photosStatus);
 
+      // TENANT-PREFERENCE VARIANT ROTATION (reported requirement: "couple of
+      // variations of the type of clients preferred"). The first ask uses
+      // variant 0; re-asks rotate through the list so the owner is never
+      // asked the identical sentence twice (max-2-attempts skip still caps
+      // the loop at 2). The confirmatory phrasing (attempts >= 2) below
+      // overrides with the softer re-ask.
+      let tenantPrefVariant = null;
+      if (nextField === 'tenantPreferences') {
+        tenantPrefVariant = TENANT_PREF_QUESTIONS[Math.min(attempts - 1, TENANT_PREF_QUESTIONS.length - 1)] || TENANT_PREF_QUESTIONS[0];
+      }
+
       // If the question is generic, replace with property-specific
       let finalQuestion = question;
-      if (question && question.includes('станот')) {
+      if (nextField === 'tenantPreferences' && tenantPrefVariant) {
+        finalQuestion = tenantPrefVariant;
+      } else if (question && question.includes('станот')) {
         finalQuestion = question.replace(/станот/g, propertyLabel);
       }
 

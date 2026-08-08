@@ -662,6 +662,32 @@ export function countBedrooms(text) {
 export function extractPrice(text) {
   const u = text.toLowerCase();
 
+  // TOTAL-PREFERENCE (reported requirement): "2000 e za m2, vkupno 185000
+  // evra" — when a total marker (vkupno/вкупно/total/ukupno) binds a DIGIT
+  // number, that number is the total price and must win over the first
+  // number (the per-m² quote). Requires a price indicator (currency) or a
+  // large number (≥1000) so "vkupno 7 sprata" / "vkupno 86 kvadrati" can
+  // never be read as a price. "vkupno 200 iljadi evra" stays 200000 (the
+  // iljadi suffix multiplies).
+  // SQUARE-UNIT GUARD (code review): "вкупно 2000 м2" / "вкупно 2000
+  // квадрати" state a square-meter TOTAL (realistic for land/commercial),
+  // not a price — the negative lookahead after the number rejects any
+  // square/floor/terrace unit so only currency-bound or bare large totals
+  // pass.
+  const totalMatch = u.match(/(?:vkupno|вкупно|total|ukupno)\s*[^\d]{0,14}(\d{3,7}|\d{1,3}(?:[.,]\d{3})*)(?!\s*(?:m2|м2|kvadrat|квадрат|kvadrata|квадрата|kvadrati|квадрати|кв|kv|sprata|спрата|sprat|спрат|kat|кат|terasi|тераси|meseci|месеци))\s*(?:evra|евра|evro|евро|eur|е|e|iljadi|илјади)?/i);
+  if (totalMatch) {
+    const raw = totalMatch[1].replace(/[.,\s]/g, '');
+    let totalNum = parseInt(raw, 10);
+    const suffix = (totalMatch[2] || '').toLowerCase();
+    if (/iljadi|илјади/.test(suffix)) totalNum *= 1000;
+    // Currency = a REAL price word only — the bare "е"/"e" (the Macedonian
+    // verb "is") is too ambiguous to unlock a small number as a price
+    // ("вкупно 300 е" stays rejected; "вкупно 185000 е" still passes on
+    // size alone).
+    const hasCurrency = /evra|евра|evro|евро|eur|€|iljadi|илјади/.test(suffix);
+    if (totalNum >= 1000 || (hasCurrency && totalNum >= 100)) return totalNum;
+  }
+
   const millionWordMatch = u.match(/(eden|edna|edno|dva|dve|tri|cetiri|pet|sest|sedum|osum|devet)\s*(miliona|miljon|милиона|милион|milion)/i);
   if (millionWordMatch) {
     const numMap = {
@@ -1014,6 +1040,14 @@ export function parseYearBuilt(text) {
       text = text.replace(odDayMonth[0], ' ');
     }
   }
+  // PRICE-YEAR GUARD (reported with the price-per-sqm feature): a 4-digit
+  // number bound to price context ("2000 e za m2" per-m², "185000 evra",
+  // "3500€", "200 iljadi") is a PRICE, never a construction year — the
+  // exact-year pattern below would otherwise read "2000" from
+  // "2000 e za m2, vkupno 185000 evra" as yearBuilt=2000. Year nouns
+  // ("2020 godina", "izgradena 2015") are NOT price context, so they
+  // survive the strip unchanged.
+  text = text.replace(/\b(\d{3,4})\b\s*(?:e\s*za\s*m2|е\s*за\s*м2|evra\s*za\s*m2|евра\s*за\s*м2|evra|евра|evro|евро|eur|€|iljadi|илјади)/gi, ' ');
   // Try word-boundary year first: "2015 godina", "izgradena 2015", "2015 година"
   // The \b ensures we match standalone year numbers, not part of a larger number.
   const exactYearMatch = text.match(/\b(19\d{2}|20\d{2})\b/);
@@ -1373,4 +1407,36 @@ export function formatAvailableFromDate(value) {
   const day = parseInt(m[3], 10);
   const monthName = AVAILABLE_FROM_MONTH_NAMES[parseInt(m[2], 10)] || '';
   return `${day} ${monthName} ${m[1]}`;
+}
+
+// ========================================
+// PRICE PER SQUARE METER — "2000 e za m2", "2000 evra za m2", "2500 е м2"
+// The owner quotes the SALE price per m² instead of a total price. The
+// intelligence layer (property-intelligence.js calculateSellingPrice)
+// turns it into the owner price: sqm × pricePerSqm (spec requirement:
+// "IF THE OWNER SAYS 2000 E ZA M2 IT SHOULD BE CALCULATED").
+// Patterns are STRICT — a currency or "e"/"е" (copula, "is") marker must
+// sit between the number and the m² unit, so "74 m2" (a sqm answer, no
+// currency) and "2000" alone (a total price) can never be misread as a
+// per-m² quote. The number must be a plausible €/m² (100–20000); small
+// numbers like "3 m2" (terrace) and "12 m2" (room) are never prices.
+// @returns {number|null} — the €/m² value, or null when no per-m² price.
+// ========================================
+export function extractPricePerSqm(text) {
+  if (!text) return null;
+  const u = text.toLowerCase();
+  // Pattern 1: "2000 e za m2" / "2000 evra za m2" / "2500 е на м2"
+  //   number + optional currency + optional preposition + m2-unit
+  const m1 = u.match(/(\d{3,6})\s*(?:evra|евра|evro|евро|eur|е|e)?\s*(?:za|на|na|по|po)?\s*(?:m2|м2|kvadrat|квадрат|kvadrata|квадрата|кв|kv)\b/i);
+  if (m1) {
+    const n = parseInt(m1[1], 10);
+    if (n >= 100 && n <= 20000) return n;
+  }
+  // Pattern 2: "2000 na kvadrat" / "2500 за квадрат" — number + per-square noun
+  const m2 = u.match(/(\d{3,6})\s*(?:evra|евра|evro|евро|eur|е|e)?\s*(?:za|на|na|по|po)\s*(?:kvadrat|квадрат|kvadrata|квадрата)\b/i);
+  if (m2) {
+    const n = parseInt(m2[1], 10);
+    if (n >= 100 && n <= 20000) return n;
+  }
+  return null;
 }

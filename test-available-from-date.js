@@ -66,7 +66,7 @@ function firstOfNextMonth() {
 function rentPersuasionSession(extra = {}) {
   return {
     adMemory: { transactionType: 'rent', propertyType: 'apartment', propertyLabel: 'станот' },
-    collectedData: { transactionType: 'rent' },
+    collectedData: { transactionType: 'rent', tenantPreferences: { preferred: [], excluded: [], notes: '' } },
     messages: [{ role: 'model', text: 'Здраво, јас сум Ана од Metropolis.' }],
     phone: '+38970123456',
     ...extra
@@ -223,7 +223,7 @@ console.log('========================================\n');
 // then the date answer advances to totalSqm.
 const d1 = {
   adMemory: { transactionType: 'rent', propertyType: 'apartment', propertyLabel: 'станот' },
-  collectedData: { cooperationAccepted: true, transactionType: 'rent' },
+  collectedData: { cooperationAccepted: true, transactionType: 'rent', tenantPreferences: { preferred: [], excluded: [], notes: '' } },
   messages: [{ role: 'model', text: 'Која е месечната кирија за станот?' }],
   phone: '+38970123456'
 };
@@ -282,6 +282,7 @@ assert('E6: "izgradena 2015" still extracts 2015',
     adMemory: { transactionType: 'rent', propertyType: 'apartment', propertyLabel: 'станот' },
     collectedData: {
       cooperationAccepted: true, transactionType: 'rent',
+      tenantPreferences: { preferred: [], excluded: [], notes: '' },
       monthlyRent: 500, monthlyRentConfidence: 0.95,
       availableFrom: '2026-06-01', availableFromConfidence: 0.95,
       totalSqm: 55, totalSqmConfidence: 0.95,

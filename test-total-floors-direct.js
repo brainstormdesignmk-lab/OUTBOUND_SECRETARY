@@ -123,6 +123,7 @@ const rentSession = {
   adMemory: { transactionType: 'rent', propertyType: 'apartment', propertyLabel: 'станот' },
   collectedData: {
     cooperationAccepted: true, transactionType: 'rent',
+    tenantPreferences: { preferred: [], excluded: [], notes: '' },
     monthlyRent: 350, monthlyRentConfidence: 0.95,
     availableFrom: '2026-06-01', availableFromConfidence: 0.95,
     totalSqm: 63, totalSqmConfidence: 0.95,
@@ -148,6 +149,7 @@ const rentSession2 = {
   adMemory: { transactionType: 'rent', propertyType: 'apartment', propertyLabel: 'станот' },
   collectedData: {
     cooperationAccepted: true, transactionType: 'rent',
+    tenantPreferences: { preferred: [], excluded: [], notes: '' },
     monthlyRent: 350, monthlyRentConfidence: 0.95,
     availableFrom: '2026-06-01', availableFromConfidence: 0.95,
     totalSqm: 63, totalSqmConfidence: 0.95,
@@ -175,6 +177,7 @@ const rentSession3 = {
   adMemory: { transactionType: 'rent', propertyType: 'apartment', propertyLabel: 'станот' },
   collectedData: {
     cooperationAccepted: true, transactionType: 'rent',
+    tenantPreferences: { preferred: [], excluded: [], notes: '' },
     monthlyRent: 350, monthlyRentConfidence: 0.95,
     availableFrom: '2026-06-01', availableFromConfidence: 0.95,
     totalSqm: 63, totalSqmConfidence: 0.95,

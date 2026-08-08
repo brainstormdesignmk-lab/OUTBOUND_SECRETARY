@@ -96,6 +96,14 @@ export const config = {
   SALE_COMMISSION_PERCENT: envInt('ANA_SALE_COMMISSION_PERCENT', 2),
   RENT_COMMISSION_PERCENT: envInt('ANA_RENT_COMMISSION_PERCENT', 50),
 
+  // === HERMES / LOVABLE ===
+  // Property-database endpoint (the spec's POST /properties). When unset,
+  // the hermes-client is a silent no-op (Ana still persists property.json
+  // + CSV locally) — HERMES_URL is only set in deployments that have the
+  // Hermes/Lovable property database reachable. No port default: the URL
+  // must be a full base URL (https://hermes.example.com).
+  HERMES_URL: envStr('HERMES_URL', ''),
+
   // === TIMING (ms) ===
   REPLY_TIMEOUT: envInt('ANA_REPLY_TIMEOUT_MS', 30 * 60 * 1000),
   FOLLOWUP_TIMEOUT: envInt('ANA_FOLLOWUP_TIMEOUT_MS', 2 * 60 * 60 * 1000),
