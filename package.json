@@ -6,7 +6,8 @@
   "scripts": {
     "test": "node run-tests.js",
     "test:ana": "node test-full-conversation.js",
-    "test:list": "node run-tests.js --list"
+    "test:list": "node run-tests.js --list",
+    "start:hermes": "node hermes-server.js"
   },
   "dependencies": {
     "axios": "^1.19.0",

@@ -44,6 +44,19 @@ function json(body, status) {
   });
 }
 
+// Timing-safe key compare (constant-time over the key length) — the header
+// is attacker-controlled; a plain !== can leak timing on match. Matches
+// hermes-server.js (the local Node endpoint) behavior.
+function safeKeyEqual(a, b) {
+  if (typeof a !== "string" || typeof b !== "string") return false;
+  let diff = a.length ^ b.length;
+  const len = Math.max(a.length, b.length);
+  for (let i = 0; i < len; i++) {
+    diff |= (a.charCodeAt(i) || 0) ^ (b.charCodeAt(i) || 0);
+  }
+  return diff === 0;
+}
+
 // Minimal schema validation — range sanity only, NEVER value rewriting
 // (all business rules already ran on Ana's side).
 function validate(payload) {
@@ -77,8 +90,8 @@ Deno.serve(async (req) => {
     return json({ error: "hermes_disabled" }, 503);
   }
 
-  // API-key auth — constant-time compare against the configured secret.
-  if (!HERMES_API_KEY || req.headers.get("X-Hermes-Key") !== HERMES_API_KEY) {
+  // API-key auth — timing-safe compare against the configured secret.
+  if (!HERMES_API_KEY || !safeKeyEqual(req.headers.get("X-Hermes-Key"), HERMES_API_KEY)) {
     return json({ error: "unauthorized" }, 401);
   }
   if (req.method !== "POST") {
