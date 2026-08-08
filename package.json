@@ -9,9 +9,12 @@
     "test:list": "node run-tests.js --list"
   },
   "dependencies": {
+    "axios": "^1.19.0",
     "blessed": "^0.1.81",
     "chalk": "^5.6.2",
     "dotenv": "^16.6.1",
-    "groq-sdk": "^0.15.0"
+    "express": "^4.22.2",
+    "groq-sdk": "^0.15.0",
+    "ws": "^8.21.2"
   }
 }

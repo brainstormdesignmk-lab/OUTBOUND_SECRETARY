@@ -28,12 +28,16 @@
  *                        an active one just resumes its chat (state kept).
  *                        With text in the input, SPACE types a space in the
  *                        owner reply — so replies with spaces still work.
- *   <number> + ENTER   — switch the ACTIVE lead by its list number (the
- *                        old way — still works).
  *   type + ENTER       — send that text as the OWNER's reply to the
- *                        currently selected lead
- *   #N + ENTER         — escape hatch: send the PURE NUMBER N as the
- *                        owner's reply (numbers are reserved for switching)
+ *                        currently selected lead. NUMBERS are replies too:
+ *                        typing "3" answers "Колку спални соби?" with 3 —
+ *                        it never switches leads (reported: "3" opened
+ *                        lead 3 instead of answering the bedroom question).
+ *   #N + ENTER         — legacy alias: also sends the number N as the reply
+ *                        (kept for muscle memory; identical to typing N)
+ *   ↑/↓ + SPACE        — switch leads from ANY mode: highlight with ↑/↓,
+ *                        SPACE (empty input) activates it. Ctrl+L then a
+ *                        number works from the list too.
  *   ENTER (empty)      — forceNext: instant bypass of every delay,
  *                        anti-ban gates + next lead greeting
  *   ENTER (during the  — SKIP Ana's real typing delay: the header shows a
@@ -200,7 +204,7 @@ const hintBar = blessed.box({
   height: HINT_H,
   tags: true,
   style: { fg: 'gray', bg: 'black' },
-  content: chalk.gray('  ↑↓ = move through leads   ·   SPACE = activate highlighted lead   ·   #N = send that number as reply   ·   ENTER = force next / skip timer / close follow-up window   ·   CTRL+L = list   ·   Esc/Ctrl+C = quit (q in list)')
+  content: chalk.gray('  ↑↓ + SPACE = switch leads   ·   type + ENTER = owner reply (numbers are replies — no # needed)   ·   ENTER = force next / skip timer / close follow-up window   ·   CTRL+L = list   ·   Esc/Ctrl+C = quit (q in list)')
 });
 
 // --- Footer: custom input line (plain box — see KEYBOARD section) ---
@@ -460,7 +464,7 @@ let inputBuffer = '';
 function renderInput() {
   const label = mode === 'LIST'
     ? ' Select lead (or ENTER = force next): '
-    : ` Owner reply (${selectedId}) — number = switch, #N = reply: `;
+    : ` Owner reply (${selectedId}) — numbers are replies (↑↓+SPACE = switch): `;
   // Defense-in-depth: blessed parseContent does not strip \x0d (see the
   // keypress listener's printable-char note). Never let a control char
   // reach the rendered line — it would corrupt the TUI.
@@ -637,7 +641,7 @@ function showLead(id) {
 async function selectLead(pos) {
   const id = positionToId[Number(pos) - 1];
   if (!id) {
-    setStatus(`❌ no lead #${pos} — pick 1-${positionToId.length} (use #${pos} to send that number as a reply)`);
+    setStatus(`❌ no lead #${pos} — pick 1-${positionToId.length}`);
     return;
   }
   const row = engine.getSnapshot().rows.find(r => r.leadId === id);
@@ -738,23 +742,22 @@ async function handleCommand(value) {
     return;
   }
 
-  // PURE NUMBER → switch the active lead (jump back/forth freely between
-  // chats). This is the fix: you're never stuck in the current chat —
-  // type the lead's number from the left panel at any time. An inactive
-  // lead gets its greeting started; an active one just resumes.
+  // PURE NUMBER → send it as the OWNER's reply to the selected lead.
+  // Reported (live TUI): typing "3" as the answer to "Колку спални соби
+  // има станот?" OPENED lead 3 — the old CHAT-mode number-switch swallowed
+  // it. Nearly every data-collection answer is numeric (bedrooms, price,
+  // sqm, floor...), so bare numbers in a chat MUST be replies. Lead
+  // switching is still one keystroke away: ↑/↓ + SPACE activates the
+  // highlighted lead from ANY mode, and Ctrl+L → <number> switches from
+  // the list.
   if (/^\d+$/.test(value)) {
-    const n = parseInt(value, 10);
-    if (n >= 1 && n <= positionToId.length) {
-      await selectLead(n);
-    } else {
-      setStatus(`❌ no lead #${n} — use #${n} to send "${n}" as a reply`);
-      screen.render();
-    }
+    await sendOwnerReply(selectedId, value);
     return;
   }
 
-  // #N → escape hatch: send a PURE NUMBER as the owner's reply to the
-  // selected lead (numbers are otherwise reserved for switching).
+  // #N → legacy alias (kept for muscle memory): strip the # and send N —
+  // identical to typing the bare number now. Never collides with the
+  // bare-number branch above (starts with #). A lone "#" falls through.
   if (/^#\d+$/.test(value)) {
     await sendOwnerReply(selectedId, value.slice(1));
     return;
