@@ -27,7 +27,8 @@ import {
   calculateSellingPrice,
   buildBrokerComment,
   buildEnhancedDescription,
-  buildPropertyJson
+  buildPropertyJson,
+  buildPriceWarningNote
 } from '../property-intelligence.js';
 import { config } from '../config.js';
 import { submitPropertyToHermes } from '../hermes-client.js';
@@ -1171,6 +1172,19 @@ function buildCloseResponse(session) {
     closeMessage = `Тоа беа информациите што ми се потребни.\n\nВи благодарам.\n\nЌе ве контактирам за да организираме фотографирање на имотот.\n\nПријатен ден.`;
   } else {
     closeMessage = `Ви благодарам за довербата и за одвоеното време.\n\nГи внесов сите информации за имотот.\n\nЌе ве контактирам штом имаме соодветен заинтересиран клиент за посета.\n\nВи посакувам убав ден.`;
+  }
+
+  // PRICE-WARNING → polite confirmation request to the OWNER (reported):
+  // the owner gave BOTH €/m² and a total price that disagree. The broker
+  // comment + Hermes payload carry the internal ⚠ flag for agents; the
+  // owner gets a soft ask (with the actual numbers — same helper as the
+  // internal note, ownerFacing variant, so the math can't drift) so the
+  // correct price lands in the system and the transcript surfaces the
+  // discrepancy for the agency to verify.
+  if (propertyData.priceWarning) {
+    const priceAsk = buildPriceWarningNote(propertyData, { ownerFacing: true });
+    closeMessage += `\n\n${priceAsk}`;
+    console.log(`[PRICE WARNING in close message — agent must verify: ${buildPriceWarningNote(propertyData)}]`);
   }
 
   return { text: closeMessage, type: "CLOSE" };

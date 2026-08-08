@@ -71,6 +71,8 @@ Hermes **validates and stores only** — never transforms.
   "owner_price": 200000,               // sale: owner's total (incl. garage)
   "agency_percent": 2,                 // sale: agency % (default 2)
   "selling_price": 204000,             // sale: owner + agency %, rounded UP to 500€
+  "price_warning": false,              // TRUE when owner gave BOTH €/m² and a total
+                                        // that disagree — agent must verify the price
   "monthly_rent": null,                // rent: the monthly rent (owner_price is sale-side)
 
   "description_public": "...",         // scraped ad + Ana-collected facts

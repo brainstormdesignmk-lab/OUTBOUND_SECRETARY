@@ -178,6 +178,49 @@ export function tenantCategoryLabel(key) {
 }
 
 // ============================================================
+// PRICE-WARNING NOTE (reported): an owner giving BOTH €/m² and a total
+// price that disagree needs the discrepancy surfaced. ONE parameterized
+// helper produces BOTH variants from the same numbers so the math and
+// formatting can never drift apart:
+//   buildPriceWarningNote(data)                  → internal ⚠ note (agents,
+//     used by buildBrokerComment / the "Интерен коментар")
+//   buildPriceWarningNote(data, { ownerFacing }) → polite owner-facing
+//     confirmation request (appended to the close message)
+// buildPropertyJson carries the machine flag (price_warning) separately.
+// Returns '' when there is no warning (no noise in normal listings).
+// ============================================================
+export function buildPriceWarningNote(data, { ownerFacing = false } = {}) {
+  if (!data || data.priceWarning !== true) return '';
+  const perSqm = typeof data.pricePerSqm === 'number' && data.pricePerSqm > 0 ? data.pricePerSqm : null;
+  const sqm = typeof data.totalSqm === 'number' && data.totalSqm > 0 ? data.totalSqm : null;
+  // The stated total is the owner's direct number (cleanPrice). When the
+  // owner gave BOTH, cleanPrice is what they typed — the sqm×€/m² product
+  // is what the calculator derived, so the note shows both for the agent
+  // to verify against the owner.
+  const statedTotal = typeof data.cleanPrice === 'number' && data.cleanPrice > 0 ? data.cleanPrice : null;
+  const derived = perSqm !== null && sqm !== null ? Math.round(sqm * perSqm) : null;
+
+  if (ownerFacing) {
+    // Owner-facing: soft ask with the numbers, no ⚠/internal wording.
+    let text = 'Забележав дека наведовте и цена по м² и вкупна цена кои не се совпаѓаат.';
+    if (derived !== null && statedTotal !== null) {
+      text = `Забележав дека наведовте цена по м² (${perSqm} €/м² × ${sqm} м² = ${formatEur(derived)} €) и вкупна цена (${formatEur(statedTotal)} €) кои не се совпаѓаат.`;
+    }
+    return `${text} Нашиот тим ќе ја потврди точната цена со вас.`;
+  }
+
+  const parts = ['⚠ ЦЕНА НЕСОГЛАСНОСТ: сопственикот даде и цена по м² и вкупна цена кои не се совпаѓаат.'];
+  if (perSqm !== null && sqm !== null && derived !== null) {
+    parts.push(`(${formatEur(perSqm)}€/м² × ${sqm}м² = ${formatEur(derived)}€)`);
+  }
+  if (statedTotal !== null) {
+    parts.push(`Наведена вкупна цена: ${formatEur(statedTotal)}€.`);
+  }
+  parts.push('Да се потврди точната цена со сопственикот.');
+  return parts.join(' ');
+}
+
+// ============================================================
 // buildBrokerComment(data)
 // Internal note visible ONLY to agency staff (the Lovable
 // "Интерен коментар" textarea). Auto-generated from the collected facts,
@@ -225,6 +268,11 @@ export function buildBrokerComment(data) {
     if (typeof data.sellingPrice === 'number' && data.sellingPrice > 0) {
       lines.push(`Продажна цена: ${formatEur(data.sellingPrice)}€`);
     }
+    // PRICE-WARNING surfaced to agents (reported): both €/m² and total
+    // given and they disagree → the internal note must carry it so the
+    // agent sees the conflict before publishing.
+    const warning = buildPriceWarningNote(data);
+    if (warning) lines.push(warning);
   } else {
     if (typeof data.monthlyRent === 'number' && data.monthlyRent > 0) {
       lines.push(`Месечна кирија: ${formatEur(data.monthlyRent)}€`);
@@ -331,6 +379,10 @@ export function buildPropertyJson(data, adMemory = {}, phone = '', propertyId = 
     owner_price: data.ownerPrice ?? data.cleanPrice ?? null,
     agency_percent: data.agencyPercent ?? null,
     selling_price: data.sellingPrice ?? null,
+    // PRICE-WARNING (reported): owner gave BOTH €/m² and a total that
+    // disagree → flag for agents in the payload (spec: { price_warning:
+    // true }). Hermes stores it; the public description never shows it.
+    price_warning: data.priceWarning === true,
     // RENT price — owner_price/selling_price are sale-side fields; a rent
     // payload carries the monthly rent here (code-review finding: the rent
     // amount used to survive ONLY inside broker_comment).

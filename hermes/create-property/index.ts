@@ -32,7 +32,7 @@ const ALLOWED_FIELDS = new Set([
   "listing_type", "available", "blocked_until",
   "city", "municipality",
   "sqm", "floor", "heating", "elevator", "garage", "garage_price",
-  "owner_price_per_sqm", "owner_price", "agency_percent", "selling_price", "monthly_rent",
+  "owner_price_per_sqm", "owner_price", "agency_percent", "selling_price", "price_warning", "monthly_rent",
   "description_public", "broker_comment", "tenant_preferences",
   "property_id", "lead_phone", "source_portal", "source_ad_url",
 ]);

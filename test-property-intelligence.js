@@ -34,6 +34,28 @@ function assert(name, cond, detail) {
   if (!cond) console.log(`  ❌ ${name} ${detail ? '— ' + detail : ''}`);
 }
 
+// Answer sequence for the both-prices warning flow (section 8) — same
+// fields as the main flow, minus the price answer (given up front).
+const FLOW8_ANSWERS = [
+  '74 kvadrati',          // totalSqm
+  'nema',                 // terraceSqm
+  '2 spalni',             // bedrooms
+  '4 kat',                // floor
+  '10 katnica',           // totalFloors
+  'ima lift',             // elevator
+  'gradsko parno',        // heating
+  'ima klima',            // ac
+  'garaza',               // parking
+  'jug',                  // orientation
+  'kompletno namesten',   // furnished
+  '2020 godina',          // yearBuilt
+  'ne',                   // renovated
+  'da',                   // documentationClean
+  'da imam sliki, ke gi ispratam', // photos
+  'Goran Petrov',         // ownerName
+  'Dame Gruev 12'         // address
+];
+
 // ============================================================
 // 1. SELLING PRICE CALCULATOR
 // ============================================================
@@ -148,6 +170,15 @@ assert('BC has Продажна цена', bc.includes('Продажна цен�
 assert('BC has Преферирани клиенти', bc.includes('Преферирани клиенти'), '');
 assert('BC has Не прифаќа', bc.includes('Не прифаќа'), '');
 
+// PRICE-WARNING in broker comment (reported): owner gave BOTH €/m² and a
+// total that disagree — the INTERNAL note must carry the ⚠ flag for agents.
+const bcNoWarning = buildBrokerComment({ transactionType: 'sale', pricePerSqm: 2500, totalSqm: 74, cleanPrice: 185000, ownerPrice: 185000, sellingPrice: 188700, priceWarning: false });
+assert('BC no ⚠ when priceWarning=false', !bcNoWarning.includes('ЦЕНА НЕСОГЛАСНОСТ'), bcNoWarning);
+const bcWarning = buildBrokerComment({ transactionType: 'sale', pricePerSqm: 2500, totalSqm: 74, cleanPrice: 160000, ownerPrice: 160000, sellingPrice: 163500, priceWarning: true });
+assert('BC ⚠ ЦЕНА НЕСОГЛАСНОСТ present', bcWarning.includes('ЦЕНА НЕСОГЛАСНОСТ'), bcWarning);
+assert('BC ⚠ shows both numbers', bcWarning.includes('2.500€/м² × 74м² = 185.000€') && bcWarning.includes('160.000€'), bcWarning);
+assert('BC ⚠ says verify with owner', bcWarning.includes('Да се потврди точната цена'), bcWarning);
+
 const bcRent = buildBrokerComment({ transactionType: 'rent', monthlyRent: 500 });
 assert('BC rent has Месечна кирија', bcRent.includes('Месечна кирија'), '');
 assert('BC rent has 50% комисија', bcRent.includes('50% од една кирија'), '');
@@ -211,7 +242,12 @@ assert('PJ garage_price=15000', pj.garage_price === 15000, '');
 assert('PJ owner_price_per_sqm=2500', pj.owner_price_per_sqm === 2500, '');
 assert('PJ owner_price=200000', pj.owner_price === 200000, '');
 assert('PJ selling_price=204000', pj.selling_price === 204000, '');
+assert('PJ price_warning=false (no conflict)', pj.price_warning === false, `got ${pj.price_warning}`);
 assert('PJ monthly_rent=null for sale', pj.monthly_rent === null, `got ${pj.monthly_rent}`);
+// PRICE-WARNING in payload (spec: { price_warning: true }) — owner gave
+// BOTH €/m² and a total that disagree → agents see the flag in Hermes.
+const pjWarn = buildPropertyJson({ transactionType: 'sale', totalSqm: 74, pricePerSqm: 2500, cleanPrice: 160000, priceWarning: true });
+assert('PJ price_warning=true on conflict', pjWarn.price_warning === true, `got ${pjWarn.price_warning}`);
 assert('PJ tenant_preferences kept', pj.tenant_preferences?.preferred[0] === 'families', '');
 assert('PJ broker_comment passthrough', pj.broker_comment === 'коментар', '');
 assert('PJ source_portal', pj.source_portal === 'reklama5', '');
@@ -336,6 +372,49 @@ async function send(u) {
   assert('FLOW brokerComment present', !!d.brokerComment && d.brokerComment.includes('Сопственик бара'), '');
   assert('FLOW descriptionPublic present', !!d.descriptionPublic && d.descriptionPublic.includes('74 м²'), '');
   assert('FLOW hermesPayload built', !!d.hermesPayload && d.hermesPayload.listing_type === 'sale', '');
+
+  // ============================================================
+  // 8. FLOW: BOTH prices given (€/m² AND total, mismatch) → warning in
+  //    close message + broker comment + payload
+  // ============================================================
+  console.log(`\n=== 8. close-flow price warning (both prices, mismatch) ===`);
+
+  const warnSession = {
+    adMemory: {
+      transactionType: 'sale', propertyType: 'apartment', propertyLabel: 'станот',
+      sourcePortal: 'test', adUrl: 'https://test', photoUrls: [], title: 'Се продава стан'
+    },
+    collectedData: { cooperationAccepted: true, transactionType: 'sale', propertyType: 'apartment' },
+    messages: [], phone: '+38976000003'
+  };
+  // Section 7 defines a module-level send(u) bound to ITS session — pass
+  // an explicit (session, u) helper for this flow.
+  async function send8(s, u) {
+    const rr = await generateResponse(s, u);
+    s.messages.push({ role: 'user', text: u }, { role: 'model', text: rr.text || '' });
+    return rr;
+  }
+  // Owner gives BOTH prices — they disagree (per-sqm 2500 × 74 = 185000,
+  // but states total 160000).
+  r = await send8(warnSession, '2500 e za m2, vkupno 160000 evra');
+  assert('FLOW8 pricePerSqm=2500', warnSession.collectedData.pricePerSqm === 2500, `got ${warnSession.collectedData.pricePerSqm}`);
+  assert('FLOW8 cleanPrice=160000 (total kept)', warnSession.collectedData.cleanPrice === 160000, `got ${warnSession.collectedData.cleanPrice}`);
+
+  for (const a of FLOW8_ANSWERS) {
+    r = await send8(warnSession, a);
+    if (r.type === 'CLOSE') break;
+  }
+  assert('FLOW8 sale closes', r.type === 'CLOSE', `got ${r.type}`);
+  const d8 = warnSession.collectedData;
+  assert('FLOW8 priceWarning=true', d8.priceWarning === true, `got ${d8.priceWarning}`);
+  assert('FLOW8 close message asks to confirm the price', /потврди.*цена|цена.*потврди|точната цена/i.test(r.text || ''),
+    `text=${(r.text || '').slice(0, 160)}`);
+  assert('FLOW8 close message shows both numbers', /2500 €\/м²/.test(r.text || '') && /160\.000 €/.test(r.text || ''),
+    `text=${(r.text || '').slice(0, 200)}`);
+  assert('FLOW8 brokerComment carries ⚠', !!d8.brokerComment && d8.brokerComment.includes('ЦЕНА НЕСОГЛАСНОСТ'),
+    `bc=${(d8.brokerComment || '').slice(0, 120)}`);
+  assert('FLOW8 hermesPayload price_warning=true', d8.hermesPayload?.price_warning === true,
+    `got ${d8.hermesPayload && d8.hermesPayload.price_warning}`);
 
   // ============================================================
   // SUMMARY
