@@ -54,6 +54,7 @@ import { appendToCSV } from './lead-processor.js';
 import { metrics } from './metrics.js';
 import { logger } from './logger.js';
 import { PHASES, transition } from './handlers/state-machine.js';
+import { photosMessages } from './handlers/awaiting-photos.js';
 
 // Optional typing-delay compressor for the interactive sim.
 // 1.0 = full real delays (production-faithful); 0.05 = 5% (fast demo).
@@ -104,6 +105,13 @@ function _captureQuestionState(session) {
     // be consumed — roll it back so the visible reply still registers the
     // availability message.
     availabilityAcknowledged: session.availabilityAcknowledged,
+    // The photos MARKETING sub-state (MAKE_ASKED / PHOTOGRAPHY_ASKED) and its
+    // reminder anchor: a dropped intermediate response must not consume the
+    // make/offer answer the owner never saw, and must not start the 2-day
+    // reminder clock early. Same phantom-attempt principle as the others.
+    photosStatus: session.collectedData?.photosStatus,
+    photosPendingSince: session.collectedData?.photosPendingSince,
+    photosManagerReview: session.collectedData?.photosManagerReview,
     skippedKeys: Object.keys(session.collectedData || {}).filter(k => k.endsWith('Skipped'))
   };
 }
@@ -127,6 +135,39 @@ function _restoreQuestionState(session, snap) {
     }
     if (snap.heatingFollowUpAttempts !== undefined) {
       session.collectedData.heatingFollowUpAttempts = snap.heatingFollowUpAttempts;
+    }
+    // Photos marketing sub-state (reported requirement): a make/offer question
+    // the owner never SAW (intermediate message, response dropped) must not
+    // keep the session in a sub-state that would consume the next message as
+    // the make/offer answer, and the reminder anchor must not start early.
+    // The AWAITING_PHOTOS phase transition is deliberately NOT rolled back
+    // (same known limitation as the photos recovery path above).
+    if (snap.photosStatus !== undefined) {
+      session.collectedData.photosStatus = snap.photosStatus;
+    }
+    if (snap.photosPendingSince !== undefined) {
+      session.collectedData.photosPendingSince = snap.photosPendingSince;
+    }
+    if (snap.photosManagerReview !== undefined) {
+      session.collectedData.photosManagerReview = snap.photosManagerReview;
+    }
+    // STRANDED-SUB-STATE UNWIND: if a dropped response entered a photos
+    // sub-state (MAKE_ASKED / PHOTOGRAPHY_ASKED) that the snapshot had NOT
+    // (the photos question was unanswered before the batch), the field must
+    // go back to ASKABLE — otherwise photos=false+MAKE_ASKED would silently
+    // strand the flow (nextField skips photos, the make question is never
+    // re-asked). Delete the whole photos field so the visible reply gets the
+    // photos question again.
+    const droppedIntoSubState = (session.collectedData.photosStatus === 'MAKE_ASKED' ||
+                                  session.collectedData.photosStatus === 'PHOTOGRAPHY_ASKED') &&
+                                  snap.photosStatus !== 'MAKE_ASKED' &&
+                                  snap.photosStatus !== 'PHOTOGRAPHY_ASKED';
+    if (droppedIntoSubState) {
+      for (const k of ['photos', 'photosPermission', 'photosSource', 'photosStatus',
+                       'photosPending', 'photosPendingSince', 'photosManagerReview']) {
+        delete session.collectedData[k];
+      }
+      console.log('[PHOTOS: dropped make/offer question — photos field rolled back to ASKABLE]');
     }
     // Remove ANY new max-2-attempts skip marker a dropped response added —
     // a field skipped by an unseen question must stay askable.
@@ -374,8 +415,51 @@ export class MultiLeadEngine {
   async _checkSessionTimers(session) {
     const now = this.clock();
 
-    // AWAITING_PHOTOS: close after REPLY_TIMEOUT of silence.
+    // AWAITING_PHOTOS: two modes.
+    //   1. REMINDER LADDER (reported requirement) — when the owner COMMITTED to
+    //      sending photos (photosPendingSince anchored by the photos handler):
+    //      remind at PHOTOS_REMINDER_1_MS (2 days), follow up again at
+    //      PHOTOS_REMINDER_2_MS (5 days), close after PHOTOS_TIMEOUT_MS
+    //      (7 days). Each rung fires ONCE (photosReminder1Sent / 2Sent flags),
+    //      and sending a reminder re-stamps lastMessageSentAt so the close
+    //      rung is measured from the LAST send, not the commitment.
+    //   2. LEGACY — sessions parked in AWAITING_PHOTOS without an anchor keep
+    //      the old close-after-REPLY_TIMEOUT behavior.
     if (session.phase === PHASES.AWAITING_PHOTOS) {
+      let since = session.collectedData?.photosPendingSince;
+      if (typeof since === 'number') {
+        // CLOCK-MISMATCH RE-ANCHOR: the photos handler anchors with real
+        // Date.now(), but the engine may run on an injected clock (tests) or a
+        // restarted process where real time moved on. A future-stamped anchor
+        // (since > now) would compute a negative elapsed and silently never
+        // fire the ladder. Re-anchor to the engine clock so the ladder is
+        // measured from the engine's present — production (both Date.now())
+        // is unaffected since since is never in the future there.
+        if (since > now) {
+          session.collectedData.photosPendingSince = now;
+          since = now;
+        }
+        const elapsed = now - since;
+        if (!session.collectedData.photosReminder1Sent && elapsed >= config.PHOTOS_REMINDER_1_MS) {
+          session.collectedData.photosReminder1Sent = true;
+          await this._send(session, photosMessages.reminder(1), { typed: true });
+          this.emit('followup', { leadId: session.leadId });
+          return;
+        }
+        if (!session.collectedData.photosReminder2Sent && elapsed >= config.PHOTOS_REMINDER_2_MS) {
+          session.collectedData.photosReminder2Sent = true;
+          await this._send(session, photosMessages.reminder(2), { typed: true });
+          this.emit('followup', { leadId: session.leadId });
+          return;
+        }
+        if (elapsed >= config.PHOTOS_TIMEOUT_MS) {
+          transition(session, 'timeout'); // AWAITING_PHOTOS → CLOSED
+          session.markTimedOut();
+          appendToCSV(session);
+          this.emit('closed', { leadId: session.leadId, outcome: 'timeout' });
+        }
+        return;
+      }
       const lastSent = session.lastMessageSentAt !== null && session.lastMessageSentAt !== undefined
         ? session.lastMessageSentAt
         : session.firstMessageSentAt;

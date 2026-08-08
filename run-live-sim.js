@@ -78,6 +78,12 @@ const FIELD_MATCH = [
   [/наместен/i, 'furnished'],
   [/година е граден|година е изграден/i, 'yearBuilt'],
   [/имо[тT]ен лист/i, 'documentationClean'],
+  // PHOTOS MARKETING FOLLOW-UP (reported requirement): after NEMAM Ana asks
+  // if the owner can MAKE the photos himself (variants), then — on CANNOT —
+  // offers professional photography from our agents. MUST come BEFORE the
+  // generic photos line — the make question itself contains "Фотографиите".
+  [/сами да ги направите|да направите неколку|ги фотографирате|направите сами/i, 'photosMake'],
+  [/фотографираат|фотографирање|професионално да го фотографираат/i, 'photosOffer'],
   [/фотографии|слики/i, 'photos'],
   [/запишам/i, 'ownerName'],
   [/адреса/i, 'address']
@@ -101,6 +107,8 @@ const ANSWERS = {
   renovationYear: 'OD 2019 E',
   documentationClean: 'DA CIST E',
   photos: 'NEMAAM FOTOGRAFII',
+  photosMake: 'DA, KE GI NAPRAVAM SAM',        // → VIBER_PENDING + reminder ladder
+  photosOffer: 'NE, BLAGODARAM',               // → NO_PHOTOS, continue
   ownerName: 'PETAR PETROVSKI',
   address: 'UL. PARTIZANSKA 12, SKOPJE'
 };

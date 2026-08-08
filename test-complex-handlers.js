@@ -158,8 +158,63 @@ function handleHeating(u, data, nextField) {
 
 function handlePhotos(u, data, hasScraperPhotos) {
   // Returns null (no early return) or { return: { text, type } }
+  // PHOTOS MARKETING FOLLOW-UP SUB-STATES (mirrors data-collection.js):
+  //   MAKE_ASKED — owner said NEMAM; we asked if he can MAKE the photos
+  //   PHOTOGRAPHY_ASKED — owner can't make them; we sent the photography offer
+  if (data.photosStatus === 'MAKE_ASKED') {
+    // CANNOT is checked FIRST — isPositive() matches a bare "da" substring,
+    // so "ne mozam da napravam" would otherwise be swallowed by the YES
+    // branch below. Idiom guard keeps "nema problem ke napravam" positive.
+    const hasIdiomPositive = /nema\s+(?:problem|проблем)|bez\s+(?:problem|проблем)|ne\s+e\s+problem|не\s+е\s+проблем/i.test(u);
+    // Dedicated CANNOT regex — NOT isNegative() (its "prav"/"прав" patterns
+    // match "napravam" inside "ke gi napravam", a YES).
+    if (!hasIdiomPositive && /ne\s+mozam|не\s+можам|ne\s+moze|не\s+може|ne\s+umam|не\s+умам|ne\s+mogu|не\s+могу|ne\s+se\s+razbiram|не\s+се\s+разбирам|ne\s+znam|не\s+знам|nemam\s+kako|немам\s+како|ne\s+sum\s+vo\s+moznost|не\s+сум\s+во\s+можност|ne\s+znam\s+da|не\s+знам\s+да|ne\s+mozam\s+da|не\s+можам\s+да|ne\s+umam\s+da|не\s+умам\s+да|nemam\s+aparat|немам\s+апарат|nemam\s+telefon|немам\s+телефон|nema\s+ko\s+da|нема\s+кој\s+да|ne\s+mi\s+se\s+da|не\s+ми\s+се\s+да|ne\s+sakam\s+da\s+pravam|не\s+сакам\s+да\s+правам|(?:^|\s)(?:ne|не|nema|нема|nemam|немам|bez|без)(?:\s|$)/i.test(u)) {
+      data.photosPermission = false;
+      data.photosSource = "NO_PHOTOS";
+      data.photosStatus = "PHOTOGRAPHY_ASKED";
+      data.photos = false;
+      data.photosPending = false;
+      return { type: "QUESTION" }; // Photography offer
+    }
+    // YES → VIBER_PENDING + reminder ladder anchor
+    if (isPositive(u) || /ke\s+gi\s+napravam|ќе\s+ги\s+направам|ke\s+napravam|ќе\s+направам|ke\s+gi\s+ispratam|ќе\s+ги\s+испратам|ke\s+ispratam|ќе\s+испратам|ke\s+probam|ќе\s+пробам|ke\s+se\s+potrudam|ќе\s+се\s+потрудам|mozam\s+da|можам\s+да|moze\s+da|може\s+да|ke\s+vi\s+gi\s+ispratam|ќе\s+ви\s+ги\s+испратам|ke\s+vi\s+ispratam|ќе\s+ви\s+испратам|ke\s+gi\s+napravam\s+sam|ќе\s+ги\s+направам\s+сам|ke\s+napravam\s+sam|ќе\s+направам\s+сам|ke\s+si\s+gi\s+napravam|ќе\s+си\s+ги\s+направам|da\s+ke|да\s+ќе|da\s+mozam|да\s+можам|ke\s+si\s+ispratam|ќе\s+си\s+испратам/i.test(u)) {
+      data.photosPermission = true;
+      data.photosSource = "VIBER_PENDING";
+      data.photosStatus = "VIBER_PENDING";
+      data.photos = true;
+      data.photosPending = true;
+      return { type: "QUESTION" }; // Make-YES ack
+    }
+    // Unclear → re-ask, capped at 3 total attempts (mirrors data-collection.js)
+    data.photosMakeAttempts = (data.photosMakeAttempts || 0) + 1;
+    if (data.photosMakeAttempts >= 3) {
+      data.photosPermission = false;
+      data.photosSource = "NO_PHOTOS";
+      data.photosStatus = "PHOTOGRAPHY_ASKED";
+      data.photos = false;
+      data.photosPending = false;
+      return { type: "QUESTION" }; // Photography offer (fall-through from cap)
+    }
+    return { type: "QUESTION" }; // Re-ask make question
+  }
+  if (data.photosStatus === 'PHOTOGRAPHY_ASKED') {
+    // NO checked FIRST — "ne sakam" contains the substring "sakam" (the YES
+    // regex below), so a negation would otherwise be swallowed as acceptance.
+    if (isNegative(u) || /ne\s+sakam|не\s+сакам|fala|фала|blagodaram|благодарам|nema\s+potreba|нема\s+потреба|ne\s+mi\s+treba|не\s+ми\s+треба|ne\s+e\s+potrebno|не\s+е\s+потребно|nema|нема|bez|без/i.test(u)) {
+      data.photosSource = "NO_PHOTOS";
+      data.photosStatus = "NO_PHOTOS";
+      return null; // continue flow
+    }
+    if (isPositive(u) || /sakam|сакам|moze|може|okej|океј|da|да|organizirajte|организирајте|zainteresiran|заинтересиран|interesno|интересно|neka|нека|izvolte|изволте|ke\s+iskoristam|ќе\s+искористам|dogovoreno|договорено|se\s+dogovara|се\s+договара|pomognete|помогнете/i.test(u)) {
+      data.photosSource = "PHOTOGRAPHY_NEEDED";
+      data.photosStatus = "PHOTOGRAPHY_NEEDED";
+      data.photosManagerReview = true;
+      return { type: "QUESTION" }; // Photography-YES ack
+    }
+    return { type: "QUESTION" }; // Re-ask photography offer
+  }
   if (data.photosStatus && data.photosStatus !== 'PENDING') {
-    if (data.photosStatus === 'NONE') {
+    if (data.photosStatus === 'NONE' || data.photosStatus === 'NO_PHOTOS') {
       data.photos = false;
     } else {
       data.photos = true;
@@ -203,9 +258,10 @@ function handlePhotos(u, data, hasScraperPhotos) {
     } else if (isNegative(u) || /nemam|немам|nema|нема|bez|без|nema sliki|нема слики|bez sliki|без слики|ne|не|nema fotografi|нема фотографии|nemam sliki|немам слики|nemam momentalno|немам моментално|ti kazav|ти кажав|kazav|кажав|rekov|реков|nemam|немам|nema momentalno|нема моментално|ne mozam|не можам|ne moze|не може/i.test(u)) {
       data.photosPermission = false;
       data.photosSource = "NONE";
-      data.photosStatus = "NONE";
+      data.photosStatus = "MAKE_ASKED";
       data.photos = false;
       data.photosPending = false;
+      return { type: "QUESTION" }; // Marketing make-photos question
     }
   }
   return null;
@@ -890,18 +946,20 @@ console.log(`━━━━━━━━━━━━━━━━━━━━━━�
   assert("P5: 'ke pratam' → VIBER_PENDING", d.photosPermission === true && d.photosSource === "VIBER_PENDING", `got source=${d.photosSource}`);
 })();
 
-// P6: Normal flow — "ne" → NONE
+// P6: Normal flow — "ne" → MAKE_ASKED (marketing follow-up: can he make them?)
 (() => {
   const d = freshData();
-  handlePhotos("ne", d, false);
-  assert("P6: 'ne' → NONE", d.photosPermission === false && d.photosSource === "NONE" && d.photosStatus === "NONE" && d.photos === false, `got source=${d.photosSource}, status=${d.photosStatus}`);
+  const result = handlePhotos("ne", d, false);
+  assert("P6: 'ne' → MAKE_ASKED (marketing make-photos question)", d.photosPermission === false && d.photosSource === "NONE" && d.photosStatus === "MAKE_ASKED" && d.photos === false, `got source=${d.photosSource}, status=${d.photosStatus}`);
+  assert("P6: make-photos question asked", result !== null && result.type === "QUESTION", `got ${JSON.stringify(result)}`);
 })();
 
-// P7: Normal flow — "nemam"
+// P7: Normal flow — "nemam" → MAKE_ASKED
 (() => {
   const d = freshData();
-  handlePhotos("nemam", d, false);
-  assert("P7: 'nemam' → NONE", d.photosPermission === false && d.photosSource === "NONE", `got source=${d.photosSource}`);
+  const result = handlePhotos("nemam", d, false);
+  assert("P7: 'nemam' → MAKE_ASKED", d.photosPermission === false && d.photosSource === "NONE" && d.photosStatus === "MAKE_ASKED", `got source=${d.photosSource}, status=${d.photosStatus}`);
+  assert("P7: make-photos question asked", result !== null && result.type === "QUESTION", `got ${JSON.stringify(result)}`);
 })();
 
 // P8: Normal flow — "nema sliki" (don't have photos — recoverable)
@@ -1005,11 +1063,12 @@ console.log(`━━━━━━━━━━━━━━━━━━━━━━�
   assert("P21: 'kako si' → no data changes", Object.keys(d).length === 0, `got ${JSON.stringify(d)}`);
 })();
 
-// P22: Normal flow — "ne mozam" (can't send) → NONE
+// P22: Normal flow — "ne mozam" (can't send) → MAKE_ASKED (marketing follow-up)
 (() => {
   const d = freshData();
-  handlePhotos("ne mozam", d, false);
-  assert("P22: 'ne mozam' → NONE", d.photosPermission === false && d.photosSource === "NONE", `got source=${d.photosSource}`);
+  const result = handlePhotos("ne mozam", d, false);
+  assert("P22: 'ne mozam' → MAKE_ASKED", d.photosPermission === false && d.photosSource === "NONE" && d.photosStatus === "MAKE_ASKED", `got source=${d.photosSource}, status=${d.photosStatus}`);
+  assert("P22: make-photos question asked", result !== null && result.type === "QUESTION", `got ${JSON.stringify(result)}`);
 })();
 
 // P23: Scraper flow — "se aktuelni" → approved
@@ -1156,11 +1215,11 @@ console.log(`━━━━━━━━━━━━━━━━━━━━━━�
   assert("P41: 'ispratam' → VIBER_PENDING", d.photosPermission === true && d.photosSource === "VIBER_PENDING", `got source=${d.photosSource}`);
 })();
 
-// P42: Normal flow — "ti kazav" (I told you, I don't have) → NONE
+// P42: Normal flow — "ti kazav" (I told you, I don't have) → MAKE_ASKED
 (() => {
   const d = freshData();
   handlePhotos("ti kazav", d, false);
-  assert("P42: 'ti kazav' → NONE", d.photosPermission === false && d.photosSource === "NONE", `got source=${d.photosSource}`);
+  assert("P42: 'ti kazav' → MAKE_ASKED", d.photosPermission === false && d.photosSource === "NONE" && d.photosStatus === "MAKE_ASKED", `got source=${d.photosSource}, status=${d.photosStatus}`);
 })();
 
 // P43: Normal flow — "bez sliki" (without photos) → RECOVERY_ASKED (bez+sliki fallback)
@@ -1229,6 +1288,109 @@ console.log(`━━━━━━━━━━━━━━━━━━━━━━�
   const d = freshData();
   handlePhotos("денес ќе пратам", d, false);
   assert("P51: 'денес ќе пратам' → VIBER_PENDING (letter-boundary guard)", d.photosSource === "VIBER_PENDING" && d.photosPending === false, `got source=${d.photosSource}, pending=${d.photosPending}`);
+})();
+
+// ========================================
+// PHOTOS MARKETING FOLLOW-UP (reported requirement): NEMAM → ask if he can
+// MAKE the photos himself and send on Viber (variants). YES → VIBER_PENDING
+// + reminder ladder anchor. CANNOT → NO_PHOTOS + photography offer from our
+// agents + manager-review flag when the property is worth it.
+// ========================================
+
+// P52: NEMAM → MAKE_ASKED — then YES "ke gi napravam" → VIBER_PENDING + pending anchor
+(() => {
+  const d = freshData();
+  const q = handlePhotos("nemam", d, false);
+  assert("P52: 'nemam' → MAKE_ASKED sub-state", d.photosStatus === "MAKE_ASKED", `got ${d.photosStatus}`);
+  assert("P52: make question returned", q && q.type === "QUESTION", `got ${JSON.stringify(q)}`);
+  // Owner answers the make question: YES
+  const r = handlePhotos("ke gi napravam", d, false);
+  assert("P52: make-YES → VIBER_PENDING", d.photosSource === "VIBER_PENDING" && d.photosStatus === "VIBER_PENDING" && d.photos === true && d.photosPending === true, `got source=${d.photosSource}, pending=${d.photosPending}`);
+  assert("P52: make-YES returns ack", r && r.type === "QUESTION", `got ${JSON.stringify(r)}`);
+})();
+
+// P53: NEMAM → MAKE_ASKED — then Cyrillic YES "ќе ги направам" → VIBER_PENDING
+(() => {
+  const d = freshData();
+  handlePhotos("немам слики", d, false); // recovery path fires first for nema+sliki
+  assert("P53: 'немам слики' stays RECOVERY_ASKED (recovery wins)", d.photosStatus === "RECOVERY_ASKED", `got ${d.photosStatus}`);
+  const d2 = freshData();
+  handlePhotos("не", d2, false);
+  assert("P53: 'не' → MAKE_ASKED", d2.photosStatus === "MAKE_ASKED", `got ${d2.photosStatus}`);
+  const r = handlePhotos("ќе ги направам", d2, false);
+  assert("P53: Cyrillic make-YES → VIBER_PENDING", d2.photosSource === "VIBER_PENDING" && d2.photosPending === true, `got source=${d2.photosSource}`);
+})();
+
+// P54: NEMAM → CANNOT ("ne mozam da napravam") → NO_PHOTOS + photography offer
+(() => {
+  const d = freshData();
+  handlePhotos("nemam", d, false);
+  assert("P54: 'nemam' → MAKE_ASKED", d.photosStatus === "MAKE_ASKED", `got ${d.photosStatus}`);
+  const r = handlePhotos("ne mozam da napravam", d, false);
+  assert("P54: make-CANNOT → NO_PHOTOS source", d.photosSource === "NO_PHOTOS", `got ${d.photosSource}`);
+  assert("P54: make-CANNOT → PHOTOGRAPHY_ASKED sub-state", d.photosStatus === "PHOTOGRAPHY_ASKED" && d.photos === false && d.photosPending === false, `got status=${d.photosStatus}, photos=${d.photos}`);
+  assert("P54: photography offer returned", r && r.type === "QUESTION", `got ${JSON.stringify(r)}`);
+})();
+
+// P55: Photography offer → YES "sakam" → PHOTOGRAPHY_NEEDED + manager review
+(() => {
+  const d = freshData();
+  handlePhotos("nemam", d, false);
+  handlePhotos("ne mozam da napravam", d, false);
+  const r = handlePhotos("sakam", d, false);
+  assert("P55: offer-YES → PHOTOGRAPHY_NEEDED", d.photosStatus === "PHOTOGRAPHY_NEEDED" && d.photosSource === "PHOTOGRAPHY_NEEDED", `got status=${d.photosStatus}, source=${d.photosSource}`);
+  assert("P55: offer-YES flags manager review", d.photosManagerReview === true, `got ${d.photosManagerReview}`);
+  assert("P55: offer-YES returns ack", r && r.type === "QUESTION", `got ${JSON.stringify(r)}`);
+})();
+
+// P56: Photography offer → NO ("ne sakam") → final NO_PHOTOS, flow continues
+(() => {
+  const d = freshData();
+  handlePhotos("nemam", d, false);
+  handlePhotos("ne mozam da napravam", d, false);
+  const r = handlePhotos("ne sakam", d, false);
+  assert("P56: offer-NO → NO_PHOTOS final", d.photosStatus === "NO_PHOTOS" && d.photosSource === "NO_PHOTOS" && d.photos === false, `got status=${d.photosStatus}`);
+  assert("P56: offer-NO continues flow (null)", r === null, `got ${JSON.stringify(r)}`);
+})();
+
+// P57: Make answer unclear ("kako si") → re-ask make question, sub-state kept
+(() => {
+  const d = freshData();
+  handlePhotos("nemam", d, false);
+  const r = handlePhotos("kako si", d, false);
+  assert("P57: unclear make answer → stays MAKE_ASKED", d.photosStatus === "MAKE_ASKED", `got ${d.photosStatus}`);
+  assert("P57: re-ask returned", r && r.type === "QUESTION", `got ${JSON.stringify(r)}`);
+})();
+
+// P58: Scraper flow unaffected by marketing sub-states (photosStatus empty)
+(() => {
+  const d = freshData();
+  handlePhotos("da", d, true);
+  assert("P58: scraper 'da' → SCRAPER_APPROVED (unchanged)", d.photosSource === "SCRAPER" && d.photosStatus === "SCRAPER_APPROVED", `got ${d.photosSource}`);
+})();
+
+// P59: Already-processed NO_PHOTOS → photos=false
+(() => {
+  const d = { photosStatus: 'NO_PHOTOS' };
+  handlePhotos("da", d, false);
+  assert("P59: NO_PHOTOS already processed → photos=false", d.photos === false, `got photos=${d.photos}`);
+})();
+
+// P60: Make-question re-ask CAP — 3rd unclear answer falls through to the
+// photography offer instead of looping the make question forever.
+// NOTE: neutral strings only — "sto e novo"/"nema vrska" contain bare
+// negatives ("nema") and would hit CANNOT directly instead of the cap.
+(() => {
+  const d = freshData();
+  handlePhotos("nemam", d, false);
+  const r1 = handlePhotos("kako si", d, false);
+  assert("P60: attempt 1 unclear → stays MAKE_ASKED", d.photosStatus === "MAKE_ASKED" && d.photosMakeAttempts === 1, `status=${d.photosStatus}, attempts=${d.photosMakeAttempts}`);
+  const r2 = handlePhotos("haha", d, false);
+  assert("P60: attempt 2 unclear → stays MAKE_ASKED", d.photosStatus === "MAKE_ASKED" && d.photosMakeAttempts === 2, `status=${d.photosStatus}, attempts=${d.photosMakeAttempts}`);
+  const r3 = handlePhotos("dobar den", d, false);
+  assert("P60: attempt 3 unclear → PHOTOGRAPHY_ASKED (cap)", d.photosStatus === "PHOTOGRAPHY_ASKED" && d.photosSource === "NO_PHOTOS", `got status=${d.photosStatus}`);
+  assert("P60: cap returns the photography offer", r3 && r3.type === "QUESTION", `got ${JSON.stringify(r3)}`);
+  assert("P60: attempts counted", d.photosMakeAttempts >= 3, `got ${d.photosMakeAttempts}`);
 })();
 
 

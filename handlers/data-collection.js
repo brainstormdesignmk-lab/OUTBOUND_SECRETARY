@@ -13,12 +13,16 @@ import { runGlobalExtraction, assessConfidence, confidenceToNumeric, scanHistory
 import {
   extractTerraceNumber,
   isPositive,
-  isNegative
+  isNegative,
+  parseMacedonianNumber,
+  parseNumberWords,
+  parsePlusSum
 } from '../property-extractor.js';
 import { getRentDefaults, calculateRentCommission } from '../lib/commission.js';
 import { getNextPropertyId, createPropertyFolder, saveToCSV } from './storage.js';
 import { transition } from './state-machine.js';
 import { isAvailabilityConfirmation } from './early-responses.js';
+import { photosMessages, isPhotosWorthManagerReview } from './awaiting-photos.js';
 
 // ========================================
 // STILL-AVAILABLE ACKNOWLEDGMENT — shared vocabulary, stricter guard
@@ -216,10 +220,34 @@ function hasRecentAvailabilityConfirmation(session) {
 // "350 e", "350 TI REKOV DA", "KAZAV 350" — IS confirming, even without a
 // "da"/"tocno". Digit runs are compared numerically with separators (spaces,
 // commas, dots) stripped so "350" never matches inside "1350" or "3500".
+// WORD-NUMBER REPEATS (reported, lead 3571074): "TRI" in reply to "Дали
+// точната вредност е 3?" — the owner repeats the SAME Macedonian number
+// WORD they originally answered with. Digit-only matching missed it ("tri"
+// has no digits), so the repeat fell into the "new value" branch below,
+// pending was cleared, re-extraction scored MEDIUM again and re-pended —
+// the SAME confirmation question forever (the bedrooms "TRI" loop). Parse
+// the word/phrase too: parseNumberWords (exact single-word + compound
+// phrases: "tri"→3, "osumdeset i ses"→86) and parseMacedonianNumber
+// (handles inflected contexts like "tri sobi"→3 via includes). The numeric
+// comparison against pValue is the gate, so a DIFFERENT value repeated in
+// words ("triest"=30 when 3 is pending) never confirms.
 // ========================================
 function messageRepeatsValue(u, pValue) {
   const digits = u.replace(/\s+/g, '').match(/\d+(?:[.,]\d+)?/g) || [];
-  return digits.some(d => Math.abs(parseFloat(d.replace(',', '.')) - pValue) < 0.01);
+  if (digits.some(d => Math.abs(parseFloat(d.replace(',', '.')) - pValue) < 0.01)) return true;
+  const wordNum = parseNumberWords(u);
+  if (wordNum !== null && Math.abs(wordNum - pValue) < 0.01) return true;
+  const macNum = parseMacedonianNumber(u);
+  if (macNum !== null && Math.abs(macNum - pValue) < 0.01) return true;
+  // PLUS-SUM (reported, lead 3571074): "EDNA PLUS DVE" (one plus two = 3) in
+  // reply to "Дали точната вредност е 3?" IS a confirmation of 3. The
+  // single-word parsers above grab only "edna"→1 ≠ 3, so the repeat was
+  // missed → pending cleared → re-extracted 1 → re-pended forever. The sum
+  // must match pValue exactly ("EDNA PLUS DVE"=3 confirms 3; "DVE PLUS
+  // DVE"=4 does NOT confirm 3).
+  const plusSum = parsePlusSum(u);
+  if (plusSum !== null && Math.abs(plusSum - pValue) < 0.01) return true;
+  return false;
 }
 
 /**
@@ -696,9 +724,107 @@ export function runComplexStatefulHandlers({ u, userInput, session, nextField, h
   session.pendingFollowUp = null;
 
   // === photos (complex stateful handler with scraper logic) ===
-  if (nextField === 'photos') {
+  // PHOTOS MARKETING FOLLOW-UP SUB-STATES (reported requirement):
+  //   'MAKE_ASKED'         — owner said NEMAM; we asked if he could MAKE the
+  //                          photos himself and send them on Viber (couple of
+  //                          question variants). Photos are needed for marketing.
+  //   'PHOTOGRAPHY_ASKED'  — owner can't make photos; we sent the professional-
+  //                          photography offer from our agents (NO_PHOTOS
+  //                          category, manager-review flag when worth it).
+  // Both are TRANSIENT: entered from the NEGATIVE branch below, each returns a
+  // follow-up question, and the next owner message is interpreted here. They
+  // MUST be checked BEFORE the already-processed guard below — otherwise a
+  // sub-state answer (e.g. "DA") would be re-marked as photos=true instead of
+  // resolving the make/offer decision.
+  if (nextField === 'photos' ||
+      session.collectedData.photosStatus === 'MAKE_ASKED' ||
+      session.collectedData.photosStatus === 'PHOTOGRAPHY_ASKED') {
+    // --- MAKE-PHOTOS ANSWER (owner said NEMAM; we asked "can you make them
+    // yourself and send them on Viber?") ---
+    if (session.collectedData.photosStatus === 'MAKE_ASKED') {
+      // CANNOT is checked FIRST — isPositive() matches a bare "da" substring,
+      // so "ne mozam da napravam" ("I can't make them") would otherwise be
+      // swallowed by the YES branch below (reported-class footgun). The idiom
+      // guard keeps "nema problem ke napravam" ("no problem, I'll make them")
+      // — a POSITIVE commitment — out of the CANNOT bucket.
+      const hasIdiomPositive = /nema\s+(?:problem|проблем)|bez\s+(?:problem|проблем)|ne\s+e\s+problem|не\s+е\s+проблем/i.test(u);
+      // CANNOT uses a DEDICATED regex — NOT isNegative(): isNegative's
+      // unfurnished patterns match "prav"/"прав" as a substring, so a YES
+      // like "ke gi napravam" (make them) would be misread as CANNOT (the
+      // "napravam"→"prav" trap). Only explicit cannot-phrases and bare
+      // standalone negatives count here.
+      if (!hasIdiomPositive && /ne\s+mozam|не\s+можам|ne\s+moze|не\s+може|ne\s+umam|не\s+умам|ne\s+mogu|не\s+могу|ne\s+se\s+razbiram|не\s+се\s+разбирам|ne\s+znam|не\s+знам|nemam\s+kako|немам\s+како|ne\s+sum\s+vo\s+moznost|не\s+сум\s+во\s+можност|ne\s+znam\s+da|не\s+знам\s+да|ne\s+mozam\s+da|не\s+можам\s+да|ne\s+umam\s+da|не\s+умам\s+да|nemam\s+aparat|немам\s+апарат|nemam\s+telefon|немам\s+телефон|nema\s+ko\s+da|нема\s+кој\s+да|ne\s+mi\s+se\s+da|не\s+ми\s+се\s+да|ne\s+sakam\s+da\s+pravam|не\s+сакам\s+да\s+правам|(?:^|\s)(?:ne|не|nema|нема|nemam|немам|bez|без)(?:\s|$)/i.test(u)) {
+        // NO PHOTOS category + manager-review flag (when worth it) +
+        // professional-photography offer from our agents.
+        session.collectedData.photosPermission = false;
+        session.collectedData.photosSource = "NO_PHOTOS";
+        session.collectedData.photosStatus = "PHOTOGRAPHY_ASKED"; // offer is next
+        session.collectedData.photos = false;
+        session.collectedData.photosPending = false;
+        const worthIt = isPhotosWorthManagerReview(session);
+        if (worthIt) session.collectedData.photosManagerReview = true;
+        console.log(`[PHOTOS: NO_PHOTOS — owner can't make photos; photosManagerReview=${worthIt}; photography offer sent]`);
+        return { text: photosMessages.photographyOffer(), type: "QUESTION" };
+      }
+      // YES → VIBER PENDING + AWAITING_PHOTOS. The engine's AWAITING_PHOTOS
+      // timer anchors the 2-day/5-day reminder ladder on photosPendingSince.
+      if (isPositive(u) || /ke\s+gi\s+napravam|ќе\s+ги\s+направам|ke\s+napravam|ќе\s+направам|ke\s+gi\s+ispratam|ќе\s+ги\s+испратам|ke\s+ispratam|ќе\s+испратам|ke\s+probam|ќе\s+пробам|ke\s+se\s+potrudam|ќе\s+се\s+потрудам|mozam\s+da|можам\s+да|moze\s+da|може\s+да|ke\s+vi\s+gi\s+ispratam|ќе\s+ви\s+ги\s+испратам|ke\s+vi\s+ispratam|ќе\s+ви\s+испратам|ke\s+gi\s+napravam\s+sam|ќе\s+ги\s+направам\s+сам|ke\s+napravam\s+sam|ќе\s+направам\s+сам|ke\s+si\s+gi\s+napravam|ќе\s+си\s+ги\s+направам|da\s+ke|да\s+ќе|da\s+mozam|да\s+можам|ke\s+si\s+ispratam|ќе\s+си\s+испратам/i.test(u)) {
+        session.collectedData.photosPermission = true;
+        session.collectedData.photosSource = "VIBER_PENDING";
+        session.collectedData.photosStatus = "VIBER_PENDING";
+        session.collectedData.photos = true;
+        session.collectedData.photosPending = true;
+        session.collectedData.photosPendingSince = Date.now();
+        console.log(`[PHOTOS: MAKE-YES → VIBER_PENDING — owner will make & send photos (2d/5d reminder ladder armed)]`);
+        transition(session, 'photos_send_later'); // → AWAITING_PHOTOS
+        return { text: photosMessages.makeYesAck(), type: "QUESTION" };
+      }
+      // Unclear → rotate a fresh make-photos question (variants). Cap at 2
+      // re-asks (same max-2-attempts principle as field questions) — a
+      // persistently non-committal owner must not loop the make question
+      // forever; on the 3rd unclear answer, fall through to NO_PHOTOS + the
+      // photography offer (the same next step as an explicit CANNOT).
+      session.collectedData.photosMakeAttempts = (session.collectedData.photosMakeAttempts || 0) + 1;
+      if (session.collectedData.photosMakeAttempts >= 3) {
+        session.collectedData.photosPermission = false;
+        session.collectedData.photosSource = "NO_PHOTOS";
+        session.collectedData.photosStatus = "PHOTOGRAPHY_ASKED";
+        session.collectedData.photos = false;
+        session.collectedData.photosPending = false;
+        const worthIt = isPhotosWorthManagerReview(session);
+        if (worthIt) session.collectedData.photosManagerReview = true;
+        console.log(`[PHOTOS: NO_PHOTOS — make question unanswered 3×, photography offer sent]`);
+        return { text: photosMessages.photographyOffer(), type: "QUESTION" };
+      }
+      return { text: photosMessages.makeQuestion(), type: "QUESTION" };
+    }
+    // --- PHOTOGRAPHY OFFER ANSWER (owner can't make photos himself) ---
+    if (session.collectedData.photosStatus === 'PHOTOGRAPHY_ASKED') {
+      // NO checked FIRST — "ne sakam" (I don't want) contains the substring
+      // "sakam" (the YES regex below), so a negation would be swallowed as an
+      // acceptance. Same shadowing class as the MAKE-ASKED CANNOT check.
+      if (isNegative(u) || /ne\s+sakam|не\s+сакам|fala|фала|blagodaram|благодарам|nema\s+potreba|нема\s+потреба|ne\s+mi\s+treba|не\s+ми\s+треба|ne\s+e\s+potrebno|не\s+е\s+потребно|nema|нема|bez|без/i.test(u)) {
+        // final NO_PHOTOS, continue the field flow
+        session.collectedData.photosSource = "NO_PHOTOS";
+        session.collectedData.photosStatus = "NO_PHOTOS";
+        console.log(`[PHOTOS: NO_PHOTOS — owner declined photography offer]`);
+        return null; // continue flow → remaining fields
+      }
+      // YES → PHOTOGRAPHY_NEEDED — our photographers handle it; always
+      // manager-worthy (a professional shoot is being arranged).
+      if (isPositive(u) || /sakam|сакам|moze|може|okej|океј|da|да|organizirajte|организирајте|zainteresiran|заинтересиран|interesno|интересно|neka|нека|izvolte|изволте|ke\s+iskoristam|ќе\s+искористам|dogovoreno|договорено|se\s+dogovara|се\s+договара|pomognete|помогнете/i.test(u)) {
+        session.collectedData.photosSource = "PHOTOGRAPHY_NEEDED";
+        session.collectedData.photosStatus = "PHOTOGRAPHY_NEEDED";
+        session.collectedData.photosManagerReview = true;
+        console.log(`[PHOTOS: PHOTOGRAPHY_NEEDED — owner accepted professional photography]`);
+        return { text: photosMessages.photographyYesAck(), type: "QUESTION" };
+      }
+      // Unclear → rotate a fresh photography offer
+      return { text: photosMessages.photographyOffer(), type: "QUESTION" };
+    }
+
     if (session.collectedData.photosStatus && session.collectedData.photosStatus !== 'PENDING') {
-      if (session.collectedData.photosStatus === 'NONE') {
+      if (session.collectedData.photosStatus === 'NONE' || session.collectedData.photosStatus === 'NO_PHOTOS') {
         session.collectedData.photos = false;
       } else {
         session.collectedData.photos = true;
@@ -741,6 +867,10 @@ export function runComplexStatefulHandlers({ u, userInput, session, nextField, h
         session.collectedData.photosStatus = "RECOVERY_ASKED";
         session.collectedData.photos = false;
         session.collectedData.photosPending = true;
+        // Anchor the 2-day/5-day reminder ladder — the owner committed to
+        // sending photos later, so the engine must remind (not close after
+        // REPLY_TIMEOUT) if they don't arrive.
+        session.collectedData.photosPendingSince = Date.now();
         console.log(`[PHOTOS: RECOVERY_ASKED — owner has no photos now, recovery question sent]`);
         // AWAITING_PHOTOS PHASE: owner committed to sending photos later —
         // the conversation now pauses in an async wait state (Layer 2),
@@ -764,12 +894,19 @@ export function runComplexStatefulHandlers({ u, userInput, session, nextField, h
         session.collectedData.photosPending = false;
         console.log(`[PHOTOS: VIBER_PENDING — owner has photos, pending Viber delivery]`);
       } else if (isNegative(u) || /nemam|немам|nema|нема|bez|без|nema sliki|нема слики|bez sliki|без слики|ne|не|nema fotografi|нема фотографии|nemam sliki|немам слики|nemam momentalno|немам моментално|ti kazav|ти кажав|kazav|кажав|rekov|реков|nemam|немам|nema momentalno|нема моментално|ne mozam|не можам|ne moze|не може/i.test(u)) {
+        // NEGATIVE → no photos. MARKETING FOLLOW-UP (reported requirement):
+        // instead of just storing NONE and moving on, ask if the owner could
+        // MAKE the photos himself and send them on Viber (question variants) —
+        // we need photos for marketing. The MAKE_ASKED sub-state above
+        // interprets the answer: YES → VIBER_PENDING + reminder ladder;
+        // CANNOT → NO_PHOTOS + photography offer + manager-review flag.
         session.collectedData.photosPermission = false;
         session.collectedData.photosSource = "NONE";
-        session.collectedData.photosStatus = "NONE";
+        session.collectedData.photosStatus = "MAKE_ASKED";
         session.collectedData.photos = false;
         session.collectedData.photosPending = false;
-        console.log(`[PHOTOS: NONE, photos=false]`);
+        console.log(`[PHOTOS: NONE — owner has no photos; asking if he can make them (marketing)]`);
+        return { text: photosMessages.makeQuestion(), type: "QUESTION" };
       }
     }
   }
@@ -966,7 +1103,11 @@ function buildCloseResponse(session) {
   let closeMessage = "";
   if (session.collectedData.photosStatus === 'VIBER_PENDING') {
     closeMessage = `Тоа беа информациите што ми се потребни.\n\nВи благодарам.\n\nГи очекувам фотографиите на Viber за да можеме поефикасно да го промовираме имотот.\n\nПријатен ден.`;
-  } else if (session.collectedData.photosStatus === 'NONE' || session.collectedData.photosStatus === 'SCRAPER_APPROVED') {
+  } else if (session.collectedData.photosStatus === 'NONE' || session.collectedData.photosStatus === 'SCRAPER_APPROVED' ||
+             session.collectedData.photosStatus === 'NO_PHOTOS') {
+    // NO_PHOTOS (reported requirement): the owner can't/won't provide photos —
+    // same close as NONE. If the property was worth it, photosManagerReview
+    // flags it for the ops team (the photography offer was already sent).
     closeMessage = `Тоа беа информациите што ми се потребни.\n\nВи благодарам за довербата.\n\nЌе ве контактирам кога ќе имаме заинтересиран клиент за разгледување на имотот.\n\nПријатен ден.`;
   } else if (session.collectedData.photosStatus === 'VIBER_RECEIVED') {
     closeMessage = `Ви благодарам за фотографиите.\n\nГи имам сите потребни информации.\n\nЌе ве контактирам кога ќе имаме заинтересиран клиент.`;

@@ -19,6 +19,79 @@
 // orchestrator's AWAITING_PHOTOS dispatch returns null so detectPhase runs.
 // ========================================
 import { PHASES, transition, transitionTo } from './state-machine.js';
+import { config } from '../config.js';
+
+// ========================================
+// PHOTOS MARKETING FOLLOW-UP (reported requirement)
+// When the owner has NO photos ("NEMAM"), Ana asks if he could MAKE them
+// himself and send them on Viber — the photos are needed for marketing.
+// Rotational variants so the bot never repeats itself verbatim.
+// ========================================
+const PHOTOS_MAKE_QUESTIONS = [
+  'Разбирам. Фотографиите се многу важни за маркетингот на огласот. Дали би можеле сами да ги направите и да ни ги испратите на Viber?',
+  'Не е проблем. За да го промовираме имотот подобро, ни се потребни фотографии. Дали би можеле да направите неколку и да ни ги испратите на Viber?',
+  'Разбирам дека немате фотографии. Дали би можеле да ги фотографирате со телефон и да ни ги испратите на Viber? Така огласот ќе биде многу попривлечен.'
+];
+
+const PHOTOS_MAKE_YES_ACK = [
+  'Одлично! Ќе ги очекувам фотографиите на Viber.',
+  'Супер! Испратете ни ги фотографиите на Viber кога ќе бидат готови.',
+  'Благодарам! Ги очекувам фотографиите на Viber за да можеме да го промовираме имотот.'
+];
+
+// ========================================
+// PROFESSIONAL PHOTOGRAPHY OFFER (from our agents)
+// Sent when the owner CANNOT make photos himself. If he accepts, the
+// lead becomes PHOTOGRAPHY_NEEDED (our photographers handle it).
+// ========================================
+const PHOTOS_PHOTOGRAPHY_OFFER = [
+  'Доколку сакате, нашите соработници можат професионално да го фотографираат имотот. Дали сте заинтересирани?',
+  'Доколку не можете сами, можеме да организираме професионално фотографирање од наша страна. Дали сакате?',
+  'Доколку ви треба помош со фотографиите, нашите фотографи можат да го направат тоа професионално. Дали да организираме?'
+];
+
+const PHOTOS_PHOTOGRAPHY_YES_ACK = [
+  'Одлично! Ќе ве контактираме за да организираме фотографирање на имотот.',
+  'Супер! Нашите соработници ќе ве контактираат за фотографирањето.'
+];
+
+// ========================================
+// REMINDER LADDER (2 days / 5 days) — the owner committed to sending
+// photos on Viber but hasn't. Sent by the engine's AWAITING_PHOTOS timer.
+// ========================================
+const PHOTOS_REMINDER_1 = [
+  'Здраво! Само да ве потсетам за фотографиите на имотот — доколку сте успеале да ги направите, испратете ни ги на Viber.',
+  'Здраво, да ве потсетам — ги очекуваме фотографиите на имотот на Viber за да го промовираме огласот.'
+];
+
+const PHOTOS_REMINDER_2 = [
+  'Здраво! Се уште ги очекуваме фотографиите на имотот. Доколку имате некаква потешкотија, пишете ни — ќе најдеме решение.',
+  'Здраво, само да проверам за фотографиите. Доколку не можете сами да ги направите, можеме да организираме професионално фотографирање.'
+];
+
+const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
+
+export const photosMessages = {
+  makeQuestion: () => pick(PHOTOS_MAKE_QUESTIONS),
+  makeYesAck: () => pick(PHOTOS_MAKE_YES_ACK),
+  photographyOffer: () => pick(PHOTOS_PHOTOGRAPHY_OFFER),
+  photographyYesAck: () => pick(PHOTOS_PHOTOGRAPHY_YES_ACK),
+  reminder: (n) => pick(n === 2 ? PHOTOS_REMINDER_2 : PHOTOS_REMINDER_1)
+};
+
+/**
+ * "IF THE PROPERTY IS WORTH IT — MANAGER REVIEWS THEM": a NO_PHOTOS lead
+ * whose price meets the transaction-specific threshold (config) is flagged
+ * photosManagerReview=true so the ops team reviews it. Rent vs sale use
+ * different thresholds (monthlyRent vs cleanPrice).
+ */
+export function isPhotosWorthManagerReview(session) {
+  const d = session?.collectedData || {};
+  if (d.transactionType === 'rent') {
+    return typeof d.monthlyRent === 'number' && d.monthlyRent >= config.PHOTOS_MANAGER_REVIEW_MIN_RENT;
+  }
+  return typeof d.cleanPrice === 'number' && d.cleanPrice >= config.PHOTOS_MANAGER_REVIEW_MIN_SALE_PRICE;
+}
 
 // ========================================
 // PHOTOS RECEIVED — owner says they sent / have the photos now

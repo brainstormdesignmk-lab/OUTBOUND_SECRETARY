@@ -164,5 +164,20 @@ export const config = {
   // error escalates the lead to a human (NEEDS_HUMAN). Kept well below
   // REPLY_TIMEOUT so a transient failure doesn't stall the whole campaign
   // waiting on a likely-non-responsive owner.
-  SERVICE_ERROR_WAIT_MS: envInt('ANA_SERVICE_ERROR_WAIT_MS', 5 * 60 * 1000)
+  SERVICE_ERROR_WAIT_MS: envInt('ANA_SERVICE_ERROR_WAIT_MS', 5 * 60 * 1000),
+
+  // === PHOTOS (marketing follow-up + reminder ladder + manager review) ===
+  // When the owner has NO photos ("NEMAM"), Ana asks if he could make them
+  // himself and send them on Viber (marketing value). If YES → VIBER_PENDING
+  // with a reminder ladder: remind at 2 days, follow up again at 5 days,
+  // close after PHOTOS_TIMEOUT_MS of silence (reported requirement).
+  PHOTOS_REMINDER_1_MS: envInt('ANA_PHOTOS_REMINDER_1_MS', 2 * 24 * 60 * 60 * 1000),
+  PHOTOS_REMINDER_2_MS: envInt('ANA_PHOTOS_REMINDER_2_MS', 5 * 24 * 60 * 60 * 1000),
+  PHOTOS_TIMEOUT_MS: envInt('ANA_PHOTOS_TIMEOUT_MS', 7 * 24 * 60 * 60 * 1000),
+  // "If the property is worth it — manager reviews them": a NO_PHOTOS lead
+  // whose price meets the transaction-specific threshold is flagged
+  // photosManagerReview=true for the ops team (the owner also gets a
+  // professional-photography offer from our agents).
+  PHOTOS_MANAGER_REVIEW_MIN_SALE_PRICE: envInt('ANA_PHOTOS_MANAGER_REVIEW_MIN_SALE_PRICE', 100000),
+  PHOTOS_MANAGER_REVIEW_MIN_RENT: envInt('ANA_PHOTOS_MANAGER_REVIEW_MIN_RENT', 400)
 };
