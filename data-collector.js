@@ -980,7 +980,9 @@ const FIELD_CONFIDENCE_KEYWORDS = {
   // TENANT PREFERENCES — tenant-profile vocabulary is unambiguous: the
   // extractor only fires on a matched category, so any extraction is a
   // direct answer to "Каков тип на станари преферирате?" → HIGH.
-  'tenantPreferences': /stanari|станари|zakupci|закупци|klienti|клиенти|milenici|миленици|semejst|семејст|studenti|студенти|vraboten|вработен|samohran|самохран|penzioner|пензионер|stranci|странци|samci|самци|pensioner|пенсионер/i,
+  // Extended (reported): children/elders/gender restrictions — deca, starci,
+  // zeni/zenski, mazi/mashki — plus the "samo za" restrictive marker.
+  'tenantPreferences': /stanari|станари|zakupci|закупци|klienti|клиенти|milenici|миленици|semejst|семејст|studenti|студенти|vraboten|вработен|samohran|самохран|penzioner|пензионер|stranci|странци|samci|самци|pensioner|пенсионер|deca|деца|starci|старци|zeni|жени|zenski|женски|zenska|женска|mazi|мажи|mashki|машки|mashka|машка|samo\s+za|само\s+за/i,
   // PRICE PER M² — "e/е za m2" phrasings are an explicit per-sqm answer.
   'pricePerSqm': /m2|м2|kvadrat|квадрат|kvadrata|квадрата/i
 };

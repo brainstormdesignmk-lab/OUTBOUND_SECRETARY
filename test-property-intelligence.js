@@ -147,6 +147,127 @@ assert('TP11 Cyrillic negation', JSON.stringify(tpCy?.excluded) === JSON.stringi
 assert('label pets → миленици', tenantCategoryLabel('pets') === 'миленици', '');
 
 // ============================================================
+// 2b. EXTENDED CATEGORIES (reported): children / elders / gender
+// restrictions + the "samo za" restrictive marker + bare "ne" negation
+// ============================================================
+
+// "NE DOZVOLUVAM DECA" — the reported exact phrasing (no children)
+const tp12 = extractTenantPreferences('NE DOZVOLUVAM DECA');
+assert('TP12 excluded=[children]', JSON.stringify(tp12?.excluded) === JSON.stringify(['children']), `got ${JSON.stringify(tp12?.excluded)}`);
+assert('TP12 preferred empty', tp12?.preferred.length === 0, '');
+
+// "samo za vraboteni" — restrictive-positive marker → preferred (the reported
+// "only for employed" phrasing; previously fell through to bare-answer too,
+// now explicitly preferred)
+const tp13 = extractTenantPreferences('samo za vraboteni');
+assert('TP13 preferred=[employed]', JSON.stringify(tp13?.preferred) === JSON.stringify(['employed']), `got ${JSON.stringify(tp13?.preferred)}`);
+assert('TP13 excluded empty', tp13?.excluded.length === 0, '');
+
+// Bare "ne" negation: "ne starci", "ne deca" (reported age restrictions)
+const tp14 = extractTenantPreferences('ne starci');
+assert('TP14 excluded=[elders]', JSON.stringify(tp14?.excluded) === JSON.stringify(['elders']), `got ${JSON.stringify(tp14?.excluded)}`);
+const tp15 = extractTenantPreferences('ne deca');
+assert('TP15 excluded=[children]', JSON.stringify(tp15?.excluded) === JSON.stringify(['children']), `got ${JSON.stringify(tp15?.excluded)}`);
+
+// Gender restrictions: "samo za zeni" → preferred women; "ne mazi" → excluded men
+const tp16 = extractTenantPreferences('samo za zeni');
+assert('TP16 preferred=[women]', JSON.stringify(tp16?.preferred) === JSON.stringify(['women']), `got ${JSON.stringify(tp16?.preferred)}`);
+const tp17 = extractTenantPreferences('ne mazi');
+assert('TP17 excluded=[men]', JSON.stringify(tp17?.excluded) === JSON.stringify(['men']), `got ${JSON.stringify(tp17?.excluded)}`);
+
+// Combined: "NE SAKAM DECA I STARCI" → both excluded
+const tp18 = extractTenantPreferences('NE SAKAM DECA I STARCI');
+assert('TP18 excluded=[children, elders]', JSON.stringify(tp18?.excluded) === JSON.stringify(['children', 'elders']), `got ${JSON.stringify(tp18?.excluded)}`);
+
+// Cyrillic extended phrasings
+const tp19 = extractTenantPreferences('не дозволувам деца');
+assert('TP19 Cyrillic excluded=[children]', JSON.stringify(tp19?.excluded) === JSON.stringify(['children']), `got ${JSON.stringify(tp19?.excluded)}`);
+const tp20 = extractTenantPreferences('само за вработени');
+assert('TP20 Cyrillic preferred=[employed]', JSON.stringify(tp20?.preferred) === JSON.stringify(['employed']), `got ${JSON.stringify(tp20?.preferred)}`);
+const tp21 = extractTenantPreferences('не старци');
+assert('TP21 Cyrillic excluded=[elders]', JSON.stringify(tp21?.excluded) === JSON.stringify(['elders']), `got ${JSON.stringify(tp21?.excluded)}`);
+const tp22 = extractTenantPreferences('само жени');
+assert('TP22 Cyrillic preferred=[women]', JSON.stringify(tp22?.preferred) === JSON.stringify(['women']), `got ${JSON.stringify(tp22?.preferred)}`);
+
+// FALSE-POSITIVE GUARDS — the adjective "stari" (old) must NOT fire elders:
+// "ne sakam stari stanovi" is about OLD APARTMENTS, not old people.
+assert('TP23 "ne sakam stari stanovi" → null (no elders from the adjective)', extractTenantPreferences('ne sakam stari stanovi') === null, `got ${JSON.stringify(extractTenantPreferences('ne sakam stari stanovi'))}`);
+// A property-fact message with a category word but no tenant context still
+// extracts (the notes preserve the statement) — but "kolku e cenata?" must stay null.
+assert('TP24 price question → null', extractTenantPreferences('kolku e cenata?') === null, '');
+
+const tp25 = extractTenantPreferences('ne sum siguren za deca');
+assert('TP25 uncertainty — no fabricated exclusion', (tp25?.excluded || []).includes('children') !== true,
+  `got ${JSON.stringify(tp25?.excluded)}`);
+assert('TP25 uncertainty — not preferred either', (tp25?.preferred || []).includes('children') !== true,
+  `got ${JSON.stringify(tp25?.preferred)}`);
+assert('TP25 notes still preserves the statement', /ne sum siguren za deca/.test(tp25?.notes || ''), '');
+
+const tp26 = extractTenantPreferences('ne znam za starci');
+assert('TP26 ne znam — no fabricated exclusion', (tp26?.excluded || []).includes('elders') !== true,
+  `got ${JSON.stringify(tp26?.excluded)}`);
+
+const tp27 = extractTenantPreferences('ne sakam deca, i starci');
+assert('TP27 same-polarity comma+i list — both excluded',
+  JSON.stringify(tp27?.excluded) === JSON.stringify(['children', 'elders']),
+  `got ${JSON.stringify(tp27)}`);
+assert('TP27 same-polarity list — nothing preferred', (tp27?.preferred || []).length === 0, '');
+
+const tp28 = extractTenantPreferences('ne deca, ne starci');
+assert('TP28 bare-ne repeated across comma clauses — both excluded',
+  JSON.stringify(tp28?.excluded) === JSON.stringify(['children', 'elders']),
+  `got ${JSON.stringify(tp28)}`);
+
+const tp29 = extractTenantPreferences('ne znam, deca se ok');
+assert('TP29 uncertainty in prior clause does not leak — deca preferred',
+  JSON.stringify(tp29?.preferred) === JSON.stringify(['children']),
+  `got ${JSON.stringify(tp29)}`);
+
+// New labels map to Macedonian for the broker comment
+assert('label children → деца', tenantCategoryLabel('children') === 'деца', '');
+assert('label elders → старци', tenantCategoryLabel('elders') === 'старци', '');
+assert('label women → жени', tenantCategoryLabel('women') === 'жени', '');
+assert('label men → мажи', tenantCategoryLabel('men') === 'мажи', '');
+
+// E2E through generateResponse: the tenant answer must be CAPTURED, not
+// swallowed by the agency handler (which matches the bare word "vraboteni"
+// = employees — reported shadowing: "samo za vraboteni" got the Metropolis
+// pitch and the profile was never stored).
+{
+  const s = {
+    adMemory: { transactionType: 'rent', propertyType: 'apartment', propertyLabel: 'станот' },
+    collectedData: { cooperationAccepted: true, transactionType: 'rent' },
+    messages: [{ role: 'model', text: 'Каков тип на станари преферирате?' }],
+    phone: '+38976000009'
+  };
+  const res = await generateResponse(s, 'NE DOZVOLUVAM DECA, SAMO ZA VRABOTENI');
+  assert('E2E-1: tenant answer captured through generateResponse',
+    s.collectedData.tenantPreferences &&
+    JSON.stringify(s.collectedData.tenantPreferences.excluded) === JSON.stringify(['children']) &&
+    JSON.stringify(s.collectedData.tenantPreferences.preferred) === JSON.stringify(['employed']),
+    `got ${JSON.stringify(s.collectedData.tenantPreferences)}`);
+  assert('E2E-2: NOT the Metropolis agency pitch', !/Metropolis/.test(res.text || ''), `got "${(res.text || '').slice(0, 60)}"`);
+}
+
+// AGENCY GUARD: a genuine agency-employee question outside tenant context
+// still gets the agency answer (the guard must not over-block).
+{
+  const s2 = {
+    adMemory: { transactionType: 'rent', propertyType: 'apartment', propertyLabel: 'станот' },
+    collectedData: { cooperationAccepted: false, transactionType: 'rent' },
+    messages: [{ role: 'model', text: 'Здраво, јас сум Ана од Metropolis. Дали е се уште достапен станот?' }],
+    phone: '+38976000009'
+  };
+  const res2 = await generateResponse(s2, 'kolku vraboteni imate?');
+  assert('E2E-3: "kolku vraboteni imate?" still → agency answer',
+    res2.type === 'NORMAL' && /Metropolis/.test(res2.text || ''),
+    `got [${res2.type}] "${(res2.text || '').slice(0, 60)}"`);
+  assert('E2E-4: no tenant preferences captured for the agency question',
+    !s2.collectedData.tenantPreferences,
+    `got ${JSON.stringify(s2.collectedData.tenantPreferences)}`);
+}
+
+// ============================================================
 // 3. BROKER COMMENT
 // ============================================================
 console.log(`\n=== 3. buildBrokerComment ===`);

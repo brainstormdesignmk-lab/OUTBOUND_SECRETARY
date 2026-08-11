@@ -99,7 +99,9 @@ export function calculateSellingPrice({ sqm, pricePerSqm, totalPrice, garagePric
 // ============================================================
 // TENANT PREFERENCE CATEGORIES — bilingual, canonical English keys
 // (spec categories: студенти, семејства, странци, самци, вработени,
-// самохрани родители, пензионери, миленици дозволени/без миленици)
+// самохрани родители, пензионери, миленици дозволени/без миленици;
+// extended: деца (children), старци (elders), жени (women), мажи (men) —
+// the reported age/gender restrictions "NE DOZVOLUVAM DECA", "NE STARCI")
 // ============================================================
 const TENANT_CATEGORIES = [
   { key: 'students', mk: 'студенти', re: /(?:^|[^a-zа-я])(?:studenti|студенти)(?:$|[^a-zа-я])/i },
@@ -109,17 +111,46 @@ const TENANT_CATEGORIES = [
   { key: 'employed', mk: 'вработени', re: /(?:^|[^a-zа-я])(?:vraboteni|вработени|zaposleni|запослени)(?:$|[^a-zа-я])/i },
   { key: 'single_parents', mk: 'самохрани родители', re: /(?:^|[^a-zа-я])(?:samohrani|самохрани)(?:$|[^a-zа-я])/i },
   { key: 'pensioners', mk: 'пензионери', re: /(?:^|[^a-zа-я])(?:penzioneri|пензионери|pensioneri|пенсионери)(?:$|[^a-zа-я])/i },
-  { key: 'pets', mk: 'миленици', re: /(?:^|[^a-zа-я])(?:milenici|миленици)(?:$|[^a-zа-я])/i }
+  { key: 'pets', mk: 'миленици', re: /(?:^|[^a-zа-я])(?:milenici|миленици)(?:$|[^a-zа-я])/i },
+  // AGE RESTRICTIONS (reported): "NE DOZVOLUVAM DECA" (no children),
+  // "NE STARCI" (no old people). Deliberately NO "stari"/"стари" (the
+  // adjective) — "stari stanovi" (old apartments) would false-positive.
+  { key: 'children', mk: 'деца', re: /(?:^|[^a-zа-я])(?:deca|деца)(?:$|[^a-zа-я])/i },
+  { key: 'elders', mk: 'старци', re: /(?:^|[^a-zа-я])(?:starci|старци)(?:$|[^a-zа-я])/i },
+  // GENDER RESTRICTIONS (reported): "SAMO ZA ZENI" (only for women),
+  // "NE MAZI" (no men). Both the noun (zeni/mazi) and adjective
+  // (zenski/mashki) forms are covered; boundary-guarded so "zenski" never
+  // matches inside compound words.
+  { key: 'women', mk: 'жени', re: /(?:^|[^a-zа-я])(?:zeni|жени|zenski|женски|zenska|женска)(?:$|[^a-zа-я])/i },
+  { key: 'men', mk: 'мажи', re: /(?:^|[^a-zа-я])(?:mazi|мажи|mashki|машки|mashka|машка)(?:$|[^a-zа-я])/i }
 ];
 
 // Negation phrases that mark EXCLUDED categories. "ne sakam milenici",
 // "bez milenici", "nema milenici", "ne dozvoluvam milenici", "odbivam...".
-const TENANT_EXCLUDE_RE = /(?:ne\s+sakam|не\s+сакам|ne\s+dozvoluvam|не\s+дозволувам|ne\s+primam|не\s+примам|odbivam|одбивам|bez|без|nema|нема|nemaat|немаат|ne\s+mi|не\s+ми|ne\s+gi|не\s+ги|ne\s+gu|не\s+гу)/i;
+// BARE "ne" (added): the reported short forms "NE STARCI", "NE DECA" are
+// direct negations with no verb — previously only "ne sakam /
+// ne dozvoluvam / ne primam" opened the exclusion gate, so "NE DECA" fell
+// through to preferred. The lookahead tolerates end-of-slice and
+// punctuation: the category regex consumes the boundary space, so the
+// before-slice ends with a bare "ne" ("ne starci" → before="ne"). The
+// notes always preserve the exact wording, so an ambiguous "ne" (e.g. "ne
+// sum siguren za deca") stays agent-interpretable.
+// NOTE: the BARE "ne"/"не" is deliberately NOT here — a whole-clause bare
+// "ne" made "ne sum siguren za deca" (I'm not sure about children)
+// fabricate an exclusion. The bare "ne" lives ONLY in the near-tail check
+// inside extractTenantPreferences (reviewer finding), where it can only be
+// the immediate token before the category ("NE DECA", "ne, starci").
+export const TENANT_EXCLUDE_RE = /(?:ne\s+sakam|не\s+сакам|ne\s+dozvoluvam|не\s+дозволувам|ne\s+primam|не\s+примам|odbivam|одбивам|bez|без|nema|нема|nemaat|немаат|ne\s+mi|не\s+ми|ne\s+gi|не\s+ги|ne\s+gu|не\s+гу)/i;
 
 // Positive phrases that mark PREFERRED categories. "preferiram semejstva",
 // "semejstva se ok", "dobri se studenti", "bi sakal vraboteni",
 // "najdobro semejstva", "moze studenti", "sakam semejstva".
-const TENANT_PREFER_RE = /(?:preferiram|преферирам|bi\s+sakal|би\s+сакал|bi\s+sakame|би\s+сакаме|sakam|сакам|sakame|сакаме|dobri\s+se|добри\s+се|dobro|добро|se\s+ok|се\s+океј|se\s+ok|ok\s+se|okey\s+se|najdobro|најдобро|moze\s+da|може\s+да|moze|може|dozvoleni|дозволени)/i;
+// "samo za"/"само за" (ONLY for — the reported "SAMO ZA VRABOTENI") and
+// "isklucivo"/"исклучиво" (exclusively) are restrictive-positive markers.
+// Exporting for the early-responses agency guard (handlers/early-responses.js)
+// so the guard's "is this a tenant answer" marker can NEVER drift from the
+// extractor's prefer vocabulary.
+export const TENANT_PREFER_RE = /(?:preferiram|преферирам|bi\s+sakal|би\s+сакал|bi\s+sakame|би\s+сакаме|sakam|сакам|sakame|сакаме|dobri\s+se|добри\s+се|dobro|добро|se\s+ok|се\s+океј|se\s+ok|ok\s+se|okey\s+se|najdobro|најдобро|moze\s+da|може\s+да|moze|може|dozvoleni|дозволени|samo\s+za|само\s+за|samo|само|isklucivo|исклучиво)/i;
 
 // ============================================================
 // extractTenantPreferences(u)
@@ -142,28 +173,72 @@ export function extractTenantPreferences(u) {
 
   const preferred = [];
   const excluded = [];
+  let uncertainSkipped = false; // a category was skipped for uncertainty — see return below
+  // CLAUSE-AWARE POLARITY: split the message into polarity clauses on
+  // commas/semicolons and contrast conjunctions (ama/ама, no/но,
+  // sepak/сепак). Each clause carries its own negation or preference, so a
+  // mixed statement like "NE DOZVOLUVAM DECA, SAMO ZA VRABOTENI" evaluates
+  // each category against ITS OWN clause — children's clause negates,
+  // employed's clause prefers (previously the whole preceding text was
+  // inspected, so the first clause's "ne dozvoluvam" leaked into the second
+  // and misclassified employed as excluded — reported). "i/и" (and) is
+  // deliberately NOT a splitter: same-polarity lists ("NE SAKAM DECA I
+  // STARCI") must stay in ONE clause so both stay excluded. The comma split
+  // carries a negative lookahead so it also refuses to break a list joined
+  // with a comma + "i/и" ("ne sakam deca, i starci" stays one clause —
+  // otherwise starci's fresh clause would lose the negation and flip to
+  // preferred, a regression from the old whole-text scan).
+  const polarityClauses = low.split(/[,;](?!\s*(?:i|и)(?:\s|$))|\s+(?:ama|ама|no|но|sepak|сепак)\s+/i).filter(Boolean);
   for (const cat of TENANT_CATEGORIES) {
-    const firstIdx = low.search(cat.re);
-    if (firstIdx === -1) continue;
-    // CLAUSE-AWARE POLARITY — inspect only the text BEFORE this category
-    // (the nearest preceding polarity phrase decides, matching word order):
+    // Find the clause containing this category; only its text-BEFORE the
+    // category decides polarity (the nearest preceding marker wins):
     //   "NE SAKAM milenici"      → negator before the category → excluded
     //   "PREFEERIRAM semejstva"  → prefer before the category → preferred
     //   "semejstva se ok"        → no marker before (idx 0) → preferred
     // The POSITIVE check runs on the SAME `before` slice only — checking the
-    // whole message made "sakam" (a substring inside "ne sakam") cancel the
+    // whole clause made "sakam" (a substring inside "ne sakam") cancel the
     // negation and misclassify "NE SAKAM MILENICI" as preferred (reported
-    // lead 5502969 phrasing shape). A marker AFTER the category never flips
-    // it ("BEZ MILENICI, AMA SEMEJSTVA SE OK" → pets excluded, families
-    // preferred — the second clause is its own `before` slice).
-    const before = low.slice(0, firstIdx);
-    const isExcluded = TENANT_EXCLUDE_RE.test(before);
-    const isPreferred = !isExcluded && TENANT_PREFER_RE.test(before);
+    // lead 5502969 phrasing shape). A marker AFTER the category never flips it.
+    let clauseBefore = null;
+    for (const clause of polarityClauses) {
+      const firstIdx = clause.search(cat.re);
+      if (firstIdx !== -1) { clauseBefore = clause.slice(0, firstIdx); break; }
+    }
+    if (clauseBefore === null) continue;
+    // UNCERTAINTY GUARD: "ne sum siguren za deca", "ne znam za starci" —
+    // the owner hasn't decided, so the category must not be recorded in
+    // EITHER list (a false "Не прифаќа: деца" broker line would tell agents
+    // to exclude families with kids). The notes line still preserves the
+    // owner's exact wording for human review. Scoped to the clause before
+    // the category so "ne znam, deca se ok" keeps the decided clause.
+    const UNCERTAIN_RE = /(?:ne\s+sum\s+siguren|не\s+сум\s+сигурен|ne\s+som\s+siguren|не\s+сом\s+сигурен|ne\s+znam|не\s+знам|neznam|незнам|ne\s+znam\s+tocno|не\s+знам\s+точно|mislam\s+deka|мислам\s+дека|mozda|можеби|valjda|ваљда)/i;
+    if (UNCERTAIN_RE.test(clauseBefore)) { uncertainSkipped = true; continue; }
+    // BARE-NE TAIL CHECK: the reported short negations ("NE DECA", "NE
+    // STARCI") have the bare "ne" IMMEDIATELY before the category. Only the
+    // LAST TWO tokens before the category are consulted for the bare "ne" —
+    // a 3-token tail made "ne sum siguren za deca" (ne + sum + siguren)
+    // still start with "ne" and fabricate the exclusion (reviewer finding).
+    // The verb forms ("ne sakam", "ne dozvoluvam", "bez", "nema") stay
+    // whole-clause in TENANT_EXCLUDE_RE.
+    const clauseTail = clauseBefore.trim().split(/\s+/).slice(-2).join(' ');
+    const isExcluded = TENANT_EXCLUDE_RE.test(clauseBefore) ||
+      /(?:^|\s)(?:ne|не)(?=[\s,;:!?.]|$)/i.test(clauseTail);
+    const isPreferred = !isExcluded && TENANT_PREFER_RE.test(clauseBefore);
     if (isExcluded) excluded.push(cat.key);
     else preferred.push(cat.key); // explicit prefer OR bare answer → preference
   }
 
-  if (preferred.length === 0 && excluded.length === 0) return null;
+  if (preferred.length === 0 && excluded.length === 0) {
+    // Nothing was decided. If the ONLY reason was owner uncertainty ("ne sum
+    // siguren za deca"), still return the notes-only result — the statement
+    // reaches the broker comment, and Ana moves on instead of re-asking a
+    // question the owner already answered. Otherwise (no tenant vocabulary
+    // at all) return null.
+    if (uncertainSkipped) {
+      return { preferred: [], excluded: [], notes: `Сопственикот изјави: ${original}` };
+    }
+    return null;
+  }
   return {
     preferred,
     excluded,

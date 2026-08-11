@@ -35,6 +35,7 @@ import {
   isAskingWhoPaysForLegalCosts
 } from '../objections.js';
 import { parseAvailableFromDate, formatAvailableFromDate } from '../property-extractor.js';
+import { extractTenantPreferences, TENANT_PREFER_RE, TENANT_EXCLUDE_RE } from '../property-intelligence.js';
 
 // ========================================
 // AVAILABILITY-POSITIVE PHRASES (shared)
@@ -402,12 +403,41 @@ export function runEarlyResponses({ u, isRent, session }) {
   }
 
   // ========================================
+  // TENANT-PREFERENCES ANSWER GUARD (MUST run BEFORE the agency block):
+  // the agency handler below matches the bare word "vraboteni" (employees),
+  // so a tenant-profile answer — "samo za vraboteni", "preferiram
+  // vraboteni", or a bare "vraboteni" right after "Каков тип на станари
+  // преферирате?" — was swallowed by the Metropolis pitch and the profile
+  // was NEVER captured (reported). When a RENT message parses to tenant
+  // categories AND carries a tenant-context marker (samo za / preferiram /
+  // ne sakam / dozvoluvam + category), OR Ana's last reply asked the tenant
+  // question, skip the agency pitch so the extraction pass captures it.
+  // A genuine agency question ("kolku vraboteni imate?" outside tenant
+  // context) is unaffected — no marker, no tenant question asked.
+  // ========================================
+  const tenantPrefAnswerContext = isRent && (() => {
+    if (!extractTenantPreferences(u)) return false;
+    // TENANT CONTEXT MARKERS — imported from property-intelligence.js so this
+    // guard can NEVER drift from the extractor's own polarity vocabulary
+    // (reviewer finding: the hand-rolled marker missed "semejstva se ok" /
+    // "vraboteni se ok" / "dobro" prefer shapes, so those answers still got
+    // swallowed by the agency pitch). A category word (extractTenantPreferences
+    // non-null) + ANY prefer/exclude marker = a tenant-profile answer.
+    const tenantMarker = TENANT_PREFER_RE.test(u) || TENANT_EXCLUDE_RE.test(u);
+    const tenantQuestionAsked =
+      /(?:станари|закупци|клиенти|преферирате|профил)/i.test(recentContextText(session));
+    const bareDirectAnswer =
+      /^\s*(?:deca|деца|vraboten|вработен|zeni|жени|zensk|женск|mazi|мажи|mashk|машки|starci|старци|semejst|семејст|studenti|студенти|milenici|миленици|samci|самци|stranci|странци|samohran|самохран|penzioner|пензионер)\s*$/i.test(u);
+    return tenantMarker || tenantQuestionAsked || bareDirectAnswer;
+  })();
+
+  // ========================================
   // HARDCODED: Agency Questions (answer BEFORE anything else except
   // commission-work / no-experience questions — the owner asks about the
   // agency itself: name, experience, location). Answer immediately. Never
   // continue data collection until the question is addressed.
   // ========================================
-  if (isAskingAboutAgency(u)) {
+  if (!tenantPrefAnswerContext && isAskingAboutAgency(u)) {
     const agencyAnswers = [
       'Ние сме Metropolis, агенција за недвижности. Работиме повеќе од 10 години и имаме искуство со продажба и издавање на станови, куќи и деловни простори. Дали имате некое друго прашање?',
       'Јас сум Ана од Metropolis. Metropolis е агенција за недвижности со повеќегодишно искуство на македонскиот пазар. Нашата канцеларија е во Скопје. Дали сакате да дознаете нешто повеќе?',
