@@ -32,7 +32,14 @@ const tests = [
   // REJECTED should still work
   ['ne', {intent:'REJECTED', minConf:0.85}],
   ['ne sum zainteresiran', {intent:'REJECTED', minConf:0.85}],
+  ['ne sum', {intent:'REJECTED', minConf:0.85}],
+  ['NE SUM, FALA', {intent:'REJECTED', minConf:0.85}],
   ['ne sakam', {intent:'REJECTED', minConf:0.85}],
+  ['ne sakam sorabotka', {intent:'REJECTED', minConf:0.85}],
+  ['ne sakam sorabotka so agencii', {intent:'REJECTED', minConf:0.85}],
+  // Hesitation must NOT be caught by the bare-ne-sum rule
+  ['ne sum siguren', {intent:'INTERESTED', minConf:0.50}],
+  ['ne sum sigurna', {intent:'INTERESTED', minConf:0.50}],
   ['ostavi me', {intent:'REJECTED', minConf:0.85}],
 
   // INTERESTED should still work

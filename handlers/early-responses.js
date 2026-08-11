@@ -204,6 +204,43 @@ export function runEarlyResponses({ u, isRent, session }) {
   }
 
   // ========================================
+  // REFUSAL GUARD (reported, lead 5436709): a clear negated-cooperation
+  // answer in PERSUASION must reach the classifier (→ REJECTED → rejection
+  // rebuttal ladder — rejectionCount++ in persuasion-phase.js), NEVER the
+  // objection/commission/agency handlers below. isAskingAboutCommission's
+  // bare "sorabotka" keyword used to swallow "NE SAKAM SORABOTKA SO
+  // AGENCII" (and isAskingAboutAgency swallows any "agencija" mention), so
+  // the refusal was answered with the commission explanation and the
+  // rejection protocol never ran — Ana repeated the pitch forever.
+  //
+  // Guarded to PERSUASION ONLY (cooperationAccepted !== true): inside
+  // DATA_COLLECTION the cooperation-rollback block above and the field
+  // extractors own this vocabulary.
+  //
+  // Fires when BOTH a refusal phrase AND (short/elliptical message OR
+  // cooperation/agency context) hold — so a commission-specific refusal like
+  // "ne sakam da platam provizija" (5 words, no cooperation/agency word)
+  // still gets the commission explanation, while "NE SAKAM SORABOTKA SO
+  // AGENCII" and bare "NE SAKAM" route to the rejection ladder.
+  // ========================================
+  if (!session.collectedData.cooperationAccepted) {
+    const REFUSAL_GUARD_RE =
+      /ne\s*sakam|не\s*сакам|ne\s+sum\s+zainteresiran|не\s+сум\s+заинтересиран|ne\s+mi\s+treba|не\s+ми\s+треба|nemam\s+potreba|немам\s+потреба|bez\s+agencija|без\s+агенциј|nema\s+sorabotka|нема\s+соработка|ne\s+planira\s+da\s+sorabotuv|не\s+планира\s+да\s+соработув|ne\s+interesira|не\s+интересира|nema\s+da\s+sorabotuv|нема\s+да\s+соработув|ne\s*sum\s*(?:[,.!?]+\s*)?(?:fala|фала|blagodaram|благодарам)?\s*[.!?]?$/i;
+    const COOP_AGENCY_CTX_RE = /sorabotk|соработк|agenci|агенци|zakup|закуп|izdavanje|издавање|prodazba|продажба|imot|имот/i;
+    // COMMISSION-SPECIFIC REFUSAL EXCLUSION (reviewer finding): "ne sakam
+    // provizija" / "ne sakam %" refuse a SPECIFIC TERM, not cooperation —
+    // they must keep the commission explanation (the rejection rebuttal is a
+    // worse answer on rent). A message naming commission vocabulary is never
+    // guarded, regardless of length.
+    const isCommissionSpecific = /provizij|провизиј|komisi|комиси|%|procent|процент/i.test(u);
+    const isShort = u.split(/\s+/).length <= 4;
+    if (REFUSAL_GUARD_RE.test(u) && !isCommissionSpecific && (isShort || COOP_AGENCY_CTX_RE.test(u))) {
+      console.log(`[REFUSAL GUARD: "${u.trim().slice(0, 50)}" → falls through to rejection classifier]`);
+      return null;
+    }
+  }
+
+  // ========================================
   // HARDCODED: Property already SOLD / no longer available
   // The owner says the property is GONE from the market — "go prodadov pred
   // dva dena" (I sold it two days ago), "veke prodaden" (already sold),

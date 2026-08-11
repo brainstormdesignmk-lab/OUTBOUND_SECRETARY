@@ -246,6 +246,19 @@ export function classifyIntent(userInput, conversation) {
     return { intent: "REJECTED", confidence: 0.95, reason: "standalone ne" };
   }
   if (/(ne|не)\s*sum\s*(zainteresiran|заинтересиран)/i.test(u)) return { intent: "REJECTED", confidence: 0.95, reason: "ne sum zainteresiran" };
+  // BARE "NE SUM" (reported, lead 5436709): "NE SUM" / "NE SUM, FALA" — a
+  // short direct answer to the cooperation/interest question ("Дали сте
+  // заинтересирани?") is a DECLINE, but the old flow read it as INTERESTED
+  // 0.5 (ambiguous default) and Ana kept pitching. SHORT-message-only (≤ 4
+  // words, only a polite tail allowed after the copula) so "ne sum siguren"
+  // (I'm not sure — hesitation, stays INTERESTED) and any mid-sentence
+  // "ne sum ..." declaration can never match. The availability family
+  // ("uste ne sum go prodal" = still available) is handled by the
+  // availability handler before this ever runs.
+  if (/^(?:ne|не)\s*sum\s*(?:[,.!?]+\s*)?(?:fala|фала|blagodaram|благодарам)?\s*[.!?]?$/i.test(u) &&
+      u.split(/\s+/).length <= 4) {
+    return { intent: "REJECTED", confidence: 0.85, reason: "bare ne sum (short answer)" };
+  }
   if (/(ne|не)\s*me\s*(interesira|интересира)/i.test(u)) return { intent: "REJECTED", confidence: 0.95, reason: "ne me interesira" };
   if (/(ne|не)\s*(sakam|сакам)/i.test(u)) return { intent: "REJECTED", confidence: 0.95, reason: "ne sakam" };
   if (/(ne|не)\s*mi\s*(treba|треба)/i.test(u)) return { intent: "REJECTED", confidence: 0.95, reason: "ne mi treba" };
