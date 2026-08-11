@@ -279,7 +279,18 @@ function matchObjection(text, isRent) {
 // HELPER: Rent Topic Detection
 // ========================================
 function isAskingAboutRentRules(text) {
-  return /депозит|depozit|минимален период|minimum stay|стандардно|standardno|uslovi za izdavanje|услови за издавање|kako rabotite|како работите|sorabotka za kirija|соработка за кирија|deposit|depozit|kirija|кирија|prv mesec|прв месец|dogovor|договор|potpis|потпис|kako funkcionira|како функционира|kako tece|како тече|standardno|стандардно|kako izdavate|како издавате|kako se izdava|како се издава/i.test(text);
+  // PRICE-ANSWER GUARD (reported lead 3571074): the bare "kirija|кирија"
+  // stem below matches ANY message containing the word "rent" — including
+  // the most natural ANSWER to the rent question ("KIRIJATA E 300 EVRA",
+  // "kirijata e 300", "plakjam 300 evra kirija"). The rent-rules explanation
+  // used to swallow those answers BEFORE extraction could collect the price
+  // (documented as a known limitation in test-price-correction C3). A
+  // message carrying a concrete price is an ANSWER, not a question about
+  // rent terms — let extraction handle it. Question forms ("kako raboti
+  // kirijata?", "kolku e depozitot?") carry no price and still match.
+  if (/\d+\s*(?:evra|евра|eur|evro|евро|е\b|e\b)/i.test(text) && /kirij|кириј|plakj|плаќ|zema|зем/i.test(text)) return false;
+  if (/\d{2,}/.test(text) && /kirij|кириј/i.test(text)) return false;
+  return /депозит|depozit|минимален период|minimalen period|минималниот период|minimalniot period|minimum stay|стандардно|standardno|uslovi za izdavanje|услови за издавање|uslovite za izdavanje|условите за издавање|kako rabotite|како работите|sorabotka za kirija|соработка за кирија|deposit|depozit|kirija|кирија|prv mesec|прв месец|dogovor|договор|potpis|потпис|kako funkcionira|како функционира|kako tece|како тече|standardno|стандардно|kako izdavate|како издавате|kako se izdava|како се издава/i.test(text);
 }
 
 function isAskingAboutRentCommission(text) {

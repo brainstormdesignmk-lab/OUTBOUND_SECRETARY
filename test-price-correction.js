@@ -305,21 +305,99 @@ console.log('\n=== E: early responses during data collection ===');
   assert('E1: confidence=0.95', s.collectedData.monthlyRentConfidence === 0.95, `got ${JSON.stringify(s.collectedData.monthlyRentConfidence)}`);
 }
 
-// E2: rent-rules swallow — "kirijata e 300" matches isAskingAboutRentRules
-// (bare "kirija" stem), so the rent-rules answer used to swallow the price
-// correction entirely. Now the correction is applied first.
+// E2: rent-rules swallow FIXED (reported lead 3571074) — "kirijata e 300"
+// used to match isAskingAboutRentRules (bare "kirija" stem), so the
+// rent-rules explanation swallowed the price correction entirely. The
+// price-answer guard now routes any message carrying a price + rent context
+// to extraction, so the correction is applied normally and the flow
+// continues (no rent-rules spiel).
 {
   const s = freshRentSession();
   const res = await generateResponse(s, 'kirijata e 300');
-  assert('E2: rent-rules answer returned', res.type === 'NORMAL' && /кириј|депозит/i.test(res.text || ''), `got [${res.type}] "${(res.text || '').substring(0, 80)}"`);
+  assert('E2: NO rent-rules swallow — "kirijata e 300" reaches extraction', res.type === 'QUESTION' && /квадратур/i.test(res.text || ''), `got [${res.type}] "${(res.text || '').substring(0, 80)}"`);
   assert('E2: monthlyRent corrected 350 → 300', s.collectedData.monthlyRent === 300, `got ${JSON.stringify(s.collectedData.monthlyRent)}`);
+  assert('E2: confidence=0.95', s.collectedData.monthlyRentConfidence === 0.95, `got ${JSON.stringify(s.collectedData.monthlyRentConfidence)}`);
 }
 
 // E2b: Cyrillic variant of the rent-rules swallow
 {
   const s = freshRentSession();
-  await generateResponse(s, 'киријата е 300');
+  const res = await generateResponse(s, 'киријата е 300');
+  assert('E2b: NO rent-rules swallow — Cyrillic "киријата е 300" reaches extraction', res.type === 'QUESTION' && /квадратур/i.test(res.text || ''), `got [${res.type}] "${(res.text || '').substring(0, 80)}"`);
   assert('E2b: Cyrillic "киријата е 300" → monthlyRent=300', s.collectedData.monthlyRent === 300, `got ${JSON.stringify(s.collectedData.monthlyRent)}`);
+}
+
+// E4: FIRST-TIME rent answer with the "kirija" word (reported lead 3571074)
+// — "KIRIJATA E 300 EVRA" is the most natural rent answer, but the bare
+// "kirija" stem in isAskingAboutRentRules used to swallow it into the
+// rent-rules explanation before extraction, so monthlyRent stayed undefined
+// and Ana re-asked. Now the price-answer guard routes it to extraction.
+{
+  const s = {
+    adMemory: { transactionType: 'rent', propertyType: 'apartment', propertyLabel: 'станот' },
+    collectedData: { cooperationAccepted: true, transactionType: 'rent' },
+    messages: [{ role: 'model', text: 'Која е месечната кирија за станот?' }],
+    phone: '+38970000001'
+  };
+  const res = await generateResponse(s, 'KIRIJATA E 300 EVRA');
+  assert('E4: first-time "KIRIJATA E 300 EVRA" → monthlyRent=300', s.collectedData.monthlyRent === 300, `got ${JSON.stringify(s.collectedData.monthlyRent)}`);
+  assert('E4: confidence=0.95', s.collectedData.monthlyRentConfidence === 0.95, `got ${JSON.stringify(s.collectedData.monthlyRentConfidence)}`);
+  assert('E4: flow advances to the next question (no rent-rules spiel)', res.type === 'QUESTION', `got [${res.type}] "${(res.text || '').substring(0, 80)}"`);
+}
+
+// E4b: Cyrillic + short forms
+{
+  const s = {
+    adMemory: { transactionType: 'rent', propertyType: 'apartment', propertyLabel: 'станот' },
+    collectedData: { cooperationAccepted: true, transactionType: 'rent' },
+    messages: [{ role: 'model', text: 'Која е месечната кирија за станот?' }],
+    phone: '+38970000001'
+  };
+  await generateResponse(s, 'киријата е 300');
+  assert('E4b: Cyrillic "киријата е 300" → monthlyRent=300', s.collectedData.monthlyRent === 300, `got ${JSON.stringify(s.collectedData.monthlyRent)}`);
+}
+
+// E4c: guard negatives — real rent-rules QUESTIONS still get the rules answer
+// (the price-answer guard must NOT silence genuine questions)
+{
+  const s = {
+    adMemory: { transactionType: 'rent', propertyType: 'apartment', propertyLabel: 'станот' },
+    collectedData: { cooperationAccepted: true, transactionType: 'rent' },
+    messages: [{ role: 'model', text: 'Која е месечната кирија за станот?' }],
+    phone: '+38970000001'
+  };
+  const res = await generateResponse(s, 'kolku e depozitot?');
+  assert('E4c: "kolku e depozitot?" still gets the rent-rules answer', res.type === 'NORMAL' && /депозит|кириј/i.test(res.text || ''), `got [${res.type}] "${(res.text || '').substring(0, 80)}"`);
+  assert('E4c: no price collected from a question', s.collectedData.monthlyRent === undefined, `got ${JSON.stringify(s.collectedData.monthlyRent)}`);
+}
+
+// E4d: confirm-with-price shape (reviewer finding) — "dali kirijata e 300
+// evra?" (a confirm question that CARRIES a price) must collect 300 via
+// extraction, not fall into the rent-rules explanation. The price-answer
+// guard treats it as an answer — correct: the owner stated a concrete price.
+{
+  const s = {
+    adMemory: { transactionType: 'rent', propertyType: 'apartment', propertyLabel: 'станот' },
+    collectedData: { cooperationAccepted: true, transactionType: 'rent' },
+    messages: [{ role: 'model', text: 'Која е месечната кирија за станот?' }],
+    phone: '+38970000001'
+  };
+  const res = await generateResponse(s, 'dali kirijata e 300 evra?');
+  assert('E4d: "dali kirijata e 300 evra?" → monthlyRent=300 (confirm-with-price is an answer)', s.collectedData.monthlyRent === 300, `got ${JSON.stringify(s.collectedData.monthlyRent)}`);
+  assert('E4d: flow advances', res.type === 'QUESTION', `got [${res.type}] "${(res.text || '').substring(0, 80)}"`);
+}
+
+// E4e: single-digit deposit question stays a rent-rules question (the \d{2,}
+// guard intentionally leaves single digits alone — "2 kirii" is not a price)
+{
+  const s = {
+    adMemory: { transactionType: 'rent', propertyType: 'apartment', propertyLabel: 'станот' },
+    collectedData: { cooperationAccepted: true, transactionType: 'rent' },
+    messages: [{ role: 'model', text: 'Која е месечната кирија за станот?' }],
+    phone: '+38970000001'
+  };
+  const res = await generateResponse(s, 'kolku e depozitot, 2 kirii?');
+  assert('E4e: "kolku e depozitot, 2 kirii?" stays a rent-rules question', res.type === 'NORMAL' && /депозит|кириј/i.test(res.text || ''), `got [${res.type}] "${(res.text || '').substring(0, 80)}"`);
 }
 
 // E3: sale from_whose_pocket question + correction in one message
