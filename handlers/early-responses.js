@@ -30,6 +30,8 @@ import {
   isAskingAboutNoAgencyExperience,
   getRandomNoAgencyExperienceResponse,
   isAskingAboutClients,
+  isAskingAboutClientQuality,
+  getRandomClientQualityResponse,
   isAskingWhoPaysForLegalCosts
 } from '../objections.js';
 import { parseAvailableFromDate, formatAvailableFromDate } from '../property-extractor.js';
@@ -524,7 +526,26 @@ export function runEarlyResponses({ u, isRent, session }) {
     };
   }
 
- // HARDCODED: Client question (requires longer phrase context, not bare words)
+ // HARDCODED: Client-QUALITY / verification concern — "ama dali klientite vi
+  // se provereni ?", "ozbilni ?" (serious?), "sakam ozbilni klienti ne nekoj
+  // salabajzeri". The owner is still NEGOTIATING (reported, lead 3571074:
+  // "mozeme da probame" + "ama dali klientite vi se provereni ?" + "ozbilni ?"
+  // — Ana jumped into data collection while the owner was still asking about
+  // client quality). Answer the reassurance ANY time it appears, in ANY phase
+  // (the router runs before phase detection), so a client-verification
+  // question is never swallowed by a data-collection question. The bare
+  // follow-up ("ozbilni ?") resolves its referent from the same-turn context
+  // (recentContextText — the whole batch is visible; same trick as the
+  // who-pays-the-notary gate). MUST run BEFORE isAskingAboutClients below so
+  // the two client gates can never shadow each other.
+  if (isAskingAboutClientQuality(u, recentContextText(session))) {
+    return {
+      text: getRandomClientQualityResponse(isRent),
+      type: "NORMAL"
+    };
+  }
+
+  // HARDCODED: Client question (requires longer phrase context, not bare words)
   // Uses the SHARED isAskingAboutClients gate (objections.js — single source of
   // truth, includes the "imate nekoj zainteresiran" family and bare "imate
   // zainteresirani" variants). An inline copy used to live here and drifted

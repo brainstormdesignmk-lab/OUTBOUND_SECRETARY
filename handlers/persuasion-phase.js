@@ -15,6 +15,7 @@
 //      exponential-backoff retry and post-processing.
 // ========================================
 import { classifyIntent, CONV_CONTINUATION_WORDS as convContWords, HESITATION_GUARD_WORDS as hesitationWords, parseConversationContext } from '../classifier.js';
+import { isClientQualityConcern } from '../objections.js';
 import { buildPersuasionContext, buildPersuasionPrompt, postProcessPersuasionResponse } from '../persuasion.js';
 import { generateCompletion } from '../llm-provider.js';
 import { transitionTo } from './state-machine.js';
@@ -32,6 +33,36 @@ import { transitionTo } from './state-machine.js';
  */
 function mirrorPhase(session, phase, event = 'phase_detected') {
   transitionTo(session, phase, event);
+}
+
+// ========================================
+// TRAILING-NEGOTIATION GUARD (reported, lead 3571074): the owner's CURRENT
+// TURN (all owner messages since Ana's last reply) ends with a
+// client-quality / verification concern — "mozeme da probame" +
+// "ama dali klientite vi se provereni ?" + "ozbilni ?". The acceptance is
+// CONDITIONAL: committing to DATA_COLLECTION on message 1 makes Ana ask
+// for the rent while the owner is still extracting promises about the
+// clientele. When the LAST message of the turn is a concern, hold the
+// transition: stay in PERSUASION so the concern is answered first and the
+// owner re-confirms cleanly. (The engine appends every grace-batch text to
+// session.messages at receipt, so the WHOLE batch is visible while ANY
+// message of it is processed — same property the availability and
+// who-pays-the-notary helpers rely on.)
+// ========================================
+// Returns the concern text when the turn's LAST message is a strict
+// client-quality concern, else null (the callers test `!concernText`).
+function trailingNegotiationConcernText(session) {
+  const msgs = session.messages || [];
+  const turn = [];
+  for (let i = msgs.length - 1; i >= 0; i--) {
+    const m = msgs[i];
+    if (m.role === 'model') break; // Ana's last reply ends the turn
+    turn.unshift(m);
+  }
+  if (turn.length === 0) return null;
+  const lastText = turn[turn.length - 1]?.text || '';
+  const turnText = turn.map(m => m.text || '').join(' ');
+  return isClientQualityConcern(lastText, turnText) ? lastText : null;
 }
 
 // IMPORTANT: env vars are loaded by env.js (see ../env.js) — the key
@@ -91,7 +122,18 @@ export function detectPhase({ u, conv, session, isRent }) {
     const futureCooperationAsked =
       /(?:во\s+иднина|vo\s+idnina|иднина|idnina|ако\s+(?:имате|имаш|има|сакате)|ako\s+(?:imate|imas|ima|sakate)|доколку|dokolku|друг\s+имот|drug\s+imot|друг\s+стан|drug\s+stan|подоцна|podocna|во\s+прилика|vo\s+prilika|кога\s+ќе|koga\s+ke|следниот\s+пат|sledniot\s+pat)/i.test(lastAnaMsg);
 
-    if (isShortPositiveConfirm && !futureCooperationAsked) {
+    // TRAILING-NEGOTIATION GUARD — computed once, applied to BOTH
+    // acceptance paths below (short-positive and the 0.85 gate).
+    const trailingConcern = trailingNegotiationConcernText(session);
+    if (trailingConcern &&
+        (isShortPositiveConfirm || (classification.intent === "ACCEPTED" && classification.confidence >= 0.85))) {
+      // The log quotes the CONCERN message (the turn's last word), not the
+      // current message being processed — for the reported batch that is
+      // "ozbilni ?", which is what actually held the transition.
+      console.log(`[COOPERATION: GATE BLOCKED — the turn ends with a client-quality concern ("${trailingConcern.trim().slice(0, 40)}"); answering it before data collection]`);
+    }
+
+    if (isShortPositiveConfirm && !futureCooperationAsked && !trailingConcern) {
       session.collectedData.cooperationAccepted = true;
       session.rejectionCount = 0;
       if (!session.collectedData.transactionType && session.adMemory?.transactionType) {
@@ -117,7 +159,7 @@ export function detectPhase({ u, conv, session, isRent }) {
         console.log(`[COOPERATION: GATE BLOCKED — conversation continuation (${classification.reason})]`);
         phase = "PERSUASION";
         classification = { intent: "INTERESTED", confidence: 0.7 };
-      } else if (classification.intent === "ACCEPTED" && classification.confidence >= 0.85 && !futureCooperationAsked) {
+      } else if (classification.intent === "ACCEPTED" && classification.confidence >= 0.85 && !futureCooperationAsked && !trailingConcern) {
         session.collectedData.cooperationAccepted = true;
         session.rejectionCount = 0;
         if (!session.collectedData.transactionType && session.adMemory?.transactionType) {

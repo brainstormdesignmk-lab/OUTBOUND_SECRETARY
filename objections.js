@@ -481,6 +481,98 @@ function isAskingAboutClients(text) {
 }
 
 // ========================================
+// CLIENT-QUALITY / VERIFICATION CONCERN — "ama dali klientite vi se
+// provereni ?" (but are your clients verified?), "ozbilni ?" (serious?),
+// "SAKAM OZBILNI KLIENTI NE NEKOJ SALABAJZERI" (I want serious clients,
+// not slackers). The owner is still NEGOTIATING the quality of the
+// clientele, not collecting property data. Two entry points:
+//
+//   isAskingAboutClientQuality(text, recentContext) — BROAD gate used by the
+//   early-response router: any client + quality-word combination, INCLUDING
+//   declarative statements ("sakam ozbilni klienti"), plus bare follow-ups
+//   ("ozbilni ?") that refer to clients mentioned in the same turn. This is
+//   what decides the ANSWER (a reassurance) when the owner says it.
+//
+//   isClientQualityConcern(text, recentContext) — STRICT gate used by the
+//   conditional-acceptance guard in persuasion-phase.js: only QUESTION /
+//   probing forms block an acceptance. A declarative statement fused into an
+//   acceptance ("dobro, sakam ozbilni klienti, ajde probame" = acceptance
+//   WITH a preference) must NOT hold the PERSUASION → DATA_COLLECTION
+//   transition — the owner already committed. The reported batch
+//   ("mozeme da probame" + "ama dali klientite vi se provereni ?" +
+//   "ozbilni ?") has question marks on the trailing messages, so it blocks.
+//
+// Reported (lead 3571074 production log): Ana jumped into data collection
+// after "mozeme da probame" while the owner was still asking "dali
+// klientite vi se provereni ? ozbilni ?" — she asked for the rent instead
+// of answering the client-quality question.
+// ========================================
+const CLIENT_QUALITY_WORDS_RE =
+  /provereni|проверени|proveren|проверен|ozbilni|озбилни|ozbilen|озбилен|seriozni|сериозни|seriozen|сериозен|salabajzer|салабајзер|kvalitetn|квалитетн|doverliv|доверлив/i;
+const CLIENT_WORDS_RE = /klient|клиент|kupuvac|купувач|kupci|купци|zakupc|закупц/i;
+// A short message that is essentially one quality word with optional
+// politeness/tense scaffolding: "ozbilni ?", "ozbilni li se ?", "provereni ?",
+// "ama dali se ozbilni ?". Shared by both gates.
+const BARE_CLIENT_QUALITY_RE =
+  /^(?:ama\s+|ама\s+|но\s+|no\s+)?(?:dali\s+|дали\s+)?(?:se\s+|се\s+)?(?:ozbilni|озбилни|provereni|проверени|seriozni|сериозни|kvalitetni|квалитетни|doverlivi|доверливи)(?:\s+(?:li|ли)\s+(?:se|се))?(?:\s*[?.,!]|\s*$)/i;
+
+function isAskingAboutClientQuality(text, recentContext = '') {
+  const u = String(text || '').toLowerCase().trim();
+  if (!u) return false;
+  const ctx = (u + ' ' + String(recentContext || '')).toLowerCase();
+  // 1. The message itself pairs a quality word with a client word
+  //    ("dali klientite vi se provereni ?", "sakam ozbilni klienti").
+  if (CLIENT_QUALITY_WORDS_RE.test(u) && CLIENT_WORDS_RE.test(u)) return true;
+  // 2. Bare quality follow-up ("ozbilni ?", "provereni ?") — the referent
+  //    (clients) must be in the same turn / recent context.
+  if (BARE_CLIENT_QUALITY_RE.test(u) && CLIENT_WORDS_RE.test(ctx)) return true;
+  // 3. "kakvi klienti imate?" / "kakvi se klientite?" (what kind of clients
+  //    do you have / what are the clients like) — the owner is probing
+  //    client quality.
+  if (/kakvi\s+(?:se\s+)?klient|какви\s+(?:се\s+)?клиент/i.test(u)) return true;
+  return false;
+}
+
+function isClientQualityConcern(text, recentContext = '') {
+  if (!isAskingAboutClientQuality(text, recentContext)) return false;
+  const u = String(text || '').toLowerCase().trim();
+  // ONLY probing forms block an acceptance — a question, an opening
+  // "ama/dali" hedge, a bare quality word, or a "kakvi klienti" probe.
+  // NOTE: the hedge prefix must use (?:\s|$) — a \b boundary is ASCII-only
+  // and would silently fail after Cyrillic "ама"/"дали" (Cyrillic chars are
+  // non-word for \b), so a Cyrillic "ама ..." without a "?" would fall
+  // through. The "?" check above covers the reported shapes anyway.
+  return /\?/.test(u) ||
+         /^(?:ama|ама|но|no|dali|дали)(?:\s|$)/i.test(u) ||
+         /^a\s+(?:dali|дали)(?:\s|$)/i.test(u) ||
+         BARE_CLIENT_QUALITY_RE.test(u) ||
+         /kakvi\s+(?:se\s+)?klient|какви\s+(?:се\s+)?клиент/i.test(u);
+}
+
+// ========================================
+// CLIENT-QUALITY RESPONSES — "dali klientite vi se provereni?" / "ozbilni?"
+// The reassurance Ana gives (rotating variants, rent/sale aware: закупци vs
+// купувачи). Same family as the no-agency-experience reassurance — the
+// owner is probing whether the clientele is serious and vetted.
+// ========================================
+const CLIENT_QUALITY_RESPONSES_SALE = [
+  'Да, сите наши клиенти се проверени и сериозни. Секој заинтересиран поминува проверка пред да закажеме посета. Дали да продолжиме со соработката?',
+  'Можам да ве уверам — клиентите ни се проверени и озбилни. Не доведуваме случајни луѓе, туку само сериозни и проверени купувачи. Дали ви звучи добро?',
+  'Сите клиенти што ги доведуваме се проверени. Ја чуваме вашата доверба и работиме само со озбилни и сериозни заинтересирани. Како ви звучи ова?'
+];
+
+const CLIENT_QUALITY_RESPONSES_RENT = [
+  'Да, сите наши клиенти се проверени и сериозни. Секој заинтересиран поминува проверка пред да закажеме посета. Дали да продолжиме со соработката?',
+  'Можам да ве уверам — клиентите ни се проверени и озбилни. Не доведуваме случајни луѓе, туку само сериозни и проверени закупци. Дали ви звучи добро?',
+  'Сите клиенти што ги доведуваме се проверени. Ја чуваме вашата доверба и работиме само со озбилни и сериозни заинтересирани. Како ви звучи ова?'
+];
+
+function getRandomClientQualityResponse(isRent) {
+  const responses = isRent ? CLIENT_QUALITY_RESPONSES_RENT : CLIENT_QUALITY_RESPONSES_SALE;
+  return responses[Math.floor(Math.random() * responses.length)];
+}
+
+// ========================================
 // HELPER: Check if asking where to send photos
 // ========================================
 function isAskingWhereToSendPhotos(text) {
@@ -651,6 +743,11 @@ export {
   NO_AGENCY_EXPERIENCE_RESPONSES_RENT,
   getRandomNoAgencyExperienceResponse,
   isAskingAboutClients,
+  isAskingAboutClientQuality,
+  isClientQualityConcern,
+  CLIENT_QUALITY_RESPONSES_SALE,
+  CLIENT_QUALITY_RESPONSES_RENT,
+  getRandomClientQualityResponse,
   isAskingWhereToSendPhotos,
   isAskingAboutLegalCosts,
   isAskingWhoPaysForLegalCosts,
