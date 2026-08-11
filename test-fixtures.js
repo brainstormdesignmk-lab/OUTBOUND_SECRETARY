@@ -185,6 +185,24 @@ assertEqual(parseYearBuilt("2000ta"), 2000, "'2000ta' → 2000");  // B11: Word-
   assertEqual(parseYearBuilt("шеесети"), 1965, "B18: 'шеесети' (Cyrillic 60s single-т) → 1965");
   assertEqual(parseYearBuilt("seesetti"), 1965, "B18: 'seesetti' (60s) → 1965");
   assertEqual(parseYearBuilt("seeseta"), 1960, "B18: 'seeseta' (60s -a form) → 1960");
+  // COMPACT DECADE FORMS (reported: "SEESTI" answering "Која година е
+  // граден?" was NOT collected) — Viber owners DROP the medial "е" from the
+  // decade word: шеесет → шеест → шеести / SEESTI. Whole-spectre coverage:
+  // Latin + Cyrillic, -ти and -та forms, for every decade 50s-90s.
+  assertEqual(parseYearBuilt("SEESTI"), 1965, "B18: 'SEESTI' (60s compact) → 1965");
+  assertEqual(parseYearBuilt("ШЕЕСТИ"), 1965, "B18: 'ШЕЕСТИ' (60s compact Cyrillic) → 1965");
+  assertEqual(parseYearBuilt("сеести"), 1965, "B18: 'сеести' (60s compact, с/ш typo) → 1965");
+  assertEqual(parseYearBuilt("seesta"), 1960, "B18: 'seesta' (60s compact -a) → 1960");
+  assertEqual(parseYearBuilt("ПЕЕСТИ"), 1955, "B18: 'ПЕЕСТИ' (50s compact Cyrillic) → 1955");
+  assertEqual(parseYearBuilt("peesti"), 1955, "B18: 'peesti' (50s compact) → 1955");
+  assertEqual(parseYearBuilt("peesta"), 1950, "B18: 'peesta' (50s compact -a) → 1950");
+  assertEqual(parseYearBuilt("девеести"), 1995, "B18: 'девеести' (90s compact Cyrillic) → 1995");
+  assertEqual(parseYearBuilt("deveesti"), 1995, "B18: 'deveesti' (90s compact) → 1995");
+  assertEqual(parseYearBuilt("deveesta"), 1990, "B18: 'deveesta' (90s compact -a) → 1990");
+  assertEqual(parseYearBuilt("осумдести"), 1985, "B18: 'осумдести' (80s compact Cyrillic) → 1985");
+  assertEqual(parseYearBuilt("осумдеста"), 1980, "B18: 'осумдеста' (80s compact Cyrillic -a) → 1980");
+  assertEqual(parseYearBuilt("седумдести"), 1975, "B18: 'седумдести' (70s compact Cyrillic) → 1975");
+  assertEqual(parseYearBuilt("седумдеста"), 1970, "B18: 'седумдеста' (70s compact Cyrillic -a) → 1970");
   // Bare Latin decade words via dual-\b blocks
   assertEqual(parseYearBuilt("osumdeset"), 1980, "B18: bare 'osumdeset' (80s Latin) → 1980");
   assertEqual(parseYearBuilt("osumdeset nekade"), 1985, "B18: bare 'osumdeset nekade' → 1985");

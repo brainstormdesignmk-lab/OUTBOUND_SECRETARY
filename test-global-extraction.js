@@ -633,6 +633,28 @@ assert("DEC3c: '2000ta ... ne znam' scores HIGH (2000s decade)",
   assessConfidence('yearBuilt', 2000, '2000ta e zgradata, ne znam tocno') === 'HIGH',
   `got ${assessConfidence('yearBuilt', 2000, '2000ta e zgradata, ne znam tocno')}`);
 
+// COMPACT DECADE FORMS (reported: "SEESTI" answering "Која година е
+// граден?" was NOT collected — silently null, then a re-ask). Compact =
+// medial "е" dropped (шеесет → шеест → SEESTI). parseYearBuilt must map it
+// AND it must score HIGH like the full forms (no confirmation re-ask).
+result = runGlobalExtraction("SEESTI E ZGRADATA TOCNO NEZNAM", {}, 'yearBuilt');
+assert("DEC6: 'SEESTI ... TOCNO NEZNAM' → yearBuilt=1965 (60s compact decade)",
+  result.yearBuilt === 1965, `got ${result.yearBuilt}`);
+assert("DEC6: compact decade answer scores HIGH (no confirmation re-ask)",
+  assessConfidence('yearBuilt', 1965, 'seesti e zgradata tocno neznam') === 'HIGH',
+  `got ${assessConfidence('yearBuilt', 1965, 'seesti e zgradata tocno neznam')}`);
+
+// Other compact decades — whole-spectre coverage (the user's full list)
+result = runGlobalExtraction("PEESTI E ZGRADATA", {}, 'yearBuilt');
+assert("DEC7: 'PEESTI' → yearBuilt=1955 (50s compact)",
+  result.yearBuilt === 1955, `got ${result.yearBuilt}`);
+assert("DEC7a: 'осумдести ... ne znam' scores HIGH (80s compact Cyrillic)",
+  assessConfidence('yearBuilt', 1985, 'осумдести e zgradata, tocno ne znam') === 'HIGH',
+  `got ${assessConfidence('yearBuilt', 1985, 'осумдести e zgradata, tocno ne znam')}`);
+assert("DEC7b: 'девеести' scores HIGH (90s compact Cyrillic)",
+  assessConfidence('yearBuilt', 1995, 'девеести e zgradata, ne znam tocno') === 'HIGH',
+  `got ${assessConfidence('yearBuilt', 1995, 'девеести e zgradata, ne znam tocno')}`);
+
 // CONTROL: an EXACT 2-digit year ("92") is NOT a decade answer → uncertainty
 // words still downgrade to MEDIUM → confirmation preserved.
 assert("DEC4: exact '92 ... ne znam' stays MEDIUM (not a decade answer)",
@@ -644,6 +666,18 @@ assert("DEC4: exact '92 ... ne znam' stays MEDIUM (not a decade answer)",
 assert("DEC5: 'renoviran vo 90tite, tocno ne znam' → renovationYear HIGH",
   assessConfidence('renovationYear', 1995, 'renoviran vo 90tite, tocno ne znam') === 'HIGH',
   `got ${assessConfidence('renovationYear', 1995, 'renoviran vo 90tite, tocno ne znam')}`);
+
+// COMPACT-FORM renovationYear path (reviewer finding): the decade→renovationYear
+// combined extractor now covers the compact forms too — "renoviran vo seestite"
+// (renovated in the 60s) must yield renovated:true + renovationYear:1965, same
+// as the digit forms ("90tite" → 1995) always did.
+result = runGlobalExtraction("RENOVIRAN VO SEESTITE, TOCNO NE ZNAM", {}, 'renovationYear');
+assert("DEC8: 'renoviran vo seestite' → renovated:true + renovationYear=1965 (compact decade)",
+  result.renovated === true && result.renovationYear === 1965,
+  `got renovated=${result.renovated} renovationYear=${result.renovationYear}`);
+assert("DEC8: compact renovationYear decade scores HIGH",
+  assessConfidence('renovationYear', 1965, 'renoviran vo seestite, tocno ne znam') === 'HIGH',
+  `got ${assessConfidence('renovationYear', 1965, 'renoviran vo seestite, tocno ne znam')}`);
 
 // NEGATIVE CONTROL (reviewer gap): "50-iljadi evra" is a PRICE — parseYearBuilt's
 // bare "50-i" substring maps it to 1955, so with uncertainty present it must

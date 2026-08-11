@@ -1258,18 +1258,22 @@ export function parseYearBuilt(text) {
   // Decade word variants — both single-t and double-t spellings, Latin + Cyrillic.
   // Viber users type "osumdeseti", "осумдесети" (single т), "deveeseti", "sedumdeseti" etc.
   // The "-ti/-tti" forms mean approximate year → mid-decade (1985/1995/1975).
-  if (/80ti|80 ти|80-ти|80ти|осумдесетти|осумдесети|80-i|80i|осамдесетти|осамдесети|osumdesti|osumdeseti|osumdesetti|osamdesetti|osamdeseti/i.test(text)) return 1985;
-  if (/80ta|80 та|80та|1980-ти|1980ти|осумдесетта|осумдесета|80-ta|osumdesetta|osumdeseta|osamdesetta|osamdeseta/i.test(text)) return 1980;
-  if (/90ti|90 ти|90-ти|90ти|деведесетти|деведесети|девеесетти|девеесети|90-i|90i|deveeseti|deveesetti|devedeseti|devedesetti/i.test(text)) return 1995;
-  if (/90ta|90 та|90та|1990-ти|1990ти|деведесетта|деведесета|девеесета|90-ta|deveesetta|deveeseta|devedesetta|devedeseta/i.test(text)) return 1990;
-  if (/70ti|70 ти|70-ти|70ти|седумдесетти|седумдесети|sedumdesti|sedumdeseti|sedumdesetti/i.test(text)) return 1975;
-  if (/70ta|70 та|70та|седумдесетта|седумдесета|sedumdesetta|sedumdeseta/i.test(text)) return 1970;
+  if (/80ti|80 ти|80-ти|80ти|осумдесетти|осумдесети|осумдести|осамдесетти|осамдесети|осамдести|80-i|80i|osumdesti|osumdeseti|osumdesetti|osamdesti|osamdesetti|osamdeseti/i.test(text)) return 1985;
+  if (/80ta|80 та|80та|1980-ти|1980ти|осумдесетта|осумдесета|осумдеста|осамдесетта|осамдесета|осамдеста|80-ta|osumdesetta|osumdeseta|osumdesta|osamdesetta|osamdeseta|osamdesta/i.test(text)) return 1980;
+  if (/90ti|90 ти|90-ти|90ти|деведесетти|деведесети|деведести|девеесетти|девеесети|девеести|90-i|90i|deveeseti|deveesetti|deveesti|devedeseti|devedesetti|devedesti/i.test(text)) return 1995;
+  if (/90ta|90 та|90та|1990-ти|1990ти|деведесетта|деведесета|деведеста|девеесетта|девеесета|девееста|90-ta|deveesetta|deveeseta|deveesta|devedesetta|devedeseta|devedesta/i.test(text)) return 1990;
+  if (/70ti|70 ти|70-ти|70ти|седумдесетти|седумдесети|седумдести|sedumdesti|sedumdeseti|sedumdesetti/i.test(text)) return 1975;
+  if (/70ta|70 та|70та|седумдесетта|седумдесета|седумдеста|sedumdesetta|sedumdeseta|sedumdesta/i.test(text)) return 1970;
   // 50s/60s decade lines were entirely missing — same disease (silently null).
   // E.g. 'pedeseti'/'peesetti' (50s), 'seeseti'/'seesetti' (60s), Viber spellings.
-  if (/50ti|50 ти|50-ти|50ти|50-i|50i|педесетти|педесети|пеесетти|пеесети|pedesetti|pedeseti|peesetti|peeseti/i.test(text)) return 1955;
-  if (/50ta|50 та|50та|50-ta|педесетта|педесета|пеесетта|пеесета|pedesetta|pedeseta|peesetta|peeseta/i.test(text)) return 1950;
-  if (/60ti|60 ти|60-ти|60ти|60-i|60i|шеесетти|шеесети|seesetti|seeseti/i.test(text)) return 1965;
-  if (/60ta|60 та|60та|60-ta|шеесетта|шеесета|seesetta|seeseta/i.test(text)) return 1960;
+  // COMPACT DECADE FORMS (reported: "SEESTI" answering "Која година е
+  // граден?" was NOT collected) — Viber owners DROP the medial "е":
+  // шеесет → шеест → шеести / SEESTI, педесет → пеест → ПЕЕСТИ,
+  // деведесет → девест → девеести, седумдесет → седумдести, etc.
+  if (/50ti|50 ти|50-ти|50ти|50-i|50i|педесетти|педесети|педести|пеесетти|пеесети|пеести|pedesetti|pedeseti|pedesti|peesetti|peeseti|peesti/i.test(text)) return 1955;
+  if (/50ta|50 та|50та|50-ta|педесетта|педесета|педеста|пеесетта|пеесета|пееста|pedesetta|pedeseta|pedesta|peesetta|peeseta|peesta/i.test(text)) return 1950;
+  if (/60ti|60 ти|60-ти|60ти|60-i|60i|шеесетти|шеесети|шеести|сеести|seesetti|seeseti|seesti/i.test(text)) return 1965;
+  if (/60ta|60 та|60та|60-ta|шеесетта|шеесета|шееста|сееста|seesetta|seeseta|seesta/i.test(text)) return 1960;
   if (/2000ti|2000 ти|двеилјадити/i.test(text)) return 2005;
   if (/2000ta|2000 та|двеилјадита/i.test(text)) return 2000;
 

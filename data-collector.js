@@ -869,6 +869,35 @@ function extractRenovated(u, data) {
       return { renovated: true, renovationYear: currentYear - wordNum };
     }
   }
+  // RENOVATION-YEAR DECADE ANSWERS ("renoviran vo 90tite" → renovated:true,
+  // renovationYear:1995). Whole-spectre coverage: full + COMPACT decade forms
+  // (seesti/шеести, deveesti/девеести, осумудести, седумдести — the medial-е
+  // dropped spellings added with the reported "SEESTI" yearBuilt fix), Latin +
+  // Cyrillic, all decades. KEEP THE DECADE VOCABULARY IN SYNC with
+  // parseYearBuilt's decade lines (property-extractor.js).
+  // ORDERING (discovered by the DEC8 regression test): MUST run BEFORE the bare
+  // "renoviran" → renovationYear:null branch below — "renoviran vo seestite"
+  // contains the bare word "renoviran", so the generic branch used to swallow
+  // the decade answer first (the old decade blocks sat at the END of the
+  // function and were unreachable for exactly this reason).
+  if (/90ti|90 ти|90-ти|90ти|деведесетти|деведесети|деведести|девеесетти|девеесети|девеести|deveeseti|deveesetti|deveesti|devedeseti|devedesetti|devedesti/i.test(u) && /renoviran|реновиран|obnoven|обновен/i.test(u)) {
+    return { renovated: true, renovationYear: 1995 };
+  }
+  if (/80ti|80 ти|80-ти|80ти|осумдесетти|осумдесети|осумдести|осамдесетти|осамдесети|осамдести|osumdesti|osumdeseti|osumdesetti|osamdesti|osamdesetti|osamdeseti/i.test(u) && /renoviran|реновиран|obnoven|обновен/i.test(u)) {
+    return { renovated: true, renovationYear: 1985 };
+  }
+  if (/70ti|70 ти|70-ти|70ти|седумдесетти|седумдесети|седумдести|sedumdesti|sedumdeseti|sedumdesetti/i.test(u) && /renoviran|реновиран|obnoven|обновен/i.test(u)) {
+    return { renovated: true, renovationYear: 1975 };
+  }
+  if (/60ti|60 ти|60-ти|60ти|шеесетти|шеесети|шеести|сеести|seesetti|seeseti|seesti/i.test(u) && /renoviran|реновиран|obnoven|обновен/i.test(u)) {
+    return { renovated: true, renovationYear: 1965 };
+  }
+  if (/50ti|50 ти|50-ти|50ти|педесетти|педесети|педести|пеесетти|пеесети|пеести|pedesetti|pedeseti|pedesti|peesetti|peeseti|peesti/i.test(u) && /renoviran|реновиран|obnoven|обновен/i.test(u)) {
+    return { renovated: true, renovationYear: 1955 };
+  }
+  if (/2000ti|2000 ти|двеилјадити/i.test(u) && /renoviran|реновиран|obnoven|обновен/i.test(u)) {
+    return { renovated: true, renovationYear: 2005 };
+  }
   // Renovation-specific words (no year) — just "renoviran" means yes, year unknown.
   // NOTE: "pre"/"пред" is intentionally excluded — it matches "pred zgrada" (in front
   // of the building) as a false positive. "novo"/"нов" is also excluded — "nova zgrada"
@@ -881,15 +910,6 @@ function extractRenovated(u, data) {
   const yearMatch = u.match(/(?:19|20)\d{2}(?=[taтг\s,.;!]|$)/);
   if (yearMatch && /renoviran|реновиран|obnoven|обновен|osvezh|освеж/i.test(u)) {
     return { renovated: true, renovationYear: parseInt(yearMatch[0].substring(0, 4)) };
-  }
-  if (/90ti|90 ти|90-ти|90ти|деведесетти/i.test(u) && /renoviran|реновиран|obnoven|обновен/i.test(u)) {
-    return { renovated: true, renovationYear: 1995 };
-  }
-  if (/80ti|80 ти|80-ти|80ти/i.test(u) && /renoviran|реновиран|obnoven|обновен/i.test(u)) {
-    return { renovated: true, renovationYear: 1985 };
-  }
-  if (/2000ti|2000 ти|двеилјадити/i.test(u) && /renoviran|реновиран|obnoven|обновен/i.test(u)) {
-    return { renovated: true, renovationYear: 2005 };
   }
   return null;
 }
@@ -1037,7 +1057,7 @@ const ANNOYED_REPEAT_RE = /(?:^|[\s.,:;!?\-]+)(?:ti\s+|ти\s+)?(?:kazav|каж�
 // net. Exact 2-digit years ("92") and exact 4-digit years ("1990", "2015ti")
 // are NOT decade answers — only "-ti/-ta" decade forms, decade words, and
 // 19XX/20XX + ти/та references ("1980-ти" = the 1980s).
-const DECADE_YEAR_RE = /(?:^|[^a-zа-я\d])(?:19|20)\d{2}\s*[- ]?(?:ti|ти|ta|та)(?:te|те)?(?:$|[^a-zа-я])|(?:^|[^a-zа-я\d])(?:2000|90|80|70|60|50)(?:\s*[- ]?)(?:ti|ти|i|ta|та)(?:te|те)?(?:$|[^a-zа-я])|деведесетти|деведесети|девеесетти|девеесети|деведесетта|деведесета|девеесета|осумдесетти|осумдесети|осумдесетта|осумдесета|осамдесетти|осамдесети|осамдесетта|осамдесета|седумдесетти|седумдесети|седумдесетта|седумдесета|шеесетти|шеесети|шеесетта|шеесета|педесетти|педесети|педесетта|педесета|пеесетти|пеесети|пеесетта|пеесета|двеилјадити|двеилјадита|deveesetti|deveeseti|devedesetti|devedeseti|deveesetta|deveeseta|devedesetta|devedeseta|osumdesetti|osumdeseti|osumdesetta|osumdeseta|osamdesetti|osamdeseti|osamdesetta|osamdeseta|sedumdesetti|sedumdeseti|sedumdesetta|sedumdeseta|seesetti|seeseti|seesetta|seeseta|pedesetti|pedeseti|pedesetta|pedeseta|peesetti|peeseti|peesetta|peeseta|(?:^|[^a-zа-я])(?:deveeset|девеесет|деведесет|devedeset|osemdeset|осумдесет|osumdeset|osamdeset|осамдесет|sedumdeset|седумдесет)(?:$|[^a-zа-я])/i;
+const DECADE_YEAR_RE = /(?:^|[^a-zа-я\d])(?:19|20)\d{2}\s*[- ]?(?:ti|ти|ta|та)(?:te|те)?(?:$|[^a-zа-я])|(?:^|[^a-zа-я\d])(?:2000|90|80|70|60|50)(?:\s*[- ]?)(?:ti|ти|i|ta|та)(?:te|те)?(?:$|[^a-zа-я])|деведесетти|деведесети|деведести|девеесетти|девеесети|девеести|деведесетта|деведесета|деведеста|девеесетта|девеесета|девееста|осумдесетти|осумдесети|осумдести|осумдесетта|осумдесета|осумдеста|осамдесетти|осамдесети|осамдести|осамдесетта|осамдесета|осамдеста|седумдесетти|седумдесети|седумдести|седумдесетта|седумдесета|седумдеста|шеесетти|шеесети|шеести|сеести|шеесетта|шеесета|шееста|сееста|педесетти|педесети|педести|педесетта|педесета|педеста|пеесетти|пеесети|пеести|пеесетта|пеесета|пееста|двеилјадити|двеилјадита|deveesetti|deveeseti|deveesti|devedesetti|devedeseti|devedesti|deveesetta|deveeseta|deveesta|devedesetta|devedeseta|devedesta|osumdesetti|osumdeseti|osumdesti|osumdesetta|osumdeseta|osumdesta|osamdesetti|osamdeseti|osamdesti|osamdesetta|osamdeseta|osamdesta|sedumdesetti|sedumdeseti|sedumdesti|sedumdesetta|sedumdeseta|sedumdesta|seesetti|seeseti|seesti|seesetta|seeseta|seesta|pedesetti|pedeseti|pedesti|pedesetta|pedeseta|pedesta|peesetti|peeseti|peesti|peesetta|peeseta|peesta|(?:^|[^a-zа-я])(?:deveeset|девеесет|деведесет|devedeset|osemdeset|осумдесет|osumdeset|osamdeset|осамдесет|sedumdeset|седумдесет)(?:$|[^a-zа-я])/i;
 
 // Required context keywords per field for HIGH confidence
 // If these keywords are present in the message AND the value was extracted,
