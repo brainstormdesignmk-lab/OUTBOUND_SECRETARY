@@ -912,6 +912,23 @@ export function extractPrice(text) {
   const hasNonPriceContext = /m2|м2|kvadrati|квадрати|kvadrata|квадрата|kv|кв|sqm|kat|кат|sprat|спрат|katnica|катница|lift|лифт|klima|клима|garaza|гаража|terasa|тераса|spalni|спални|parking|паркинг|garage|гараж|potkrovje|поткровје|zgrada|зграда|godina|година|izgraden|изграден|graden|граден|renoviran|реновиран|renovira|реновира|obnoven|обновен|osvezen|освежен/i.test(uClean);
   if (!hasPriceKeywords && hasNonPriceContext) return null;
 
+  // DATE GUARD (reported): the owner answers the availableFrom question with
+  // "OD 7.15.2026" — a DATE, never a price. Without this guard the aggressive
+  // digit-cleanup fallback below strips the separators and returns 7152026 as
+  // a phantom monthly rent (stored as monthlyRent=7152026). Fire only when NO
+  // price keyword is present — a message quoting BOTH a price and a date
+  // ("kirijata 300 evra, od 7.15.2026") must still yield 300.
+  //   - "od/од/na/на" + day.month(.year) — the standard date-answer shape
+  //     ("od 7.15", "od 07.15", "od 7 15", "od 7.15.2026", "od 15.07.2026");
+  //     the (?!\d) after the second group keeps "od 15.000 evra" (15000€,
+  //     thousands separator) safe — a digit follows "15.00".
+  //   - bare day.month.year ("7.15.2026" without "od")
+  //   - ISO "2026-07-15"
+  if (!hasPriceKeywords) {
+    const datePattern = /(?:od|од|na|на)\s+\d{1,2}[./\s]+\d{1,2}(?!\d)(?:[./\s]+(?:19|20)\d{2})?|\d{1,2}[./]\d{1,2}[./](?:19|20)\d{2}|\d{4}-\d{2}-\d{2}/i;
+    if (datePattern.test(uClean)) return null;
+  }
+
   // BARE WORD-NUMBER PRICE (reported): the owner answers the price/rent
   // question with a pure number WORD and no currency — "CETRSTOPEESET"
   // (четирсто пеесет = 450). The digit fallback below requires digits and
@@ -936,7 +953,19 @@ export function extractPrice(text) {
     }
   }
 
-  const cleaned = text.replace(/[\s.,]/g, '');
+  // DATE MASK before the digit-cleanup fallback (reviewer-caught edge): the
+  // early-return guard above fires only when NO price keyword is present — a
+  // message with BOTH a date and a price ("OD 7.15.2026, KIRIJATA 300 EVRA")
+  // skips the guard and the fallback would grab the DATE digits first
+  // (7152026). Mask numeric dates (dotted/slashed/spaced/ISO) and word-month
+  // dates ("od 1 juli 2026", "od 15 septemvri 2026") out of the text so only
+  // the real price survives. Same shape as the guard: od/од/na/на + day.month
+  // (.year), bare day.month.year, ISO, and od/на + day + month-name + year.
+  const dateMasked = text.replace(
+    /(?:od|од|na|на)\s+\d{1,2}[./\s]+\d{1,2}(?!\d)(?:[./\s]+(?:19|20)\d{2})?|\d{1,2}[./]\d{1,2}[./](?:19|20)\d{2}|\d{4}-\d{2}-\d{2}|(?:od|од|na|на)\s+\d{1,2}\s+(?:januari|januar|fevruari|februar|mart|april|maj|juni|juli|avgust|septemvri|oktomvri|noemvri|dekemvri|јануари|јануар|фебруари|фебруар|март|април|мај|јуни|јули|август|септември|октомври|ноември|декември)[а-яa-z]*\s+(?:19|20)\d{2}/gi,
+    ' '
+  );
+  const cleaned = dateMasked.replace(/[\s.,]/g, '');
   const match = cleaned.match(/(\d{3,7})/);
   return match ? parseInt(match[1]) : null;
 }

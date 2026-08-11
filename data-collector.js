@@ -587,8 +587,22 @@ function extractHeating(u, data) {
     return { heating: "district", heatingType: "district" };
   }
 
-  // Private/own: parno sopstveno, sopstveno parno, sopstveno
-  if (/parno\s+sopstveno|sopstveno\s+parno|сопствено\s+парно|парно\s+сопствено|sopstveno(?!\s+gradsko)|сопствено(?!\s+градско)/i.test(u)) {
+  // Private/own: parno sopstveno, sopstveno parno, sopstveno, moe licno,
+  // kotel/kotlarnica, etazno, and the "I installed it myself" family
+  // ("JAS GO STAVIV", "jas sum go stavil"). Reported: the owner answered
+  // "Какво парно? Градско или сопствено?" with "MOE LICNO" / "MOE" /
+  // "JAS GO STAVIV" (I put it in myself = private heating) but the private
+  // branch only knew sopstveno — the answer was never collected. Context
+  // rules for GLOBAL discovery (this extractor runs on EVERY message):
+  //   - moe/licno/nase alone are NOT enough ("toa e moe" = "that's mine" is
+  //     not a heating answer) — they must be bound to parno/греење;
+  //   - the staviv/stavil family REQUIRES the 1st-person prefix
+  //     (jas/sum/сам/licno/лично) — a bare "GO STAVIV OGLASOT" (I posted
+  //     the ad, reviewer-caught) would otherwise false-positive heating
+  //     on every listing-management message. The follow-up handler in
+  //     data-collection.js has the broader patterns because the "Какво
+  //     парно?" question is literally being asked there.
+  if (/parno\s+sopstveno|sopstveno\s+parno|сопствено\s+парно|парно\s+сопствено|sopstveno(?!\s+gradsko)|сопствено(?!\s+градско)|kotel|kotlarnica|котларница|etazno|етажно|etazhno|(?:parno|парно|greene|греење)\s+(?:moe|мое|licno|лично|nase|наше)|(?:moe|мое|licno|лично|nase|наше)\s+(?:parno|парно)|(?:jas|сам|licno|лично)(?:\s+(?:sum|сум))?\s+(?:go|го)\s+(?:staviv|ставив|stavil|ставил|postaviv|поставив|postavil|поставил)|jas\s+licno\s+go\s+stav|јас\s+лично\s+го\s+став|sopstveno\s+go\s+staviv|сопствено\s+го\s+ставив/i.test(u)) {
     return { heating: "private", heatingType: "private" };
   }
 

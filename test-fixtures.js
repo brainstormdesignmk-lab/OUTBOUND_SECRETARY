@@ -123,6 +123,29 @@ assertEqual(extractPrice("2 miliona"), 2000000, "'2 miliona' → 2000000");
 assertEqual(extractPrice("98 iljadi"), 98000, "'98 iljadi' → 98000");
 assertEqual(extractPrice("250 evra"), 250, "'250 evra' → 250");
 
+// DATE GUARD (reported): the owner answers the availableFrom question with
+// "OD 7.15.2026" — a DATE, never a price. Without the guard the digit-cleanup
+// fallback stripped the separators and stored monthlyRent=7152026 (a phantom
+// 7-million rent). All date shapes must return null:
+assertEqual(extractPrice("OD 7.15.2026"), null, "DATE-GUARD: 'OD 7.15.2026' → null (never a price)");
+assertEqual(extractPrice("OD 07.15.2026"), null, "DATE-GUARD: 'OD 07.15.2026' → null");
+assertEqual(extractPrice("od 7.15.2026 ke bide sloboden"), null, "DATE-GUARD: full sentence → null");
+assertEqual(extractPrice("od 15.07.2026"), null, "DATE-GUARD: 'od 15.07.2026' (dd.mm.yyyy) → null");
+assertEqual(extractPrice("OD 7 15 2026"), null, "DATE-GUARD: 'OD 7 15 2026' (spaces) → null");
+assertEqual(extractPrice("7.15.2026"), null, "DATE-GUARD: bare '7.15.2026' → null");
+assertEqual(extractPrice("2026-07-15"), null, "DATE-GUARD: ISO '2026-07-15' → null");
+assertEqual(extractPrice("od 7.15"), null, "DATE-GUARD: 'od 7.15' (month.day) → null");
+// Real prices must NOT be killed by the guard:
+assertEqual(extractPrice("OD 15.000 evra"), 15000, "DATE-GUARD: 'OD 15.000 evra' → 15000 (thousands separator stays a price)");
+assertEqual(extractPrice("kirijata 300 evra, od 7.15.2026"), 300, "DATE-GUARD: price + date in one message → 300 (price wins)");
+assertEqual(extractPrice("OD 250 evra"), 250, "DATE-GUARD: 'OD 250 evra' → 250");
+// DATE-BEFORE-PRICE (reviewer-caught edge): the date digits must be MASKED,
+// not just early-returned, so a date-then-price message still yields the price
+assertEqual(extractPrice("OD 7.15.2026, KIRIJATA 300 EVRA"), 300, "DATE-GUARD: date first, price after → 300 (masked, not 7152026)");
+assertEqual(extractPrice("od 7.15.2026, 300 evra"), 300, "DATE-GUARD: 'od 7.15.2026, 300 evra' → 300");
+assertEqual(extractPrice("od 1 juli 2026, kirijata 300 evra"), 300, "DATE-GUARD: word-month date + price → 300");
+assertEqual(extractPrice("od 15 septemvri 2026"), null, "DATE-GUARD: 'od 15 septemvri 2026' → null (no price)");
+
 // ============================================================
 // TEST GROUP: parseYearBuilt
 // ============================================================
@@ -625,14 +648,14 @@ console.log(`\n📦 GROUP: B16 — Heating type detection patterns (comprehensiv
 // in data-collector.js has different semantics and is tested separately.
 // District: /gradsko|граѓско|dalinsko|toplovod|beg|centralno|централно|central/i
 //   (centralno/central = централно парно = градско, NOT private — reported bug)
-// Private central: /sopstveno|сопствено|individualno|индивидуално|svoja|своја|kotel|kotlarnica|котларница|сопствена|sopstvena|moe|мое|nase|наше|licno|лично|zgradata|зградата|na zgradata|на зградата|sopstveno parno|сопствено парно|moe parno|мое парно|nase parno|наше парно|licno parno|лично парно|parno moe|парно мое|parno nase|парно наше|parno licno|парно лично|parno na zgradata|парно на зградата|sopstveno|сопствено|sopstveno parno|сопствено парно/i
+// Private central: /sopstveno|сопствено|individualno|индивидуално|svoja|своја|kotel|kotlarnica|котларница|сопствена|sopstvena|moe|мое|nase|наше|licno|лично|zgradata|зградата|na zgradata|на зградата|sopstveno parno|сопствено парно|moe parno|мое парно|nase parno|наше парно|licno parno|лично парно|parno moe|парно мое|parno nase|парно наше|parno licno|парно лично|parno na zgradata|парно на зградата|sopstveno|сопствено|sopstveno parno|сопствено парно|etazno|етажно|etazhno|jas\s+(?:sum\s+|сум\s+)?(?:go|го)\s+(?:staviv|ставив|stavil|ставил|postaviv|поставив|postavil|поставил)|(?:go|го)\s+(?:staviv|ставив|postaviv|поставив)(?:\s+(?:jas|licno|сам|лично))?|jas\s+licno\s+go\s+stav|јас\s+лично\s+го\s+став|sopstveno\s+go\s+staviv|сопствено\s+го\s+ставив/i
 // Inverter: /klima|клима|inverter|инвертер|split|сплит|invertor|инвертор|klima inverter|клима инвертер|термопумпа|toplotna|топлотна|na klima|на клима|se gream|се греам/i
 // Electric: /struja|струја|electric|термо|термосистем|termo|radijatori|радијатори|kalorifer|калорифер/i
 // Solid_fuel/oil: /drva|дрва|peleti|пелети|pellet|пелет|nafta|нафта|loz|лож|огрев|ogrev|jаглен|jaglen|uglen|у́глен/i
 //   Sub-check: /drva|дрва|peleti|пелети|pellet|пелет|ogrev|огрев/i → wood_pellets, else → oil
 function testHeatingPattern(u) {
   if (/gradsko|градско|граѓско|dalinsko|dalecno|далечно|toplovod|beg|centralno|централно|central/i.test(u)) return "district";
-  if (/sopstveno|сопствено|individualno|индивидуално|svoja|своја|kotel|kotlarnica|котларница|сопствена|sopstvena|moe|мое|nase|наше|licno|лично|zgradata|зградата|na zgradata|на зградата|sopstveno parno|сопствено парно|moe parno|мое парно|nase parno|наше парно|licno parno|лично парно|parno moe|парно мое|parno nase|парно наше|parno licno|парно лично|parno na zgradata|парно на зградата|sopstveno|сопствено|sopstveno parno|сопствено парно/i.test(u)) return "private_central";
+  if (/sopstveno|сопствено|individualno|индивидуално|svoja|своја|kotel|kotlarnica|котларница|сопствена|sopstvena|moe|мое|nase|наше|licno|лично|zgradata|зградата|na zgradata|на зградата|sopstveno parno|сопствено парно|moe parno|мое парно|nase parno|наше парно|licno parno|лично парно|parno moe|парно мое|parno nase|парно наше|parno licno|парно лично|parno na zgradata|парно на зградата|sopstveno|сопствено|sopstveno parno|сопствено парно|etazno|етажно|etazhno|jas\s+(?:sum\s+|сум\s+)?(?:go|го)\s+(?:staviv|ставив|stavil|ставил|postaviv|поставив|postavil|поставил)|(?:go|го)\s+(?:staviv|ставив|postaviv|поставив)(?:\s+(?:jas|licno|сам|лично))?|jas\s+licno\s+go\s+stav|јас\s+лично\s+го\s+став|sopstveno\s+go\s+staviv|сопствено\s+го\s+ставив/i.test(u)) return "private_central";
   if (/klima|клима|inverter|инвертер|split|сплит|invertor|инвертор|klima inverter|клима инвертер|термопумпа|toplotna|топлотна|na klima|на клима|se gream|се греам/i.test(u)) return "inverter";
   if (/struja|струја|electric|термо|термосистем|termo|radijatori|радијатори|kalorifer|калорифер/i.test(u)) return "electric";
   if (/drva|дрва|peleti|пелети|pellet|пелет|nafta|нафта|loz|лож|огрев|ogrev|jаглен|jaglen|uglen|у́глен/i.test(u)) {
@@ -684,6 +707,25 @@ assertEqual(testHeatingPattern("parno licno"), "private_central", "B16: 'parno l
 assertEqual(testHeatingPattern("parno na zgradata"), "private_central", "B16: 'parno na zgradata' → private_central");
 assertEqual(testHeatingPattern("sopstveno parno"), "private_central", "B16: 'sopstveno parno' → private_central");
 assertEqual(testHeatingPattern("сопствено парно"), "private_central", "B16: 'сопствено парно' (Cyrillic) → private_central");
+
+// ── PRIVATE CENTRAL: "I installed it myself" family + etazno (reported) ──
+// The owner answered "Какво парно? Градско или сопствено?" with "MOE LICNO"
+// / "MOE" / "JAS GO STAVIV" (I put it in myself = private heating). The
+// moe/licno forms were already covered; the jas-go-staviv family and etazno
+// (floor-level own heating) were missing and the answer was never collected.
+console.log(`  ── Private central: jas-go-staviv family + etazno`);
+assertEqual(testHeatingPattern("JAS GO STAVIV"), "private_central", "B16: 'JAS GO STAVIV' → private_central");
+assertEqual(testHeatingPattern("JAS SUM GO STAVIL"), "private_central", "B16: 'JAS SUM GO STAVIL' → private_central");
+assertEqual(testHeatingPattern("JAS GO POSTAVIV"), "private_central", "B16: 'JAS GO POSTAVIV' → private_central");
+assertEqual(testHeatingPattern("jas sum go postavil"), "private_central", "B16: 'jas sum go postavil' → private_central");
+assertEqual(testHeatingPattern("LICNO GO STAVIV"), "private_central", "B16: 'LICNO GO STAVIV' → private_central");
+assertEqual(testHeatingPattern("GO STAVIV JAS"), "private_central", "B16: 'GO STAVIV JAS' → private_central");
+assertEqual(testHeatingPattern("ГО СТАВИВ ЈАС"), "private_central", "B16: 'ГО СТАВИВ ЈАС' (Cyrillic) → private_central");
+assertEqual(testHeatingPattern("JAS LICNO GO STAVIV"), "private_central", "B16: 'JAS LICNO GO STAVIV' → private_central");
+assertEqual(testHeatingPattern("SOPSTVENO GO STAVIV"), "private_central", "B16: 'SOPSTVENO GO STAVIV' → private_central");
+assertEqual(testHeatingPattern("ETAZNO"), "private_central", "B16: 'ETAZNO' (floor-level own heating) → private_central");
+assertEqual(testHeatingPattern("етажно"), "private_central", "B16: 'етажно' (Cyrillic) → private_central");
+assertEqual(testHeatingPattern("MOE LICNO"), "private_central", "B16: 'MOE LICNO' → private_central");
 
 // ── INVERTER tests ──
 console.log(`  ── Inverter variants`);

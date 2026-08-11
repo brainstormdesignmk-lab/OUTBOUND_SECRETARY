@@ -692,7 +692,7 @@ export function runComplexStatefulHandlers({ u, userInput, session, nextField, h
       session.collectedData.heatingFollowUp = false;
       session.pendingFollowUp = null;
       console.log(`[HEATING: district]`);
-    } else if (/sopstveno|сопствено|individualno|индивидуално|svoja|своја|kotel|kotlarnica|котларница|сопствена|sopstvena|moe|мое|nase|наше|licno|лично|zgradata|зградата|na zgradata|на зградата|sopstveno parno|сопствено парно|moe parno|мое парно|nase parno|наше парно|licno parno|лично парно|parno moe|парно мое|parno nase|парно наше|parno licno|парно лично|parno na zgradata|парно на зградата|sopstveno|сопствено|sopstveno parno|сопствено парно/i.test(u)) {
+    } else if (/sopstveno|сопствено|individualno|индивидуално|svoja|своја|kotel|kotlarnica|котларница|сопствена|sopstvena|moe|мое|nase|наше|licno|лично|zgradata|зградата|na zgradata|на зградата|sopstveno parno|сопствено парно|moe parno|мое парно|nase parno|наше парно|licno parno|лично парно|parno moe|парно мое|parno nase|парно наше|parno licno|парно лично|parno na zgradata|парно на зградата|sopstveno|сопствено|sopstveno parno|сопствено парно|etazno|етажно|etazhno|jas\s+(?:sum\s+|сум\s+)?(?:go|го)\s+(?:staviv|ставив|stavil|ставил|postaviv|поставив|postavil|поставил)|(?:go|го)\s+(?:staviv|ставив|postaviv|поставив)(?:\s+(?:jas|licno|сам|лично))?|jas\s+licno\s+go\s+stav|јас\s+лично\s+го\s+став|sopstveno\s+go\s+staviv|сопствено\s+го\s+ставив/i.test(u)) {
       session.collectedData.heating = "central";
       session.collectedData.heatingType = "private_central";
       session.collectedData.heatingFollowUp = false;

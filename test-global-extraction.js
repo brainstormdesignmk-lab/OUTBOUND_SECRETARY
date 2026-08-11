@@ -986,6 +986,31 @@ result = runGlobalExtraction("централно парно", {});
 assert("RH2: 'централно парно' → heating=district (Cyrillic)", result.heating === 'district', `got ${JSON.stringify(result.heating)}`);
 result = runGlobalExtraction("sopstveno parno", {});
 assert("RH3: 'sopstveno parno' → heating=private (own boiler, unchanged)", result.heating === 'private', `got ${JSON.stringify(result.heating)}`);
+// ── 2b. "I installed it myself" + etazno private heating (reported): the owner
+// answered "Какво парно? Градско или сопствено?" with "JAS GO STAVIV" (I put
+// it in myself = private heating) — the private branch only knew sopstveno, so
+// the answer was never collected. Bare "moe"/"licno" stay parno/греење-bound
+// in global discovery ("toa e moe" = "that's mine" is NOT a heating answer).
+result = runGlobalExtraction("JAS GO STAVIV", {});
+assert("RH4: 'JAS GO STAVIV' → heating=private", result.heating === 'private', `got ${JSON.stringify(result.heating)}`);
+result = runGlobalExtraction("jas sum go stavil", {});
+assert("RH5: 'jas sum go stavil' → heating=private", result.heating === 'private', `got ${JSON.stringify(result.heating)}`);
+result = runGlobalExtraction("ETAZNO PARNO", {});
+assert("RH6: 'ETAZNO PARNO' → heating=private (floor-level own)", result.heating === 'private', `got ${JSON.stringify(result.heating)}`);
+result = runGlobalExtraction("MOE PARNO", {});
+assert("RH7: 'MOE PARNO' → heating=private", result.heating === 'private', `got ${JSON.stringify(result.heating)}`);
+result = runGlobalExtraction("TOA E MOE, NE E NA PRODAZBA", {});
+assert("RH8: 'TOA E MOE' (that's mine) → heating stays null (no parno context)", result.heating === undefined, `got ${JSON.stringify(result.heating)}`);
+// Bare "go staviv" (I posted it) must NOT fire in global discovery — only the
+// 1st-person "jas/sam/licno go staviv" family is unambiguous (reviewer-caught
+// false-positive vector: "GO STAVIV OGLASOT" = "I posted the ad", not heating).
+result = runGlobalExtraction("GO STAVIV OGLASOT ZA PRODAZBA", {});
+assert("RH8b: 'GO STAVIV OGLASOT' (I posted the ad) → heating stays null", result.heating === undefined, `got ${JSON.stringify(result.heating)}`);
+result = runGlobalExtraction("go staviv da se prodava", {});
+assert("RH8c: 'go staviv da se prodava' → heating stays null", result.heating === undefined, `got ${JSON.stringify(result.heating)}`);
+// Date answers to the availableFrom question must NEVER leak into a price:
+result = runGlobalExtraction("OD 7.15.2026", { transactionType: 'rent' });
+assert("RH9: 'OD 7.15.2026' → no phantom monthlyRent", result.monthlyRent === undefined, `got ${JSON.stringify(result)}`);
 
 // ── 3. Parking: "vo cenata" = private, "slobodno parkiranje" = public ──
 result = runGlobalExtraction("PARKING MESTO VO CENATA", {});
