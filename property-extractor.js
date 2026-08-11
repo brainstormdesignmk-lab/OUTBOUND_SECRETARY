@@ -1288,6 +1288,23 @@ function _isoDate(d) {
   const day = String(d.getDate()).padStart(2, '0');
   return `${y}-${m}-${day}`;
 }
+// RELATIVE-DATE HELPERS (reported): "od utre" (tomorrow), "zadutre" (day
+// after tomorrow), "za dve nedeli" (in two weeks), "za mesec dena" (in a
+// month) — computed from TODAY, matching the roll-forward semantics of
+// _nextDay/_nextMonthDay. _addMonths clamps to the target month's last day
+// (Jan 31 + 1 month → Feb 28/29, never Mar 3).
+function _addDays(days) {
+  const today = new Date();
+  const base = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  return _isoDate(new Date(base.getFullYear(), base.getMonth(), base.getDate() + days));
+}
+function _addMonths(months) {
+  const today = new Date();
+  const base = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  const targetMonth = base.getMonth() + months;
+  const lastDay = new Date(base.getFullYear(), targetMonth + 1, 0).getDate();
+  return _isoDate(new Date(base.getFullYear(), targetMonth, Math.min(base.getDate(), lastDay)));
+}
 
 // Next occurrence of (day, month) — rolls to next year when the candidate is
 // in the past. month is 1-12, day 1-31.
@@ -1314,9 +1331,48 @@ export function parseAvailableFromDate(text) {
   if (!t) return null;
 
   // 1. IMMEDIATE — the property is free right away (no blocked_until needed).
-  if (/(?:^|[^a-zа-я])(?:odma|одма|sega|сега|vednash|веднаш|od denes|од денес|denes|денес)(?:$|[^a-zа-я])/i.test(t)) {
+  //    Reported: "sloboden momentalno" (free at the moment) was NOT registered
+  //    even after the second attempt — "momentalno" (currently), "instant",
+  //    "za brzo" (soon/quickly) and "veke e sloboden" (already free) are the
+  //    missing immediate words from the Macedonian vocabulary.
+  //    NEGATION GUARD (reviewer finding): "моментално НЕ Е слободен" / "не е
+  //    слободен моментно" / "моментално е зафатен" say the property is NOT
+  //    free now — the immediate rule must NOT fire (it would reply "достапен
+  //    веднаш" — the opposite of the truth). Let the future-date rules below
+  //    handle a following date ("не е слободен, од 1 јуни") or return null
+  //    so the date question re-asks.
+  //    BARE "brzo" DELIBERATELY EXCLUDED (reviewer finding): the user asked
+  //    for "za brzo" — a bare "brzo" in "ke ti odgovoram brzo" (I'll reply
+  //    quickly) or "ke vi ispratam sliki brzo" would false-capture immediate
+  //    while the field is still missing (extractAvailableFrom runs in global
+  //    discovery + the STEP 2 bonus pass).
+  const NEGATED_NOW_RE = /ne\s*e\s*(?:sloboden|dostapen|izdaden|издаден)|не\s*е\s*(?:слободен|достапен|издаден)|ne\s*(?:e|е)\s*sloboden|не\s*е\s*слободен|zafaten|зафатен|zaferan|momentаlno\s*ne|моментално\s*не|momentno\s*ne|моментно\s*не/i;
+  if (!NEGATED_NOW_RE.test(t) &&
+      /(?:^|[^a-zа-я])(?:odma|одма|sega|сега|vednash|веднаш|od denes|од денес|denes|денес|momentalno|моментално|momentno|моментно|instant|инстант|za\s+brzo|за\s+брзо|veke\s+e\s+sloboden|веќе\s+е\s+слободен|veke\s+sloboden|веќе\s+слободен)(?:$|[^a-zа-я])/i.test(t)) {
     return 'immediate';
   }
+
+  // 2a. RELATIVE DATES (reported): the owner answers "Од кога ќе биде
+  //     слободен?" with a relative phrase instead of a calendar date:
+  //     "od utre" (from tomorrow), "zadutre" (day after tomorrow),
+  //     "prekosutra", "za mesec dena" (in a month), "za dve nedeli" (in
+  //     two weeks), "za edna nedela" (in a week), "slednata nedela" (next
+  //     week), "za godina dena" (in a year). Computed from TODAY. Word-
+  //     boundary-guarded so the check order is safe: "zadutre" contains
+  //     "utre" as a substring, but the leading ^|[^a-zа-я] boundary stops
+  //     "utre" from matching inside it. "nedela" alone is deliberately NOT
+  //     a match (недела = Sunday is ambiguous with неделя = week) — only the
+  //     plural/dena/edna/slednata forms pin the week reading.
+  if (/(?:^|[^a-zа-я])(?:zadutre|задутре|prekosutra|прекосутра)(?:$|[^a-zа-я])/i.test(t)) return _addDays(2);
+  if (/(?:^|[^a-zа-я])(?:utre|утре)(?:$|[^a-zа-я])/i.test(t)) return _addDays(1);
+  if (/(?:za|за)\s+(?:eden|еден|1)\s+(?:mesec|месец)|(?:za|за)\s+(?:mesec|месец)\s+(?:dena|дена)/i.test(t)) return _addMonths(1);
+  if (/(?:za|за)\s+(?:dva|два|2)\s+(?:meseca|месеца)/i.test(t)) return _addMonths(2);
+  if (/(?:za|за)\s+(?:tri|три|3)\s+(?:meseca|месеца)/i.test(t)) return _addMonths(3);
+  if (/(?:za|за)\s+(?:dve|две|2)\s+(?:nedeli|недели)/i.test(t)) return _addDays(14);
+  if (/(?:za|за)\s+(?:tri|три|3)\s+(?:nedeli|недели)/i.test(t)) return _addDays(21);
+  if (/(?:slednata|следната|sledna|следна)\s+(?:nedela|недела)/i.test(t)) return _addDays(7);
+  if (/(?:za|за)\s+(?:edna|една|1)\s+(?:nedela|недела)|(?:za|за)\s+(?:nedela|недела)\s+(?:dena|дена)/i.test(t)) return _addDays(7);
+  if (/(?:za|за)\s+(?:edna|една|1)\s+(?:godina|година)|(?:za|за)\s+(?:godina|година)\s+(?:dena|дена)/i.test(t)) return _addMonths(12);
 
   // 2. NEXT MONTH — "sledniot mesec" / "следниот месец" → 1st of next month.
   if (/(?:sledniot|следниот)\s+(?:mesec|месец)/i.test(t)) {

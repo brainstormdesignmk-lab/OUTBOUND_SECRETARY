@@ -62,6 +62,22 @@ function firstOfNextMonth() {
   const d = new Date(today.getFullYear(), today.getMonth() + 1, 1);
   return iso(d.getFullYear(), d.getMonth() + 1, d.getDate());
 }
+// Relative-date helpers — mirror _addDays/_addMonths (local-time getters +
+// clamping to the target month's last day).
+function fromTodayDays(n) {
+  const today = new Date();
+  const base = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  const d = new Date(base.getFullYear(), base.getMonth(), base.getDate() + n);
+  return iso(d.getFullYear(), d.getMonth() + 1, d.getDate());
+}
+function fromTodayMonths(n) {
+  const today = new Date();
+  const base = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  const targetMonth = base.getMonth() + n;
+  const lastDay = new Date(base.getFullYear(), targetMonth + 1, 0).getDate();
+  const d = new Date(base.getFullYear(), targetMonth, Math.min(base.getDate(), lastDay));
+  return iso(d.getFullYear(), d.getMonth() + 1, d.getDate());
+}
 
 function rentPersuasionSession(extra = {}) {
   return {
@@ -81,6 +97,60 @@ console.log('========================================\n');
 assert('A1: "одма" → immediate', parseAvailableFromDate('одма') === 'immediate', `got ${parseAvailableFromDate('одма')}`);
 assert('A2: "сега" → immediate', parseAvailableFromDate('сега') === 'immediate', `got ${parseAvailableFromDate('сега')}`);
 assert('A3: "vednash" → immediate', parseAvailableFromDate('vednash') === 'immediate', `got ${parseAvailableFromDate('vednash')}`);
+
+// --- IMMEDIATE VOCABULARY EXTENSION (reported): "sloboden momentalno" was
+// NOT registered even after the second attempt — the missing immediate words
+// from the Macedonian vocabulary (momentalno, instant, za brzo, veke e
+// sloboden).
+assert('A28: "sloboden momentalno" → immediate (reported re-ask loop)',
+  parseAvailableFromDate('sloboden momentalno') === 'immediate', `got ${parseAvailableFromDate('sloboden momentalno')}`);
+assert('A29: "моментално" → immediate', parseAvailableFromDate('моментално') === 'immediate', `got ${parseAvailableFromDate('моментално')}`);
+assert('A30: "instant" → immediate', parseAvailableFromDate('instant') === 'immediate', `got ${parseAvailableFromDate('instant')}`);
+assert('A31: "za brzo" → immediate', parseAvailableFromDate('za brzo') === 'immediate', `got ${parseAvailableFromDate('za brzo')}`);
+assert('A32: "veke e sloboden" → immediate', parseAvailableFromDate('veke e sloboden') === 'immediate', `got ${parseAvailableFromDate('veke e sloboden')}`);
+
+// --- RELATIVE DATES (reported): "od utre" (tomorrow), "zadutre" (day after
+// tomorrow), "za mesec dena" (in a month), "za dve nedeli" (in two weeks)
+// and the other variations.
+assert('A33: "od utre" → tomorrow', parseAvailableFromDate('od utre') === fromTodayDays(1), `got ${parseAvailableFromDate('od utre')}, want ${fromTodayDays(1)}`);
+assert('A34: "zadutre" → day after tomorrow', parseAvailableFromDate('zadutre') === fromTodayDays(2), `got ${parseAvailableFromDate('zadutre')}, want ${fromTodayDays(2)}`);
+assert('A35: "прекосутра" → day after tomorrow', parseAvailableFromDate('прекосутра') === fromTodayDays(2), `got ${parseAvailableFromDate('прекосутра')}`);
+assert('A36: "za mesec dena" → +1 month', parseAvailableFromDate('za mesec dena') === fromTodayMonths(1), `got ${parseAvailableFromDate('za mesec dena')}, want ${fromTodayMonths(1)}`);
+assert('A37: "za eden mesec" → +1 month', parseAvailableFromDate('za eden mesec') === fromTodayMonths(1), `got ${parseAvailableFromDate('za eden mesec')}`);
+assert('A38: "за два месеца" → +2 months', parseAvailableFromDate('за два месеца') === fromTodayMonths(2), `got ${parseAvailableFromDate('за два месеца')}`);
+assert('A39: "za edna nedela" → +1 week', parseAvailableFromDate('za edna nedela') === fromTodayDays(7), `got ${parseAvailableFromDate('za edna nedela')}`);
+assert('A40: "za dve nedeli" → +2 weeks', parseAvailableFromDate('za dve nedeli') === fromTodayDays(14), `got ${parseAvailableFromDate('za dve nedeli')}, want ${fromTodayDays(14)}`);
+assert('A41: "за три недели" → +3 weeks', parseAvailableFromDate('за три недели') === fromTodayDays(21), `got ${parseAvailableFromDate('за три недели')}`);
+assert('A42: "slednata nedela" → +1 week', parseAvailableFromDate('slednata nedela') === fromTodayDays(7), `got ${parseAvailableFromDate('slednata nedela')}`);
+assert('A43: "za nedela dena" → +1 week', parseAvailableFromDate('za nedela dena') === fromTodayDays(7), `got ${parseAvailableFromDate('za nedela dena')}`);
+assert('A44: "за година дена" → +1 year', parseAvailableFromDate('за година дена') === fromTodayMonths(12), `got ${parseAvailableFromDate('за година дена')}`);
+// Bare "nedela" (недела = Sunday, ambiguous with week) must NOT fire.
+assert('A45: bare "недела" → null (Sunday/week ambiguity)',
+  parseAvailableFromDate('недела') === null, `got ${parseAvailableFromDate('недела')}`);
+
+// --- NEGATION GUARD (reviewer finding): "моментално НЕ е слободен" says NOT
+// free now — must NOT be immediate; a following date still wins, and a bare
+// negation stays null (the date question re-asks).
+assert('A46: "моментално не е слободен, од 1 јуни ќе биде" → June 1, NOT immediate (negation guard)',
+  parseAvailableFromDate('моментално не е слободен, од 1 јуни ќе биде') === nextMonthDay(6, 1),
+  `got ${parseAvailableFromDate('моментално не е слободен, од 1 јуни ќе биде')}`);
+assert('A47: "не е слободен моментно" → null (negated now — re-ask, not immediate)',
+  parseAvailableFromDate('не е слободен моментно') === null, `got ${parseAvailableFromDate('не е слободен моментно')}`);
+assert('A48: "моментално е зафатен" → null (occupied now — not immediate)',
+  parseAvailableFromDate('моментално е зафатен') === null, `got ${parseAvailableFromDate('моментално е зафатен')}`);
+assert('A49: "sega ne e dostapen, za dve nedeli ke bide" → +14 days (negated now, relative future wins)',
+  parseAvailableFromDate('sega ne e dostapen, za dve nedeli ke bide') === fromTodayDays(14),
+  `got ${parseAvailableFromDate('sega ne e dostapen, za dve nedeli ke bide')}`);
+
+// --- BARE-brzo FALSE-POSITIVE GUARD (reviewer finding): "ke ti odgovoram
+// brzo" (I'll reply quickly) is NOT an availability answer — only the "za
+// brzo" phrase the user asked for may fire.
+assert('A50: "ke ti odgovoram brzo" → null (bare brzo excluded — not availability)',
+  parseAvailableFromDate('ke ti odgovoram brzo') === null, `got ${parseAvailableFromDate('ke ti odgovoram brzo')}`);
+assert('A51: "ke vi ispratam sliki brzo" → null',
+  parseAvailableFromDate('ke vi ispratam sliki brzo') === null, `got ${parseAvailableFromDate('ke vi ispratam sliki brzo')}`);
+assert('A52: "sloboden ke bide za brzo" → immediate (the za-brzo phrase still fires)',
+  parseAvailableFromDate('sloboden ke bide za brzo') === 'immediate', `got ${parseAvailableFromDate('sloboden ke bide za brzo')}`);
 
 // --- Month words (roll forward) ---
 const nextJan1 = nextMonthDay(1, 1);
@@ -258,6 +328,54 @@ assert('D2: sale never sets availableFrom',
 console.log('\n========================================');
 console.log('🧪 E: yearBuilt must never be backfilled from the available-from date');
 console.log('========================================\n');
+
+// D3: e2e regression — the reported "sloboden momentalno" must be captured
+// on the FIRST attempt (no re-ask loop): monthlyRent → availableFrom question
+// → "sloboden momentalno" → availableFrom=immediate → advances to totalSqm.
+{
+  const d3 = {
+    adMemory: { transactionType: 'rent', propertyType: 'apartment', propertyLabel: 'станот' },
+    // NOTE: tenantPreferences deliberately NOT pre-seeded — the real rent
+    // order is monthlyRent → availableFrom → tenantPreferences, so the
+    // "advances" assert below checks the true next field (mirrors
+    // sim-rent-conversation.js; the D1 fixture above pre-seeds it and skips
+    // the tenant question by design).
+    collectedData: { cooperationAccepted: true, transactionType: 'rent' },
+    messages: [{ role: 'model', text: 'Која е месечната кирија за станот?' }],
+    phone: '+38970123457'
+  };
+  const d3r1 = await generateResponse(d3, '260 evra');
+  assert('D3: monthlyRent=260 stored', d3.collectedData.monthlyRent === 260, `got ${JSON.stringify(d3.collectedData.monthlyRent)}`);
+  assert('D3: next question is availableFrom (rent order)',
+    d3r1.type === 'QUESTION' && d3r1.nextField === 'availableFrom',
+    `got type=${d3r1.type} next=${d3r1.nextField}`);
+
+  const d3r2 = await generateResponse(d3, 'sloboden momentalno');
+  assert('D3: "sloboden momentalno" captured on FIRST attempt (reported re-ask loop fixed)',
+    d3.collectedData.availableFrom === 'immediate',
+    `got ${JSON.stringify(d3.collectedData.availableFrom)}`);
+  assert('D3: no re-ask — advances to tenantPreferences (rent order)',
+    d3r2.type === 'QUESTION' && d3r2.nextField === 'tenantPreferences',
+    `got type=${d3r2.type} next=${d3r2.nextField} "${(d3r2.text || '').slice(0, 60)}"`);
+}
+
+// D4: e2e regression — "za dve nedeli" (in two weeks) computes a real date.
+{
+  const d4 = {
+    adMemory: { transactionType: 'rent', propertyType: 'apartment', propertyLabel: 'станот' },
+    collectedData: { cooperationAccepted: true, transactionType: 'rent' },
+    messages: [{ role: 'model', text: 'Која е месечната кирија за станот?' }],
+    phone: '+38970123458'
+  };
+  await generateResponse(d4, '260 evra');
+  const d4r2 = await generateResponse(d4, 'ke bide sloboden za dve nedeli');
+  assert('D4: "za dve nedeli" → +14 days computed',
+    d4.collectedData.availableFrom === fromTodayDays(14),
+    `got ${JSON.stringify(d4.collectedData.availableFrom)}, want ${fromTodayDays(14)}`);
+  assert('D4: advances to tenantPreferences',
+    d4r2.type === 'QUESTION' && d4r2.nextField === 'tenantPreferences',
+    `got type=${d4r2.type} next=${d4r2.nextField}`);
+}
 
 // scanHistoryForField joins ALL owner messages and re-runs the yearBuilt
 // extractor — the owner's date answer ("od 1.6.2026") must NOT become the
