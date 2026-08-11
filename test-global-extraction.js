@@ -488,6 +488,52 @@ assert("RT3d4: bare '350' stays MEDIUM (confirmation preserved)",
   assessConfidence('monthlyRent', 350, '350') === 'MEDIUM',
   `got ${assessConfidence('monthlyRent', 350, '350')}`);
 
+// Test 33e2: COMPRESSED HUNDRED-WORD RENT (reported): the owner answered the
+// rent question with "CETRSTOPEESET" — the compressed Viber form of
+// "четиристо пеесет" (400 + 50 = 450), dropping the i's from "четиристо".
+// parseNumberWords previously read the "stopeeset" substring (150) inside it
+// and extractPrice had no bare word-number path at all → monthlyRent was
+// never extracted and the field was SKIPPED after the 2-attempt cap ("SKIP:
+// monthlyRent — max attempts reached (2), owner not providing answer,
+// storing null"). Now: 450 extracted, MEDIUM confidence (confirmation net
+// preserved for a genuinely new price, like bare "350").
+result = runGlobalExtraction("CETRSTOPEESET", { transactionType: 'rent' }, 'monthlyRent');
+assert("RT3f: monthlyRent=450 from compressed 'CETRSTOPEESET' (четирсто пеесет)", result.monthlyRent === 450, `got ${JSON.stringify(result.monthlyRent)}`);
+assert("RT3f: cleanPrice NOT extracted for rent", result.cleanPrice === undefined, `got ${JSON.stringify(result.cleanPrice)}`);
+assert("RT3f: compressed word rent scores MEDIUM (confirmation preserved)",
+  assessConfidence('monthlyRent', 450, 'CETRSTOPEESET') === 'MEDIUM',
+  `got ${assessConfidence('monthlyRent', 450, 'CETRSTOPEESET')}`);
+// Variant spellings of the 400 root (dropped-i, h-initial, Cyrillic compressed)
+result = runGlobalExtraction("cetiristotini", { transactionType: 'rent' }, 'monthlyRent');
+assert("RT3f2: monthlyRent=400 from 'cetiristotini'", result.monthlyRent === 400, `got ${JSON.stringify(result.monthlyRent)}`);
+result = runGlobalExtraction("chetiristotini", { transactionType: 'rent' }, 'monthlyRent');
+assert("RT3f3: monthlyRent=400 from h-initial 'chetiristotini'", result.monthlyRent === 400, `got ${JSON.stringify(result.monthlyRent)}`);
+result = runGlobalExtraction("четирсто пеесет", { transactionType: 'rent' }, 'monthlyRent');
+assert("RT3f4: monthlyRent=450 from Cyrillic compressed 'четирсто пеесет'", result.monthlyRent === 450, `got ${JSON.stringify(result.monthlyRent)}`);
+result = runGlobalExtraction("cetrsto", { transactionType: 'rent' }, 'monthlyRent');
+assert("RT3f5: monthlyRent=400 from bare compressed 'cetrsto'", result.monthlyRent === 400, `got ${JSON.stringify(result.monthlyRent)}`);
+// With currency the compressed form scores HIGH like any evra-bound price
+assert("RT3f6: 'cetrstopeeset evra' scores HIGH (currency marker)",
+  assessConfidence('monthlyRent', 450, 'cetrstopeeset evra') === 'HIGH',
+  `got ${assessConfidence('monthlyRent', 450, 'cetrstopeeset evra')}`);
+// SAFETY: small bare word-numbers must NOT become prices (bedrooms/floors
+// answering the rent question would be nonsense)
+result = runGlobalExtraction("tri", { transactionType: 'rent' }, 'monthlyRent');
+assert("RT3f7: bare 'tri' NOT extracted as rent", result.monthlyRent === undefined, `got ${JSON.stringify(result.monthlyRent)}`);
+result = runGlobalExtraction("sedum", { transactionType: 'rent' }, 'monthlyRent');
+assert("RT3f8: bare 'sedum' NOT extracted as rent", result.monthlyRent === undefined, `got ${JSON.stringify(result.monthlyRent)}`);
+// GUARDS (code review): the bare word-price path must NEVER shadow an
+// explicit digit price nor misread a word number that belongs to another
+// field (sqm/rooms) even when a price keyword appears in the sentence.
+result = runGlobalExtraction("300 evra, dvesta", { transactionType: 'rent' }, 'monthlyRent');
+assert("RT3g: '300 evra, dvesta' → 300 (digit price wins, word NOT shadowing)", result.monthlyRent === 300, `got ${JSON.stringify(result.monthlyRent)}`);
+result = runGlobalExtraction("kirijata e dogovor, ima dvesta kvadrati", { transactionType: 'rent' }, 'monthlyRent');
+assert("RT3g2: 'kirijata e dogovor, ima dvesta kvadrati' → NOT extracted (dvesta is sqm)", result.monthlyRent === undefined, `got ${JSON.stringify(result.monthlyRent)}`);
+result = runGlobalExtraction("go izdavam za dvesta evra", { transactionType: 'rent' }, 'monthlyRent');
+assert("RT3g3: 'go izdavam za dvesta evra' → 200 (real word rent with keyword)", result.monthlyRent === 200, `got ${JSON.stringify(result.monthlyRent)}`);
+result = runGlobalExtraction("dvesta spalni", { transactionType: 'rent' }, 'monthlyRent');
+assert("RT3g4: 'dvesta spalni' NOT extracted as rent (room count)", result.monthlyRent === undefined, `got ${JSON.stringify(result.monthlyRent)}`);
+
 // Test 33e: UTILITIES-FIRST GUARD — "reziski se 50 evra, kirijata 350"
 // (utilities are 50€, the rent is 350). extractPrice grabs the FIRST number,
 // and "evra" now scores the result HIGH — without a strip, monthlyRent=50

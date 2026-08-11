@@ -219,7 +219,21 @@ export function parseNumberWords(text) {
     const mergedHT = [
       { prefix: /(?:^|[^a-zа-я])(dvest[ea]|двест[аe])/i, hVal: 200 },
       { prefix: /(?:^|[^a-zа-я])(triest[ea]|трист[аe]|trista|триста)/i, hVal: 300 },
-      { prefix: /(?:^|[^a-zа-я])(cetiristotini|четиристотини)/i, hVal: 400 },
+      // PHONETIC/VIBER 400-COMPRESSED FORMS (reported): "CETRSTOPEESET" =
+      // четир-сто-пеесет (400+50 = 450) — the owner compresses "четиристо"
+      // to "cetrsto"/"четирсто" (dropping the i's) in Viber shorthand, and
+      // also spells it "cetirsto"/"chetiristo"/"chetirsto" (h for ч), plus
+      // the -tini full forms "cetirstotini"/"chetiristotini"/"четирстотини"
+      // (dropped-i / h-initial variants of четиристотини). The plain
+      // "cetiristotini" entry below never matched these, so "cetrsto" fell
+      // through to the irregularTens substring "stopeeset" → 150 instead of
+      // 450, and the monthlyRent was skipped after the 2-attempt cap
+      // (reported: owner answered "CETRSTOPEESET" → SKIP storing null).
+      // ALTERNATION ORDER IS CRITICAL: longest first — "cetiristo" is a
+      // prefix of "cetiristotini" and regex alternation tries left-to-right;
+      // a short form matching first would leave "tini" as afterHundreds and
+      // the letter-after boundary would reject the whole 400 prefix.
+      { prefix: /(?:^|[^a-zа-я])(chetiristotini|cetiristotini|cetirstotini|четиристотини|четирстотини|chetiristo|cetiristo|cetirsto|chetirsto|cetrsto|четиристо|четирсто)/i, hVal: 400 },
       { prefix: /(?:^|[^a-zа-я])(petstotini|петстотини)/i, hVal: 500 },
       { prefix: /(?:^|[^a-zа-я])(seststotini|шестстотини)/i, hVal: 600 },
       { prefix: /(?:^|[^a-zа-я])(sedumstotini|седумстотини)/i, hVal: 700 },
@@ -888,9 +902,38 @@ export function extractPrice(text) {
   // Prevents false positives like "100 m2, 3 kat" → cleanPrice=100.
   const uClean = text.toLowerCase();
   const hasPriceKeywords = /iljadi|илјади|evra|евра|eur|evro|евро|cena|цена|plate|плате|plakja|плаќа|kirija|кирија/i.test(uClean);
-  if (!hasPriceKeywords) {
-    const hasNonPriceContext = /m2|м2|kvadrati|квадрати|kvadrata|квадрата|kv|кв|sqm|kat|кат|sprat|спрат|katnica|катница|lift|лифт|klima|клима|garaza|гаража|terasa|тераса|spalni|спални|parking|паркинг|garage|гараж|potkrovje|поткровје|zgrada|зграда|godina|година|izgraden|изграден|graden|граден|renoviran|реновиран|renovira|реновира|obnoven|обновен|osvezen|освежен/i.test(uClean);
-    if (hasNonPriceContext) return null;
+  // NON-PRICE CONTEXT WORDS (sqm/floor/room/terrace/year/...): a message
+  // describing those fields must never be read as a price — "100 m2, 3 kat"
+  // is not 100€. Hoisted OUT of the !hasPriceKeywords block (reviewer
+  // finding): the bare WORD fallback below must also respect it even when a
+  // price keyword is present — "kirijata e dogovor, ima dvesta kvadrati"
+  // (rent by agreement; 200 is the sqm) contains "kirija" but the number
+  // word "dvesta" belongs to "kvadrati", not the rent.
+  const hasNonPriceContext = /m2|м2|kvadrati|квадрати|kvadrata|квадрата|kv|кв|sqm|kat|кат|sprat|спрат|katnica|катница|lift|лифт|klima|клима|garaza|гаража|terasa|тераса|spalni|спални|parking|паркинг|garage|гараж|potkrovje|поткровје|zgrada|зграда|godina|година|izgraden|изграден|graden|граден|renoviran|реновиран|renovira|реновира|obnoven|обновен|osvezen|освежен/i.test(uClean);
+  if (!hasPriceKeywords && hasNonPriceContext) return null;
+
+  // BARE WORD-NUMBER PRICE (reported): the owner answers the price/rent
+  // question with a pure number WORD and no currency — "CETRSTOPEESET"
+  // (четирсто пеесет = 450). The digit fallback below requires digits and
+  // returned null, so monthlyRent was never extracted and the field hit the
+  // 2-attempt cap → SKIP storing null. Parse the whole text as a Macedonian
+  // number word; require a plausible price magnitude so small counts ("tri"
+  // bedrooms, "sedum" floors) can never phantom as a price. With a price
+  // keyword present (evra/iljadi/cena/kirija) accept >= 10 ("deset evra");
+  // without one require >= 50 ("dvesta" = 200€ rent is a price, "tri" = 3
+  // is not).
+  // GUARDS (reviewer finding): fire ONLY on pure word answers — (1) no
+  // digits at all, so an explicit digit price ("300 evra, dvesta" → 300,
+  // never 200 from the "dvesta" word) is never shadowed; (2) no non-price
+  // context words, so "… dvesta kvadrati" (sqm answer) and "… tret sprat"
+  // (floor answer) never phantom as prices even when a price keyword
+  // appears elsewhere in the sentence.
+  const hasDigits = /\d/.test(uClean);
+  const bareWordPrice = parseNumberWords(uClean);
+  if (bareWordPrice !== null && !hasDigits && !hasNonPriceContext) {
+    if (hasPriceKeywords ? bareWordPrice >= 10 : bareWordPrice >= 50) {
+      return bareWordPrice;
+    }
   }
 
   const cleaned = text.replace(/[\s.,]/g, '');

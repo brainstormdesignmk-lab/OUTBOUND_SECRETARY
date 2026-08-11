@@ -1189,8 +1189,15 @@ function assessConfidence(field, value, input) {
   // field-specific keywords — might be a volunteered bare number.
   // Example: "pedeset" without "kvadrati" → MEDIUM, not LOW.
   // User might be answering the current question with a word number.
+  // COMPRESSED HUNDRED FORMS (reported): "CETRSTOPEESET" (четирсто пеесет
+  // = 450) drops the vowels of "четиристотини", so "cetiri" (which scores
+  // "cetiristotini" as MEDIUM) never matches — the bare word price scored
+  // LOW and the monthlyRent was skipped after the 2-attempt cap. The
+  // compressed hundred roots (cetrsto/четирсто, petsto, seststo, ...) must
+  // score MEDIUM exactly like their full -tini forms, keeping the
+  // confirmation re-ask net ("Дали точната вредност е 450?").
   const hasDigits = /\d+/.test(input);
-  if (hasDigits || /jedn|dve|tri|cetiri|pet|sest|sedum|osum|devet|deset|stoti|илjadi/i.test(input)) {
+  if (hasDigits || /jedn|dve|tri|cetiri|pet|sest|sedum|osum|devet|deset|stoti|илjadi|cetrsto|четирсто|cetirsto|cetiristo|chetiristo|четиристо|petsto|петсто|seststo|шестсто|sedumsto|седумсто|osumsto|осумсто|devetsto|деветсто|tristo|тристо|dvesto|двесто/i.test(input)) {
     return 'MEDIUM';
   }
 
