@@ -1031,6 +1031,30 @@ result = runGlobalExtraction("garaza na -1", {});
 assert("RP4: 'garaza' → parkingType=garage (unchanged)", result.parkingType === 'garage', `got ${result.parkingType}`);
 result = runGlobalExtraction("ima parking", {});
 assert("RP5: bare 'ima parking' → parkingType=public (unchanged)", result.parkingType === 'public', `got ${result.parkingType}`);
+// ── POC resident sticker = PUBLIC parking (reported) ──
+// "SO POC" / "SO POC NALEPNICA" — the ПОЦ resident parking-permit sticker
+// (Паркирање Од Центар). The owner parks on PUBLIC street wherever a spot is
+// free using the sticker issued to the address — NOT a garage, NOT private.
+result = runGlobalExtraction("SO POC ILI SO POC NALEPNICA", {});
+assert("RP6: 'SO POC ILI SO POC NALEPNICA' → parking=true, type=public", result.parking === true && result.parkingType === 'public', `got ${JSON.stringify(result.parking)}/${result.parkingType}`);
+result = runGlobalExtraction("SO POC", {});
+assert("RP6b: 'SO POC' → parking=true, type=public", result.parking === true && result.parkingType === 'public', `got ${JSON.stringify(result.parking)}/${result.parkingType}`);
+result = runGlobalExtraction("СО ПОЦ", {});
+assert("RP6c: 'СО ПОЦ' (Cyrillic) → parking=true, type=public", result.parking === true && result.parkingType === 'public', `got ${JSON.stringify(result.parking)}/${result.parkingType}`);
+result = runGlobalExtraction("PARKING SO NALEPNICA", {});
+assert("RP6d: 'PARKING SO NALEPNICA' (parking sticker) → parking=true, type=public", result.parking === true && result.parkingType === 'public', `got ${JSON.stringify(result.parking)}/${result.parkingType}`);
+// Bare "nalepnica" alone is NOT parking — could be an energy label or
+// municipal decal in global discovery (reviewer finding); only co-occurring
+// with poc/parking context signals public parking.
+result = runGlobalExtraction("IMA NALEPNICA", {});
+assert("RP6g: bare 'IMA NALEPNICA' (no poc/parking context) → parking stays null", result.parking === undefined, `got ${JSON.stringify(result.parking)}`);
+result = runGlobalExtraction("ENERGETSKA NALEPNICA ZA STANOT", {});
+assert("RP6h: 'ENERGETSKA NALEPNICA' (energy label) → parking stays null", result.parking === undefined, `got ${JSON.stringify(result.parking)}`);
+// Word-boundary guard: "pocetok" (beginning) / "pocnuva" (starts) are NOT poc
+result = runGlobalExtraction("POCETOK NA GRADBA", {});
+assert("RP6e: 'POCETOK NA GRADBA' (beginning) → parking stays null", result.parking === undefined, `got ${JSON.stringify(result.parking)}`);
+result = runGlobalExtraction("pocne od septemvri", {});
+assert("RP6f: 'pocne od septemvri' (starts) → parking stays null", result.parking === undefined, `got ${JSON.stringify(result.parking)}`);
 
 // ========================================
 // TEST GROUP: Reported production bugs (renovation flow)

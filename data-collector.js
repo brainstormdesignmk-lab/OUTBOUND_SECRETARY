@@ -650,7 +650,16 @@ function extractParking(u, data) {
   // "graza" = the common Latin-script misspelling of "гаража" (garage) —
   // "SO GRAZA ZIDANA" (with a masonry garage) must register parking=true
   // like "garaza" does (reported lead 5540516 multi-field answer).
-  if (/garaza|гаража|graza|граза|privat|приват|parking|паркинг|parkiranje|паркирање|garage|гараж|podzemna|подземна|sopstveno|сопствено|pred zgrada|пред зграда|na -|на -|podzemno|подземно|ima parking|има паркинг|ima garaza|има гаража/i.test(u)) {
+  // POC STICKER (reported): "SO POC" / "SO POC NALEPNICA" — the resident
+  // parking-permit sticker (ПОЦ = Паркирање Од Центар). The owner parks on
+  // PUBLIC street wherever a spot is free, using the sticker issued to the
+  // address — it is NOT a garage and NOT a private spot, so parkingType must
+  // stay the default "public". Word-boundary "poc" so "pocetok" (beginning)
+  // and "pocnuva" (starts) can never match. NALEPNICA alone is NOT enough
+  // (a bare "sticker" could be an energy label or municipal decal in global
+  // discovery — reviewer finding) — it only signals public parking when it
+  // co-occurs with poc/parking context (within ~25 chars, either order).
+  if (/garaza|гаража|graza|граза|privat|приват|parking|паркинг|parkiranje|паркирање|garage|гараж|podzemna|подземна|sopstveno|сопствено|pred zgrada|пред зграда|na -|на -|podzemno|подземно|ima parking|има паркинг|ima garaza|има гаража|(?:^|[^a-zа-я])(?:poc|поц)(?:$|[^a-zа-я])|(?:poc|поц|parking|паркинг|parkiranje|паркирање).{0,25}(?:nalepnica|налепница|nalepnici|налепници|nalepka|налепка)|(?:nalepnica|налепница|nalepnici|налепници|nalepka|налепка).{0,25}(?:poc|поц|parking|паркинг|parkiranje|паркирање)/i.test(u)) {
     let parkingType = "public";
     if (/garaza|гаража|graza|граза|garage|гараж|podzemna|подземна|podzemno|подземно|na -1|на -1|na -2|на -2|na -|на -|podzemno parking|подземно паркинг|podzemna garaza|подземна гаража|garaza na -|гаража на -/i.test(u)) {
       parkingType = "garage";
