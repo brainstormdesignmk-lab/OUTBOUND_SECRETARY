@@ -243,6 +243,30 @@ assert("E9: 'pred 2 godini' extracts year correctly",
   result.renovationYear === expectedYear, 
   `got ${result.renovationYear}, expected ${expectedYear}`);
 
+// BOUND-PHRASE DIGIT FIX (reported): "pred 4 godini" (4 years ago) must use
+// the digit bound to "pred" — NOT the first digit anywhere in the message.
+// The HISTORY-SCAN path (scanHistoryForField joins ALL owner messages) feeds
+// the extractor joined text like "260 evra | pred 4 godini"; the old
+// `u.match(/\d+/)` grabbed "260" (the rent price) and computed
+// currentYear−260 → an absurd year (1766), so the owner's "pred 4 godini"
+// answer to the renovation-year question was stored WRONG (reported: year
+// caught wrong). Both extractRenovated and extractRenovationYear now capture
+// the number inside the pred/pri phrase itself.
+const relYear = new Date().getFullYear() - 4;
+result = runGlobalExtraction("260 evra | pred 4 godini", { transactionType: 'rent' });
+assert("E9b: joined history '260 evra | pred 4 godini' → renovationYear = currentYear−4 (bound digit, not 260)",
+  result.renovationYear === relYear, `got ${result.renovationYear}, expected ${relYear}`);
+// The renovationYear fallback path (renovated already true — the reported
+// two-message exchange "da" then "pred 4 godini"): joined history must also
+// use the bound digit.
+result = runGlobalExtraction("260 evra | pred 4 godini", { transactionType: 'rent', renovated: true });
+assert("E9c: renovationYear fallback with joined history also uses the bound digit",
+  result.renovationYear === relYear, `got ${result.renovationYear}, expected ${relYear}`);
+// Cyrillic bound-digit form: "пред 4 години" after a rent price.
+result = runGlobalExtraction("260 евра | пред 4 години", { transactionType: 'rent' });
+assert("E9d: Cyrillic 'пред 4 години' joined → currentYear−4",
+  result.renovationYear === relYear, `got ${result.renovationYear}, expected ${relYear}`);
+
 // ========================================
 // TEST GROUP: Context awareness (no false matches)
 // ========================================

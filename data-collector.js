@@ -751,15 +751,29 @@ function extractRenovated(u, data) {
   // Requires "godini"/"години" context to prevent false positives like
   // "parking pred zgrada" (parking in front of building).
   if (/pred\s+\d+\s+godini|пред\s+\d+\s+години|pred\s+\d+\s+god|пред\s+\d+\s+год|pri\s+\d+\s+godini|при\s+\d+\s+години|pri\s+\d+\s+god|при\s+\d+\s+год|pred\s+\d+\s+godina|пред\s+\d+\s+година/i.test(u)) {
-    const years = u.match(/\d+/);
-    if (years) {
+    // THE DIGIT MUST COME FROM THE MATCHED PHRASE, NOT THE WHOLE MESSAGE
+    // (reported): the owner answers "Дали е реновиран?" with "da", then the
+    // renovation-year follow-up with "pred 4 godini" (4 years ago). The
+    // HISTORY-SCAN path (scanHistoryForField joins ALL owner messages) can
+    // feed extractRenovated a joined string like "260 evra | pred 4 godini" —
+    // the old `u.match(/\d+/)` grabbed the FIRST digit in the joined history
+    // ("260" from the rent price) and computed 2026−260 = 1766 instead of
+    // 2026−4 = 2022. Capture the number bound to the pred/при marker directly.
+    const predMatch = u.match(/(?:pred|пред|pri|при)\s+(\d{1,3})\s+(?:godini|години|god|год|godina|година)/i);
+    if (predMatch) {
       const currentYear = new Date().getFullYear();
-      return { renovated: true, renovationYear: currentYear - parseInt(years[0]) };
+      return { renovated: true, renovationYear: currentYear - parseInt(predMatch[1]) };
     }
-    const wordNum = parseMacedonianNumber(u);
-    if (wordNum !== null && wordNum >= 1 && wordNum <= 100) {
-      const currentYear = new Date().getFullYear();
-      return { renovated: true, renovationYear: currentYear - wordNum };
+    // Word-number fallback: "pred dve godini" / "пред три години" — parse
+    // ONLY the phrase after the marker, never the whole message (same
+    // first-digit trap for word numbers in a joined history).
+    const predPhrase = u.match(/(?:pred|пред|pri|при)\s+([a-zа-я]+)\s+(?:godini|години|god|год|godina|година)/i);
+    if (predPhrase) {
+      const wordNum = parseMacedonianNumber(predPhrase[1]);
+      if (wordNum !== null && wordNum >= 1 && wordNum <= 100) {
+        const currentYear = new Date().getFullYear();
+        return { renovated: true, renovationYear: currentYear - wordNum };
+      }
     }
   }
   // "pred godina" (without digit) — "about a year ago" = 1 year.
@@ -813,15 +827,21 @@ function extractRenovationYear(u, data) {
   const year = parseYearBuilt(u);
   if (year !== null) return { renovationYear: year };
   if (/pred|пред|pri|при/i.test(u)) {
-    const years = u.match(/\d+/);
-    if (years) {
+    // Bound-phrase capture ONLY — same first-digit trap as extractRenovated
+    // (reported): a joined history "260 evra | pred 4 godini" must use the
+    // "4" bound to "pred", never the "260" from the rent price.
+    const predMatch = u.match(/(?:pred|пред|pri|при)\s+(\d{1,3})\s+(?:godini|години|god|год|godina|година)/i);
+    if (predMatch) {
       const currentYear = new Date().getFullYear();
-      return { renovationYear: currentYear - parseInt(years[0]) };
+      return { renovationYear: currentYear - parseInt(predMatch[1]) };
     }
-    const wordNum = parseMacedonianNumber(u);
-    if (wordNum !== null && wordNum >= 1 && wordNum <= 100) {
-      const currentYear = new Date().getFullYear();
-      return { renovationYear: currentYear - wordNum };
+    const predPhrase = u.match(/(?:pred|пред|pri|при)\s+([a-zа-я]+)\s+(?:godini|години|god|год|godina|година)/i);
+    if (predPhrase) {
+      const wordNum = parseMacedonianNumber(predPhrase[1]);
+      if (wordNum !== null && wordNum >= 1 && wordNum <= 100) {
+        const currentYear = new Date().getFullYear();
+        return { renovationYear: currentYear - wordNum };
+      }
     }
   }
   return null;
