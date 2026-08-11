@@ -113,6 +113,41 @@ result = runGlobalExtraction("seeset i pet kvadrati so terasa od 3 m2", {});
 assert("N7: word-based sqm + terrace → totalSqm=65", result.totalSqm === 65, `got ${result.totalSqm}`);
 assert("N7: terrace from same message → hasTerrace=true, terraceSqm=3", result.hasTerrace === true && result.terraceSqm === 3, `got ${JSON.stringify(result.hasTerrace)}/${result.terraceSqm}`);
 
+// Test: THE reported message — "seese i osum kvadrata so terasa golema"
+// (68 m² total with a large terrace, "seese" = Viber-shortened "seeset" = 60).
+// THREE bugs were reported on this exact message:
+//   1. totalSqm NOT registered — parseNumberWords didn't know the truncated
+//      tens form "seese" (60), so the compound "seese i osum" (60+8=68)
+//      never parsed.
+//   2. bedrooms=8 phantom — countBedrooms' roomSegments branch split on
+//      " i " and read the loose "osum" from "osum kvadrata" as a bedroom.
+//   3. terraceSqm=8 phantom — extractTerraceNumber crowned "osum" (total
+//      sqm, glued to "kvadrata") as the "best context" terrace candidate.
+result = runGlobalExtraction("seese i osum kvadrata so terasa golema", {});
+assert("N8: 'seese i osum kvadrata so terasa golema' → totalSqm=68 (seese=60 + osum=8)", result.totalSqm === 68, `got ${result.totalSqm}`);
+assert("N8: bedrooms NOT extracted from the sqm phrase", result.bedrooms === undefined, `got ${JSON.stringify(result.bedrooms)}`);
+assert("N8: hasTerrace NOT extracted (no terrace SIZE given)", result.hasTerrace === undefined, `got ${JSON.stringify(result.hasTerrace)}`);
+assert("N8: terraceSqm NOT extracted", result.terraceSqm === undefined, `got ${JSON.stringify(result.terraceSqm)}`);
+// Truncated-tens family — "seese i osum" alone, and its Cyrillic/full cousins
+result = runGlobalExtraction("seese i osum kvadrati", {});
+assert("N8b: 'seese i osum kvadrati' → totalSqm=68", result.totalSqm === 68, `got ${result.totalSqm}`);
+result = runGlobalExtraction("peese i pet kvadrati", {});
+assert("N8c: 'peese i pet kvadrati' → totalSqm=55 (peese=50 + pet=5)", result.totalSqm === 55, `got ${result.totalSqm}`);
+result = runGlobalExtraction("dvaese i tri kvadrati", {});
+assert("N8d: 'dvaese i tri kvadrati' → totalSqm=23 (dvaese=20 + tri=3)", result.totalSqm === 23, `got ${result.totalSqm}`);
+// CONTROLS — the truncated form must NOT substring-match inside full forms or
+// unrelated words:
+//   a) "seese" ⊂ "seesetipet" — the full merged form keeps 65, not 65+60.
+//   b) "ese" must never fire inside "trinaese" — no phantom 60 (→ null, and
+//      with no sqm keyword match the field stays unset).
+//   c) "seeset kvadrati" keeps 60 (full form unaffected).
+result = runGlobalExtraction("seesetipet kvadrati", {});
+assert("N8e: 'seesetipet kvadrati' → totalSqm=65 (merged form, no truncated double-count)", result.totalSqm === 65, `got ${result.totalSqm}`);
+result = runGlobalExtraction("trinaese kvadrati", {});
+assert("N8e2: 'trinaese kvadrati' → totalSqm NOT set (no 'ese'→60 substring leak)", result.totalSqm === undefined, `got ${JSON.stringify(result.totalSqm)}`);
+result = runGlobalExtraction("seeset kvadrati", {});
+assert("N8f: 'seeset kvadrati' → totalSqm=60 (full form unaffected)", result.totalSqm === 60, `got ${result.totalSqm}`);
+
 // ========================================
 // TEST GROUP: Field-targeted extraction (no unrestricted global)
 // ========================================

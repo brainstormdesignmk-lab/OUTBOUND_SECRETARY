@@ -451,6 +451,14 @@ assertEqual(countBedrooms("ima edna spalna"), 1, "'ima edna spalna' → 1");
 // Compound: spalni doesn't match 'spalna', detska matches once → roomCount=1 < 2
 // Falls through to parseMacedonianNumber: 'dve'=2 → returns 2
 assertEqual(countBedrooms("dve spalni i detska"), 2, "'dve spalni i detska' → 2 (dve=2 via fallback)");
+// OTHER-FIELD UNITS GUARD (reported): "seese i osum kvadrata so terasa golema"
+// (68 m² total with a large terrace) — the roomSegments branch used to split on
+// " i " and read "osum" from "osum kvadrata" as bedrooms=8 (phantom). A segment
+// carrying sqm/terrace/price/floor units is NOT a bedroom list.
+assertEqual(countBedrooms("seese i osum kvadrata so terasa golema"), null, "reported sqm phrase → null (no phantom 8)");
+assertEqual(countBedrooms("osum kvadrata i terasa"), null, "'osum kvadrata i terasa' → null (sqm unit)");
+// CONTROL: a genuine multi-room list still counts (no sqm/terrace units present)
+assertEqual(countBedrooms("dve golemi i edna detska"), 3, "'dve golemi i edna detska' → 3 (guard untouched)");
 
 // Fallback to number word
 assertEqual(countBedrooms("cetiri"), 4, "'cetiri' → 4 (fallback)");

@@ -63,6 +63,22 @@ assert('A2: "ima terasa 5m2" still → 5', extractTerraceNumber('ima terasa 5m2'
 assert('A2: "terasa 5 m2" still → 5', extractTerraceNumber('terasa 5 m2') === 5, `got ${extractTerraceNumber('terasa 5 m2')}`);
 assert('A2: "nema terasa" still → null', extractTerraceNumber('nema terasa') === null, `got ${extractTerraceNumber('nema terasa')}`);
 assert('A2: "ima 3 kvadrata e" still → 3', extractTerraceNumber('ima 3 kvadrata e') === 3, `got ${extractTerraceNumber('ima 3 kvadrata e')}`);
+// TOTAL-SQM PHRASE GUARD (reported): "seese i osum kvadrata so terasa golema"
+// = 68 m² total with a large terrace — NO terrace size given. The total-sqm
+// number words ("seese"=60, "osum"=8) must NEVER be read as the terrace
+// size: "osum" is glued to the total-sqm keyword "kvadrata", and "seese"
+// sits before that keyword (the whole "seese i osum kvadrata" is the total).
+assert('A2: total-sqm phrase + bare "terasa golema" → null (no phantom 60/8)',
+  extractTerraceNumber('seese i osum kvadrata so terasa golema') === null,
+  `got ${extractTerraceNumber('seese i osum kvadrata so terasa golema')}`);
+assert('A2: "osum kvadrata i terasa" → null (number glued to kvadrata is the total)',
+  extractTerraceNumber('osum kvadrata i terasa') === null,
+  `got ${extractTerraceNumber('osum kvadrata i terasa')}`);
+// CONTROL: an explicit terrace size with its own unit is still extracted
+// even when a total-sqm phrase precedes it (the reported lead 5540516 case).
+assert('A2: "VKUPNO IMA OSUMDESET I SES I TERASA OD 3 M2" → 3 (own unit wins)',
+  extractTerraceNumber('VKUPNO IMA OSUMDESET I SES I TERASA OD 3 M2') === 3,
+  `got ${extractTerraceNumber('VKUPNO IMA OSUMDESET I SES I TERASA OD 3 M2')}`);
 
 // Guard: the PLURAL count construction must stay a COUNT (null), not a size
 assert('A2: "ima 2 terasi" still → null (plural count, not size)',

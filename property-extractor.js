@@ -232,6 +232,11 @@ export function parseNumberWords(text) {
       'triest','триест','trieset','триесет','pedeset','педесет','osumdeset','осумдесет',
       'sedumdeset','седумдесет','deveeset','девеесет','devedeset','деведесет',
       'osemdeset','осемдесет','stopeeset','стопеесет','stodvaeset','стодваесет',
+      // Truncated tens forms (dropped final t/т) — "seese i osum" = 86.
+      // Full forms sort before them (longer first), so "seeset" always wins
+      // over "seese". Mirrors the irregularTens additions above.
+      'seese','шесе','peese','пеесе','dvaese','дваесе','oseese','осеесе',
+      'sedumese','седумесе','deveese','девеесе',
       'deset','десет','eeset','еесет','eset','есет']
       .sort((a, b) => b.length - a.length);
     const tensDirectMap = {
@@ -242,7 +247,10 @@ export function parseNumberWords(text) {
       'sedumdeset': 70, 'седумдесет': 70, 'deveeset': 90, 'девеесет': 90,
       'devedeset': 90, 'деведесет': 90, 'osemdeset': 80, 'осемдесет': 80,
       'deset': 10, 'десет': 10,
-      'stopeeset': 150, 'стопеесет': 150, 'stodvaeset': 120, 'стодваесет': 120
+      'stopeeset': 150, 'стопеесет': 150, 'stodvaeset': 120, 'стодваесет': 120,
+      'seese': 60, 'шесе': 60, 'peese': 50, 'пеесе': 50,
+      'dvaese': 20, 'дваесе': 20, 'oseese': 80, 'осеесе': 80,
+      'sedumese': 70, 'седумесе': 70, 'deveese': 90, 'девеесе': 90
     };
     for (const { prefix, hVal } of mergedHT) {
       const pMatch = u.match(prefix);
@@ -306,7 +314,19 @@ export function parseNumberWords(text) {
       'osumdeset': 80, 'осумдесет': 80,
       'osemdeset': 80, 'осемдесет': 80,
       'sedumdeset': 70, 'седумдесет': 70,
-      'peeset': 50, 'пеесет': 50
+      'peeset': 50, 'пеесет': 50,
+      // TRUNCATED TENS FORMS (reported): "seese i osum kvadrata" = "seeset
+      // i osum" (86 m²) — the owner drops the final "t"/"т" of the tens
+      // word in Viber shorthand, so "seese"/"шесе" (60) never matched and
+      // the whole 86 fell apart (totalSqm lost, the loose "osum" leaked
+      // into bedrooms/terrace). The truncated forms are boundary-guarded
+      // (letter boundaries both sides) so they can NEVER substring-match
+      // inside the FULL forms ("seese" ⊂ "seeset") or inside unrelated
+      // words ("trinaese" = 13 must not read "ese"→60 via the eset alias).
+      // Full forms above are checked first in this map's iteration order.
+      'seese': 60, 'шесе': 60, 'peese': 50, 'пеесе': 50,
+      'dvaese': 20, 'дваесе': 20, 'oseese': 80, 'осеесе': 80,
+      'sedumese': 70, 'седумесе': 70, 'deveese': 90, 'девеесе': 90
     };
     for (const [word, val] of Object.entries(irregularTens)) {
       const idx = u.indexOf(word);
@@ -316,6 +336,33 @@ export function parseNumberWords(text) {
         firstMatchIndex = idx;
         found = true;
         break;
+      }
+    }
+
+    // TRUNCATED-FORM BOUNDARY GUARD (reported): "seese i osum kvadrata" =
+    // "seeset i osum" (68 m²) — "seese"/"шесе" drop the final "t"/"т" of the
+    // tens word. The FULL forms ("seeset" etc.) keep the unguarded legacy
+    // substring match above ("stoosumdeset" — a tens word after the "sto"
+    // prefix letter — must still match). ONLY the truncated forms get the
+    // letter-boundary check, so "seese" can never substring-match inside
+    // "seeset", "trinaese" (13 — not "ese"→60), or any unrelated word.
+    if (!found) {
+      const truncatedTens = {
+        'seese': 60, 'шесе': 60, 'peese': 50, 'пеесе': 50,
+        'dvaese': 20, 'дваесе': 20, 'oseese': 80, 'осеесе': 80,
+        'sedumese': 70, 'седумесе': 70, 'deveese': 90, 'девеесе': 90
+      };
+      for (const [word, val] of Object.entries(truncatedTens)) {
+        const idx = u.indexOf(word);
+        if (idx !== -1 &&
+            !/[a-zа-я]/.test(u[idx - 1] || '') &&
+            !/[a-zа-я]/.test(u[idx + word.length] || '')) {
+          result = val;
+          consumedLength = idx + word.length;
+          firstMatchIndex = idx;
+          found = true;
+          break;
+        }
       }
     }
 
@@ -530,7 +577,21 @@ export function countBedrooms(text) {
   const roomSegments = u.split(/\s*,\s*|\s+(?:i|и)\s+/);
   if (roomSegments.length >= 2) {
     let roomsFromList = 0;
-    for (const seg of roomSegments) {        if (/(spaln|спалн|detsk|детск|gostinsk|гостинск|golem|голем|mala|мала|soba|соба|sobi|соби|bracn|брачн|brachn|pomal|помал|pogolem|поголем|roditelsk|родителск)/i.test(seg)) {
+    // OTHER-FIELD UNITS GUARD (reported): "seese i osum kvadrata so terasa
+    // golema" (86 m² with a large terrace) split on " i " into ["seese",
+    // "osum kvadrata so terasa golema"] — the second segment matches the
+    // room-regex ("golema") and parseMacedonianNumber's substring matching
+    // read "osum"→8, storing a phantom bedrooms=8. The word-number fallback
+    // below already skips other-field context (kvadrata/terasa/m2/price/floor);
+    // the roomSegments branch (which returns EARLY at >= 2) must apply the
+    // SAME guard per segment. A genuine multi-room answer ("dve spalni i
+    // edna detska") has no sqm/terrace/price words and is untouched.
+    const otherFieldUnits = /m2|м2|m²|кв|kvadrati|квадрати|kvadrata|квадрата|kvadrat|квадрат|sqm|kat|кат|sprat|спрат|evra|евра|iljadi|илјади|parking|паркинг|garaza|гаража|lift|лифт|klima|клима|terasa|тераса|teras|терас|terrace|zosto|зошто|zasto|зашто|godina|година|izgraden|граден/i;
+    for (const seg of roomSegments) {
+      // Skip segments that are really about another field (sqm total, terrace,
+      // price, floor, year...) — a number word there belongs to THAT field.
+      if (otherFieldUnits.test(seg)) continue;
+      if (/(spaln|спалн|detsk|детск|gostinsk|гостинск|golem|голем|mala|мала|soba|соба|sobi|соби|bracn|брачн|brachn|pomal|помал|pogolem|поголем|roditelsk|родителск)/i.test(seg)) {
         const num = parseMacedonianNumber(seg);
         if (num !== null && num >= 1 && num <= 20) {
           roomsFromList += num;
@@ -960,6 +1021,39 @@ export function extractTerraceNumber(text) {
         const unitAdjacent = hasAreaUnit(words[i]) ||
           (((i + 1 < words.length && hasAreaUnit(words[i + 1])) ||
             (i - 1 >= 0 && hasAreaUnit(words[i - 1]))) && distance <= 2);
+        // TOTAL-SQM-ADJACENCY EXCLUSION (reported): "seese i osum kvadrata
+        // so terasa golema" (86 m² with a large terrace) — "osum" sits
+        // DIRECTLY before the total-sqm word "kvadrata" ("8 kvadrata"), so
+        // it is the TOTAL, never the terrace size. Without this, the scan
+        // picked "osum"→8 as the best context candidate and stored a phantom
+        // terraceSqm=8 (and bedrooms=8 via countBedrooms). A number with an
+        // attached unit ("5m2") or adjacent "m2"/"kv" ("3 M2") is still a
+        // SIZE signal (kept by unitAdjacent) — only a number glued to a
+        // TOTAL-sqm word (kvadrata/kvadrati forms) is excluded. The copula
+        // boundTerraceMatch above already ran, so "...OD KOI 2 SE TERASA"
+        // (2 m² terrace of a 63 m² total) is unaffected.
+        // TOTAL-SQM PHRASE EXCLUSION — a number word that belongs to the
+        // TOTAL-sqm phrase ("seese i osum kvadrata" = 68 m² total) is never
+        // a terrace size. Two prongs:
+        //   a) ADJACENT: the number is glued to a total-sqm keyword
+        //      ("osum kvadrata" → "osum" is the total, not the terrace).
+        //   b) BEFORE-KEYWORD: the number sits anywhere BEFORE the
+        //      total-sqm keyword token ("seese i osum kvadrata ... terasa")
+        //      — the tens word "seese" also belongs to the total phrase, and
+        //      with "kvadrata" between it and "terasa" the old
+        //      hasSqmBetween logic wrongly crowned it "best context".
+        //      Excluding every pre-keyword bare candidate kills the whole
+        //      phantom in one rule. Unit-ATTACHED numbers ("3 M2" / "5m2") —
+        //      including ones after "terasa" ("... terasa od 3 M2") — are
+        //      untouched (the terrace size of the VKUPNO case, reported
+        //      lead 5540516).
+        const totalSqmUnitRe = /kvadrata|квадрата|kvadrati|квадрати|kvadrat|квадрат/i;
+        const prevIsTotalSqm = i - 1 >= 0 && totalSqmUnitRe.test(words[i - 1]);
+        const nextIsTotalSqm = i + 1 < words.length && totalSqmUnitRe.test(words[i + 1]);
+        const totalSqmKeywordIdx = words.findIndex(w => totalSqmUnitRe.test(w));
+        const beforeTotalSqmKeyword = totalSqmKeywordIdx !== -1 && i < totalSqmKeywordIdx;
+        const totalSqmAdjacent = prevIsTotalSqm || nextIsTotalSqm;
+        if (totalSqmAdjacent || (beforeTotalSqmKeyword && !unitAdjacent)) continue;
         if ((hasSqmBetween || unitAdjacent) && distance < bestContextDistance) {
           bestContextDistance = distance;
           bestWithContext = result;
