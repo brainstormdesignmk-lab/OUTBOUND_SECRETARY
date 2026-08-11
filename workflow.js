@@ -13,7 +13,7 @@
 // the "whole batch" problem for land leads). monthlyRent is in the whitelist
 // for rent land leads, cleanPrice for sale — the per-transaction order picks
 // one.
-const LAND_FIELDS = ['cleanPrice', 'monthlyRent', 'totalSqm', 'documentationClean', 'photos', 'ownerName', 'address'];
+const LAND_FIELDS = ['cleanPrice', 'monthlyRent', 'totalSqm', 'documentationClean', 'ownerName', 'address', 'photos'];
 
 // BUSINESS/COMMERCIAL FIELD WHITELIST — commercial properties (локал, офис,
 // деловен простор, продавница, ресторан, магацин, office, shop, restaurant,
@@ -31,7 +31,7 @@ const COMMERCIAL_FIELDS = [
   'cleanPrice', 'monthlyRent',
   'totalSqm', 'floor', 'totalFloors', 'heating', 'ac', 'parking',
   'orientation', 'furnished', 'yearBuilt', 'renovated', 'renovationYear',
-  'documentationClean', 'photos', 'ownerName', 'address'
+  'documentationClean', 'ownerName', 'address', 'photos'
 ];
 
 const isLand = (data) => data.propertyType === 'land';
@@ -63,9 +63,9 @@ export function getNextMissingField(data) {
     "renovated",
     "renovationYear",
     "documentationClean",
-    "photos",
     "ownerName",
-    "address"
+    "address",
+    "photos"
   ];
 
   const rentOrder = [
@@ -87,11 +87,19 @@ export function getNextMissingField(data) {
     "renovated",
     "renovationYear",
     "documentationClean",
-    "photos",
     "ownerName",
-    "address"
+    "address",
+    "photos"
   ];
 
+  // PHOTOS IS LAST (reported): the photos flow can transition the session to
+  // the async AWAITING_PHOTOS wait state (owner commits to sending photos
+  // later — 2d/5d reminder ladder). If ownerName/address were still pending,
+  // the conversation would PARK without ever asking them. Photos is the
+  // natural closing question: it is asked only after every other field
+  // (incl. ownerName/address) is collected, so the async pause never strands
+  // anything. Both orders above and the LAND/COMMERCIAL whitelists reflect
+  // this.
   const order = isRent ? rentOrder : saleOrder;
 
   // Debug: log all currently-missing fields before selecting next

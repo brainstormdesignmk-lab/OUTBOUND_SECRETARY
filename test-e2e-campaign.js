@@ -189,28 +189,29 @@ async function runScenario1() {
   assert("S1-T15: renovated=true", session.collectedData.renovated === true, `got ${session.collectedData.renovated}`);
   assert("S1-T15: renovationYear=2020", session.collectedData.renovationYear === 2020, `got ${session.collectedData.renovationYear}`);
 
-  // Turn 16: Documentation
+  // Turn 16: Documentation — photos is now the LAST field (reported order
+  // fix: the AWAITING_PHOTOS pause must never strand ownerName/address), so
+  // the next question is ownerName.
   res = await sendMessage(session, "cist imoten list");
   assert("S1-T16: type=QUESTION", res.type === "QUESTION", `got ${res.type}`);
-  assert("S1-T16: nextField=photos", res.nextField === "photos", `got ${res.nextField}`);
+  assert("S1-T16: nextField=ownerName (photos is last)", res.nextField === "ownerName", `got ${res.nextField}`);
   assert("S1-T16: documentationClean=true", session.collectedData.documentationClean === true, `got ${session.collectedData.documentationClean}`);
 
-  // Turn 17: Photos — "da, imam sliki" → Viber pending
-  res = await sendMessage(session, "da, imam sliki");
-  assert("S1-T17: type=QUESTION", res.type === "QUESTION", `got ${res.type}`);
-  assert("S1-T17: nextField=ownerName", res.nextField === "ownerName", `got ${res.nextField}`);
-  assert("S1-T17: photos=VIBER_PENDING", session.collectedData.photosStatus === "VIBER_PENDING", `got ${session.collectedData.photosStatus}`);
-
-  // Turn 18: Owner name
+  // Turn 16b: Owner name, then address, then photos
   res = await sendMessage(session, "Zoran Atanasov");
-  assert("S1-T18: type=QUESTION", res.type === "QUESTION", `got ${res.type}`);
-  assert("S1-T18: nextField=address", res.nextField === "address", `got ${res.nextField}`);
-  assert("S1-T18: ownerName=Zoran Atanasov", session.collectedData.ownerName === "Zoran Atanasov", `got ${session.collectedData.ownerName}`);
-
-  // Turn 19: Address → CLOSED
+  assert("S1-T16b: nextField=address", res.nextField === "address", `got ${res.nextField}`);
   res = await sendMessage(session, "Jane Sandanski 45");
-  assert("S1-T19: type=CLOSED", res.type === "CLOSE", `got ${res.type}`);
-  assert("S1-T19: address=Jane Sandanski 45", session.collectedData.address === "Jane Sandanski 45", `got ${session.collectedData.address}`);
+  assert("S1-T16c: nextField=photos", res.nextField === "photos", `got ${res.nextField}`);
+
+  // Turn 17: Photos — "da, imam sliki" → Viber pending. ownerName/address were
+  // already collected (T16b/T16c — photos is the LAST field), so there is
+  // nothing left to ask → the conversation CLOSES immediately (the reported
+  // stranding bug fix).
+  res = await sendMessage(session, "da, imam sliki");
+  assert("S1-T17: type=CLOSE (photos last — nothing left to ask)", res.type === "CLOSE", `got ${res.type}`);
+  assert("S1-T17: photos=VIBER_PENDING", session.collectedData.photosStatus === "VIBER_PENDING", `got ${session.collectedData.photosStatus}`);
+  assert("S1-T17: ownerName=Zoran Atanasov", session.collectedData.ownerName === "Zoran Atanasov", `got ${session.collectedData.ownerName}`);
+  assert("S1-T17: address=Jane Sandanski 45", session.collectedData.address === "Jane Sandanski 45", `got ${session.collectedData.address}`);
 
   // Verify all fields collected
   const expected = {

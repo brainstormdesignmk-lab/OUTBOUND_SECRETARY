@@ -393,6 +393,38 @@ console.log('\n🔗 AWAITING_PHOTOS resolution unchanged');
   assert('10: photosStatus=VIBER_RECEIVED', session.collectedData.photosStatus === 'VIBER_RECEIVED', `got ${session.collectedData.photosStatus}`);
 }
 
+// ========================================
+// 11. PHOTOS-LAST ORDER FIX (reported): after the owner commits to sending
+// photos later (AWAITING_PHOTOS pause), ownerName/address must ALREADY be
+// collected — the async wait must never strand them. getNextMissingField
+// now surfaces photos LAST (after ownerName/address) in both orders and the
+// LAND/COMMERCIAL whitelists.
+// ========================================
+console.log('\n📷 PHOTOS-LAST ORDER (AWAITING_PHOTOS pause must not strand ownerName/address)');
+{
+  const { getNextMissingField } = await import('./workflow.js');
+  // Sale walk: photos must come after address.
+  const saleData = { transactionType: 'sale', propertyType: 'apartment' };
+  const saleOrder = [];
+  let f = getNextMissingField(saleData);
+  while (f) { saleOrder.push(f); saleData[f] = 'X'; saleData[f + 'Confidence'] = 0.95; f = getNextMissingField(saleData); }
+  assert('11: sale order ends with ownerName → address → photos',
+    saleOrder[saleOrder.length - 3] === 'ownerName' &&
+    saleOrder[saleOrder.length - 2] === 'address' &&
+    saleOrder[saleOrder.length - 1] === 'photos',
+    `Got tail: ${saleOrder.slice(-3).join(' -> ')} (full: ${saleOrder.join(',')})`);
+  // Rent walk: same tail.
+  const rentData = { transactionType: 'rent', propertyType: 'apartment' };
+  const rentOrder = [];
+  f = getNextMissingField(rentData);
+  while (f) { rentOrder.push(f); rentData[f] = 'X'; rentData[f + 'Confidence'] = 0.95; f = getNextMissingField(rentData); }
+  assert('11b: rent order ends with ownerName → address → photos',
+    rentOrder[rentOrder.length - 3] === 'ownerName' &&
+    rentOrder[rentOrder.length - 2] === 'address' &&
+    rentOrder[rentOrder.length - 1] === 'photos',
+    `Got tail: ${rentOrder.slice(-3).join(' -> ')} (full: ${rentOrder.join(',')})`);
+}
+
 console.log(`\n==================================================`);
 console.log(harness.failed > 0 ? `   ❌ Failed: ${harness.failed}` : `   ✅ All ${harness.passed} photos-offer-flow tests passed`);
 console.log(`   📋 Total: ${harness.passed + harness.failed}`);

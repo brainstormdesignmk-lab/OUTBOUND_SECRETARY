@@ -1291,8 +1291,8 @@ const partialSkipRes = runDataCollectionFlow({
   hasScraperPhotos: false
 });
 console.log(`  Partial-skip result: type=${partialSkipRes && partialSkipRes.type}, nextField=${partialSkipRes && partialSkipRes.nextField}`);
-assert('partially-skipped session → QUESTION (photos not yet asked)',
-  partialSkipRes && partialSkipRes.type === 'QUESTION' && partialSkipRes.nextField === 'photos',
+assert('partially-skipped session → QUESTION (ownerName not yet asked; photos is now the LAST field, reported order fix)',
+  partialSkipRes && partialSkipRes.type === 'QUESTION' && partialSkipRes.nextField === 'ownerName',
   `Got: ${JSON.stringify(partialSkipRes)}`);
 
 console.log('\n========================================');
@@ -1422,8 +1422,8 @@ while (f16) {
   f16 = getNextMissingField(landSale);
 }
 console.log(`  land sale order: ${landSaleOrder.join(' -> ')}`);
-assert('land sale asks ONLY the whitelisted fields (price/sqm/doc/photos/name/address), in order',
-  JSON.stringify(landSaleOrder) === JSON.stringify(['cleanPrice', 'totalSqm', 'documentationClean', 'photos', 'ownerName', 'address']),
+assert('land sale asks ONLY the whitelisted fields (price/sqm/doc/name/address/photos), in order — photos LAST (reported: AWAITING_PHOTOS pause must never strand ownerName/address)',
+  JSON.stringify(landSaleOrder) === JSON.stringify(['cleanPrice', 'totalSqm', 'documentationClean', 'ownerName', 'address', 'photos']),
   `Got: ${landSaleOrder.join(' -> ')}`);
 assert('land sale: building-only fields (terrace/bedrooms/floor/heating/...) NEVER surface',
   !landSaleOrder.some(f => ['terraceSqm', 'bedrooms', 'floor', 'totalFloors', 'elevator', 'heating', 'ac', 'parking', 'orientation', 'furnished', 'yearBuilt', 'renovated', 'renovationYear'].includes(f)),
@@ -1441,7 +1441,7 @@ while (f16) {
 }
 console.log(`  land rent order: ${landRentOrder.join(' -> ')}`);
 assert('land rent asks ONLY the whitelisted fields (monthlyRent first, photos included)',
-  JSON.stringify(landRentOrder) === JSON.stringify(['monthlyRent', 'totalSqm', 'documentationClean', 'photos', 'ownerName', 'address']),
+  JSON.stringify(landRentOrder) === JSON.stringify(['monthlyRent', 'totalSqm', 'documentationClean', 'ownerName', 'address', 'photos']),
   `Got: ${landRentOrder.join(' -> ')}`);
 
 // --- Case C: building-only fields are NEVER surfaced for land, even if the
@@ -1530,19 +1530,20 @@ const aptPhotosQ = getQuestion('photos', 'apartment', false);
 assert('apartment photos: unchanged generic wording (no sketch mention)',
   !/скица\/цртеж/.test(aptPhotosQ),
   `Got: "${aptPhotosQ}"`);
-assert('land photos: getNextMissingField surfaces photos after documentationClean',
+assert('land photos: getNextMissingField surfaces photos LAST (after address) — the AWAITING_PHOTOS pause must never strand ownerName/address',
   landSaleOrder.includes('photos') &&
-  landSaleOrder.indexOf('photos') === landSaleOrder.indexOf('documentationClean') + 1,
+  landSaleOrder.indexOf('photos') === landSaleOrder.length - 1,
   `Got order: ${landSaleOrder.join(' -> ')}`);
 
 // --- Case F3: END-TO-END through generateResponse — fill a land lead up to
 // the photos step and verify the actual asked question carries the sketch
 // wording (proves the nextField==='photos' handler wiring, not just the
 // question factory). ---
-// NOTE: do NOT pre-fill documentationClean — the owner's "da" must answer the
-// documentation question so the FOLLOW-UP response is the photos question
-// (if documentationClean were already filled, the "da" would be read as the
-// photos answer and the flow would skip to ownerName).
+// PHOTOS-LAST ORDER FIX (reported): photos is now the LAST field (after
+// ownerName/address), so after the documentationClean "da" the flow asks
+// ownerName — NOT photos. NOTE: do NOT pre-fill documentationClean — the
+// owner's "da" must answer the documentation question so the FOLLOW-UP
+// response is the ownerName question.
 const landPhotosSession = {
   adMemory: { transactionType: 'sale', propertyType: 'land', propertyLabel: 'плацот' },
   collectedData: {
@@ -1559,8 +1560,8 @@ const landPhotosSession = {
 };
 const landPhotosRes = await generateResponse(landPhotosSession, 'da');
 console.log(`  land e2e at photos step → ${landPhotosRes.type} nextField=${landPhotosRes.nextField} — "${(landPhotosRes.text || '').substring(0, 70)}"`);
-assert('land e2e: reaches the photos question with sketch wording after documentationClean',
-  landPhotosRes.type === 'QUESTION' && landPhotosRes.nextField === 'photos' && /скица\/цртеж/.test(landPhotosRes.text || ''),
+assert('land e2e: after documentationClean the flow asks ownerName first (photos is now the last field)',
+  landPhotosRes.type === 'QUESTION' && landPhotosRes.nextField === 'ownerName',
   `Got: ${landPhotosRes.type} nextField=${landPhotosRes.nextField} — "${landPhotosRes.text}"`);
 
 // --- Case G: PHANTOM BUILDING DATA GUARD — a land owner answering a bare
@@ -1770,7 +1771,7 @@ console.log('========================================\n');
 
 // --- Case A: full sale walk — exactly the reported business list. ---
 const COMMERCIAL_SALE_ORDER =
-  'cleanPrice,totalSqm,floor,totalFloors,heating,ac,parking,orientation,furnished,yearBuilt,renovated,renovationYear,documentationClean,photos,ownerName,address';
+  'cleanPrice,totalSqm,floor,totalFloors,heating,ac,parking,orientation,furnished,yearBuilt,renovated,renovationYear,documentationClean,ownerName,address,photos';
 const commSaleData = { propertyType: 'commercial', transactionType: 'sale' };
 let cf = getNextMissingField(commSaleData);
 const commSaleOrder = [];
