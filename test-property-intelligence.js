@@ -267,6 +267,41 @@ assert('label men → мажи', tenantCategoryLabel('men') === 'мажи', '');
     `got ${JSON.stringify(s2.collectedData.tenantPreferences)}`);
 }
 
+// VARIANT ROTATION (reported requirement: "couple of variations of the type
+// of clients preferred"): the tenant question must rotate through ALL
+// TENANT_PREF_QUESTIONS variants on re-asks — NOT be shadowed by the fixed
+// confirmatory phrasing ("Само да потврдам...") and NOT be skipped after 2
+// attempts. The field is exempt from both gates; one ask per variant.
+{
+  const s3 = {
+    adMemory: { transactionType: 'rent', propertyType: 'apartment', propertyLabel: 'станот' },
+    collectedData: { cooperationAccepted: true, transactionType: 'rent', monthlyRent: 350, availableFrom: '2026-07-01' },
+    messages: [{ role: 'model', text: 'Одлично. Каков тип на станари преферирате?' }],
+    phone: '+38976000009'
+  };
+  const variantTexts = [
+    'Каков тип на станари преферирате?',
+    'Дали имате преференци за профилот на закупците?',
+    'На какви лица би сакале да се издаде станот?',
+    'Дали постојат категории на станари што ги преферирате или не ги преферирате?'
+  ];
+  // Four non-answers (no tenant category word) → four different variants.
+  for (let i = 0; i < variantTexts.length; i++) {
+    const r3 = await generateResponse(s3, 'KAKO KJE BIDE');
+    assert(`ROT-${i + 1}: attempt ${i + 1} asks variant ${i} ("${variantTexts[i]}")`,
+      r3.type === 'QUESTION' && r3.nextField === 'tenantPreferences' && (r3.text || '').includes(variantTexts[i]),
+      `got [${r3.type}] next=${r3.nextField} "${(r3.text || '').slice(0, 90)}"`);
+  }
+  // Fifth non-answer → max attempts (variant count) reached → field skipped,
+  // flow advances to the next field (totalSqm) — no infinite loop.
+  const r3skip = await generateResponse(s3, 'KAKO KJE BIDE');
+  assert('ROT-5: after 4 non-answers the field is skipped (moves on, no loop)',
+    r3skip.type === 'QUESTION' && r3skip.nextField === 'totalSqm',
+    `got [${r3skip.type}] next=${r3skip.nextField} "${(r3skip.text || '').slice(0, 90)}"`);
+  assert('ROT-6: skipped marker set after max attempts', s3.collectedData.tenantPreferencesSkipped === true,
+    `got ${JSON.stringify(s3.collectedData.tenantPreferencesSkipped)}`);
+}
+
 // ============================================================
 // 3. BROKER COMMENT
 // ============================================================

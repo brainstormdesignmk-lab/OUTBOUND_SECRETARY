@@ -72,7 +72,11 @@ const CONFIRMATORY_QUESTIONS = {
   renovationYear: () => `Само да потврдам, која година е реновиран?`,
   documentationClean: () => `Само да потврдам, дали имате чист имотен лист?`,
   photos: () => `Само да потврдам, дали имате фотографии?`,
-  tenantPreferences: () => `Само да потврдам, каков тип на станари преферирате?`,
+  // NOTE: NO tenantPreferences entry — the tenant question rotates through
+  // TENANT_PREF_QUESTIONS variants (one fresh sentence per attempt), so the
+  // fixed confirmatory phrasing would shadow variants 1-3 and the rotation
+  // would never be heard (reported requirement: "couple of variations of
+  // the type of clients preferred").
   ownerName: () => `Само да потврдам, како да ве запишам?`,
   address: () => `Само да потврдам, која е точната адреса?`
 };
@@ -1309,7 +1313,16 @@ export function runDataCollectionFlow({ u, userInput, session, adMemory, hasScra
     // block below handles the "all fields exhausted" case naturally.
     // This prevents infinite loops on fields like "furnished" or "renovated".
     // ========================================
-    while (nextField && (session.questionAttempts[nextField] || 0) >= 2) {
+    // TENANT-PREFERENCE ATTEMPTS EXEMPTION (reported requirement: "couple of
+    // variations of the type of clients preferred"): the tenant question is
+    // asked once per TENANT_PREF_QUESTIONS variant, so it may re-ask up to
+    // the variant count — the generic 2-attempt cap would skip the field
+    // right after variant 1 and variants 2-3 would never be spoken. Every
+    // other field keeps the strict 2-attempt cap.
+    // Math.max(1, …) guard: a hypothetical empty variant list can never make
+    // the while-loop non-terminating (attempts >= 0 would always be true).
+    const tenantPrefMaxAttempts = Math.max(1, TENANT_PREF_QUESTIONS.length);
+    while (nextField && (session.questionAttempts[nextField] || 0) >= (nextField === 'tenantPreferences' ? tenantPrefMaxAttempts : 2)) {
       // Fallback: run global extraction with NO preferredField to catch
       // any keyword in the owner's message that might have been missed.
       const fallbackUpdates = runGlobalExtraction(u, session.collectedData);
@@ -1340,7 +1353,7 @@ export function runDataCollectionFlow({ u, userInput, session, adMemory, hasScra
       // (null value + confidence < 0.7 both read as "missing" in workflow.js
       // — without the marker the while-loop below spins forever.)
       session.collectedData[nextField + 'Skipped'] = true;
-      console.log(`[SKIP: ${nextField} — max 2 attempts reached, owner not providing answer, storing null]`);
+      console.log(`[SKIP: ${nextField} — max attempts reached (${nextField === 'tenantPreferences' ? '4 tenant variants' : '2'}), owner not providing answer, storing null]`);
       const updatedKnown = { ...adMemory, ...session.collectedData };
       nextField = getNextMissingField(updatedKnown);
     }
@@ -1367,9 +1380,13 @@ export function runDataCollectionFlow({ u, userInput, session, adMemory, hasScra
       // TENANT-PREFERENCE VARIANT ROTATION (reported requirement: "couple of
       // variations of the type of clients preferred"). The first ask uses
       // variant 0; re-asks rotate through the list so the owner is never
-      // asked the identical sentence twice (max-2-attempts skip still caps
-      // the loop at 2). The confirmatory phrasing (attempts >= 2) below
-      // overrides with the softer re-ask.
+      // asked the identical sentence twice. tenantPreferences is EXEMPT from
+      // both generic re-ask gates: the max-attempts precheck above caps it at
+      // TENANT_PREF_QUESTIONS.length (one ask per variant, NOT 2), and the
+      // confirmatory override below deliberately skips it — each attempt
+      // already carries a fresh variant sentence, so the fixed
+      // "Само да потврдам…" phrasing would shadow variants 1-3 and the
+      // rotation would never be heard.
       let tenantPrefVariant = null;
       if (nextField === 'tenantPreferences') {
         tenantPrefVariant = TENANT_PREF_QUESTIONS[Math.min(attempts - 1, TENANT_PREF_QUESTIONS.length - 1)] || TENANT_PREF_QUESTIONS[0];
@@ -1383,8 +1400,11 @@ export function runDataCollectionFlow({ u, userInput, session, adMemory, hasScra
         finalQuestion = question.replace(/станот/g, propertyLabel);
       }
 
-      // Override question text on re-asks
-      if (attempts >= 2) {
+      // Override question text on re-asks — EXCEPT tenantPreferences, whose
+      // variant rotation above already supplies a fresh sentence for every
+      // attempt (the confirmatory phrasing would shadow variants 1-3 and
+      // the rotation would never be heard — reported requirement).
+      if (attempts >= 2 && nextField !== 'tenantPreferences') {
         const confQuestion = CONFIRMATORY_QUESTIONS[nextField];
         if (confQuestion) {
           finalQuestion = confQuestion(propertyLabel);
