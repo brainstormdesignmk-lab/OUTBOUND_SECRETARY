@@ -516,7 +516,15 @@ export class MultiLeadEngine {
   async onOwnerMessage(leadId, text) {
     const session = this.sessions.get(String(leadId));
     if (!session) return { type: 'IGNORED', action: 'ignored' };
-    if (!session.isActive()) return { type: 'IGNORED', action: 'ignored' };
+    // CLOSING FOLLOW-UP WINDOW (reported, approved Option A): a CLOSED_SUCCESS
+    // chat stays reachable for CLOSE_FOLLOWUP_WINDOW_MS after the success
+    // close, so the owner's end questions ("KOGA DA VE OCEKUVAM SO KLIENTI?",
+    // "SE NAJDOBRO") still get answered by the rule-based closing responder
+    // (handlers/closing-phase.js — no LLM, no re-opening data collection).
+    // After the window expires, late messages are IGNORED exactly as before.
+    const closingOpen = typeof session.closingSince === 'number' &&
+      (this.clock() - session.closingSince) < config.CLOSE_FOLLOWUP_WINDOW_MS;
+    if (!session.isActive() && !closingOpen) return { type: 'IGNORED', action: 'ignored' };
     if (!isValidMessage(text, 10000)) {
       return { type: 'ERROR', action: 'error', text: 'Ве молам, испратете валидна порака.' };
     }
@@ -525,6 +533,10 @@ export class MultiLeadEngine {
     session.addReply(text);
     // Re-stamp with the ENGINE clock (see _send note — addReply uses Date.now).
     session.lastReplyAt = this.clock();
+    // A message inside the closing window RE-ARMS it ("10 min of silence"
+    // semantics — same as ownerGraceMs). closingOpen above was computed from
+    // the PRE-re-arm value, so a message at minute 9 still counts as in-window.
+    if (closingOpen) session.closingSince = this.clock();
     this.emit('owner-message', { leadId: session.leadId, text });
 
     // OWNER FOLLOW-UP GRACE: with ownerGraceMs > 0 (interactive TUI), don't
@@ -544,7 +556,7 @@ export class MultiLeadEngine {
     // its [PHASE]/[MEMORY]/[EXTRACTION] diagnostics via console.log, which the
     // TUI captures and shows INSIDE the right lead's chat. It needs to know
     // WHICH lead is being processed — and with the grace window the reply is
-    // generated asynchronously (up to 15s later), so the TUI can't rely on
+    // generated asynchronously (up to 30s later), so the TUI can't rely on
     // the calling frame. These events carry the leadId for the whole call.
     this.emit('processing-start', { leadId: session.leadId });
     let response;
@@ -712,6 +724,12 @@ export class MultiLeadEngine {
         session.markOwnerInterested();
         return { type, action: 'wait' };
       case 'CLOSE':
+        // CLOSING FOLLOW-UP WINDOW (approved Option A): stamp when the success
+        // close was routed — onOwnerMessage admits late owner messages within
+        // CLOSE_FOLLOWUP_WINDOW_MS and routes them to the rule-based closing
+        // responder. State/CSV/closed-event stay IMMEDIATE, so the TUI shows
+        // "closed — success" and the next lead starts as planned.
+        session.closingSince = this.clock();
         session.markClosed(true);
         appendToCSV(session);
         this.emit('closed', { leadId: session.leadId, outcome: 'success' });

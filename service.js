@@ -26,6 +26,7 @@ import { detectOffensive, getStrikeResponse, addToBlocklist, applyStrikeDecay } 
 import { isValidPhone, isValidMessage, createSafeFallback } from './retry-utils.js';
 
 import { runEarlyResponses } from './handlers/early-responses.js';
+import { handleClosingFollowUp } from './handlers/closing-phase.js';
 import { runHumanEscalation, getHumanEscalationMessage } from './handlers/human-escalation.js';
 import { detectPhase, runPersuasion } from './handlers/persuasion-phase.js';
 import {
@@ -200,6 +201,21 @@ export async function generateResponse(session, userInput) {
         text: getHumanEscalationMessage(),
         type: 'ESCALATE'
       };
+    }
+
+    // ========================================
+    // CLOSING FOLLOW-UP WINDOW (reported, approved Option A — grace window
+    // only): the engine keeps a successful CLOSED_SUCCESS chat reachable for
+    // CLOSE_FOLLOWUP_WINDOW_MS, so the owner's end questions ("KOGA DA VE
+    // OCEKUVAM SO KLIENTI?", "SE NAJDOBRO") still get answered — rule-based,
+    // no LLM, no data collection, no persuasion. MUST run BEFORE the strike
+    // protocol (a venting owner inside the window must never be strike-3
+    // blocklisted), before early responses, and before phase detection. The
+    // engine already filters window expiry — a stale flag reaching here
+    // simply gets a polite final answer.
+    // ========================================
+    if (typeof session.closingSince === 'number') {
+      return handleClosingFollowUp(session, u);
     }
 
     // ========================================

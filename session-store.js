@@ -99,7 +99,10 @@ export class SessionStore {
       offensiveStrikes: session.offensiveStrikes,
       availabilityAcknowledged: session.availabilityAcknowledged,
       escalationReason: session.escalationReason,
-      serviceErrorCount: session.serviceErrorCount
+      serviceErrorCount: session.serviceErrorCount,
+      // CLOSING FOLLOW-UP WINDOW anchor — persisted so a restart inside the
+      // 10-min window keeps answering end questions (reviewer finding).
+      closingSince: session.closingSince ?? null
     };
   }
 
@@ -140,6 +143,8 @@ export class SessionStore {
     session.availabilityAcknowledged = data.availabilityAcknowledged || false;
     session.escalationReason = data.escalationReason || null;
     session.serviceErrorCount = data.serviceErrorCount || 0;
+    // CLOSING FOLLOW-UP WINDOW anchor (reviewer finding): survive a restart.
+    session.closingSince = typeof data.closingSince === 'number' ? data.closingSince : null;
 
     return session;
   }

@@ -77,8 +77,8 @@ export function createWebhookAdapter(options = {}) {
     canSendContact: options.canSendContact,
     recordSent: options.recordSent,
     typingDelay: options.typingDelay,
-    // Webhook replies are IMMEDIATE by default (0). The TUI's 15s
-    // owner-follow-up grace window would make every Viber reply 15s
+    // Webhook replies are IMMEDIATE by default (0). The TUI's 30s
+    // owner-follow-up grace window would make every Viber reply 30s
     // late for a single-message owner; operators who want quickfire
     // batching can pass ownerGraceMs explicitly.
     ownerGraceMs: options.ownerGraceMs ?? 0

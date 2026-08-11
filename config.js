@@ -115,10 +115,20 @@ export const config = {
   // Owner-follow-up grace window (interactive TUI): after an owner message
   // Ana waits this long for a possible follow-up (or two) before replying —
   // real owners often type several messages in a row. A new message re-arms
-  // the window; 0 = reply instantly (campaign/tests). 15s gives a real owner
-  // time to fire a 2nd message while keeping the test snappy. Used by the
-  // interactive TUI (engine ownerGraceMs).
-  OWNER_FOLLOWUP_GRACE_MS: envInt('ANA_OWNER_FOLLOWUP_GRACE_MS', 15000),
+  // the window; 0 = reply instantly (campaign/tests). 30s gives a slower
+  // owner time to fire a 2nd message while keeping the test snappy
+  // (reported: "some of them are slow"). Used by the interactive TUI
+  // (engine ownerGraceMs).
+  OWNER_FOLLOWUP_GRACE_MS: envInt('ANA_OWNER_FOLLOWUP_GRACE_MS', 30000),
+  // CLOSING FOLLOW-UP WINDOW (reported, approved Option A — grace window
+  // only): after a successful data-collection close, the chat stays
+  // reachable for this long so an owner's end questions ("KOGA DA VE
+  // OCEKUVAM SO KLIENTI?", "SE NAJDOBRO") still get answered by the
+  // rule-based closing responder (handlers/closing-phase.js). A message
+  // inside the window re-arms it ("10 min of silence" semantics); after it
+  // expires, late messages are IGNORED exactly as before. Fits inside the
+  // existing GAP_BETWEEN_LEADS, so it never delays the next lead.
+  CLOSE_FOLLOWUP_WINDOW_MS: envInt('ANA_CLOSE_FOLLOWUP_WINDOW_MS', 10 * 60 * 1000),
   TYPING_CHAR_MIN: envInt('ANA_TYPING_CHAR_MIN', 80),
   TYPING_CHAR_MAX: envInt('ANA_TYPING_CHAR_MAX', 250),
   MESSAGE_PAUSE_MIN: envInt('ANA_MESSAGE_PAUSE_MIN_MS', 2000),
