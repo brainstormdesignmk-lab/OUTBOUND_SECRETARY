@@ -39,15 +39,15 @@ const HTTP_PORT = Number(process.env.VIBER_HTTP_PORT || 8080);
 const WS_PORT = Number(process.env.VIBER_WS_PORT || 8081);
 const LEADS_PATH = process.env.LEADS_INPUT_PATH || './leads/today.csv';
 const USE_ENGINE = (process.env.VIBER_ENGINE || '1') !== '0';
-// Owner-follow-up grace window. 0 = reply to each message immediately
-// (the webhook default — instant replies matter in production). Set
-// ANA_OWNER_FOLLOWUP_GRACE_MS to a few seconds to merge quickfire
-// multi-message owners into ONE reply (the grace-batch behavior the
-// reported 4-message fix was built around). Tradeoff: every reply is
-// delayed by the grace window.
+// Owner-follow-up grace window — the same ANA_OWNER_FOLLOWUP_GRACE_MS knob
+// the TUI uses (config.js OWNER_FOLLOWUP_GRACE_MS), so production webhook
+// replies batch quickfire multi-message owners into ONE reply too (some
+// owners are slow typers — reported). Default 30s matches the TUI. Tradeoff:
+// every Viber reply waits up to the grace window for a possible follow-up
+// before being sent; set ANA_OWNER_FOLLOWUP_GRACE_MS=0 for instant replies.
 const OWNER_GRACE_MS = process.env.ANA_OWNER_FOLLOWUP_GRACE_MS !== undefined
   ? Number(process.env.ANA_OWNER_FOLLOWUP_GRACE_MS)
-  : 0;
+  : 30000;
 
 let wss = null;              // created below; broadcast refs it lazily
 
