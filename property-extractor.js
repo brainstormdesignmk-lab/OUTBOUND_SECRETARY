@@ -1134,7 +1134,18 @@ export function extractTerraceNumber(text) {
   // yearBuilt decade, never a terrace size): the old list lacked them, so a
   // "80ti" digit fell through to the bare-\d+ grab below and a phantom
   // terraceSqm=80 was stored (reported lead 5540516).
-  const hasOtherContext = /iljadi|илјади|evra|евра|eur|evro|евро|kvadrati|квадрати|kvadrata|квадрата|m2|м2|kv|кв|sqm|kat|кат|sprat|спрат|sprata|спрата|kata|ката|katnica|катница|spalni|спални|parking|паркинг|garaza|гаража|lift|лифт|klima|клима|godina|година|izgraden|граден|renoviran|реновиран|zgrad|зград|\d{1,2}\s*[- ]?(?:ti|ти|ta|та)(?:te|те)?|осумдесет|osumdeset|осамдесет|osamdeset|девеесет|deveeset|деведесет|devedeset|седумдесет|sedumdeset|шеесет|seeset|педесет|pedeset/i.test(text);
+  // TIME-UNIT WORDS (reported): "ZA DVA DENA" (in 2 days), "za tri dena" —
+  // a bare-number answer to the available-from date question must NEVER be
+  // read as a terrace size. "dva""/"tri" passed the ≤3-word bare fallback
+  // below and a phantom terraceSqm=2 was stored while availableFrom stayed
+  // missing. dena/дена/denovi/денови (days) and the SINGULAR den/ден are
+  // time units, not terrace areas — the singular is boundary-guarded (a
+  // standalone "den"/"ден" token only) so the bare "den" substring never
+  // matches inside unrelated words ("sloboden", "ograden", "vreden",
+  // "sreden" — reviewer finding). nedel/недел (week) and mesec/месец
+  // (month) stems are unambiguous. A boundary-guarded singular also catches
+  // "za eden den" (1 day) while leaving "denes" (today) alone.
+  const hasOtherContext = /iljadi|илјади|evra|евра|eur|evro|евро|kvadrati|квадрати|kvadrata|квадрата|m2|м2|kv|кв|sqm|kat|кат|sprat|спрат|sprata|спрата|kata|ката|katnica|катница|spalni|спални|parking|паркинг|garaza|гаража|lift|лифт|klima|клима|godina|година|izgraden|граден|renoviran|реновиран|zgrad|зград|dena|дена|denovi|денови|(?:^|[^a-zа-я])(?:den|ден)(?:$|[^a-zа-я])|nedel|недел|mesec|месец|\d{1,2}\s*[- ]?(?:ti|ти|ta|та)(?:te|те)?|осумдесет|osumdeset|осамдесет|osamdeset|девеесет|deveeset|деведесет|devedeset|седумдесет|sedumdeset|шеесет|seeset|педесет|pedeset/i.test(text);
   if (wordCount <= 3 && !hasOtherContext) {
     const wordNum = parseMacedonianNumber(text);
     if (wordNum !== null && wordNum >= 1 && wordNum <= 100) return wordNum;
@@ -1511,6 +1522,38 @@ export function parseAvailableFromDate(text) {
   if (/(?:za|за)\s+(?:edna|една|1)\s+(?:nedela|недела)|(?:za|за)\s+(?:nedela|недела)\s+(?:dena|дена)/i.test(t)) return _addDays(7);
   if (/(?:za|за)\s+(?:edna|една|1)\s+(?:godina|година)|(?:za|за)\s+(?:godina|година)\s+(?:dena|дена)/i.test(t)) return _addMonths(12);
 
+  // 2b. DAY-COUNT RANGE (reported): "ZA DVA TRI DENA" (in 2-3 days),
+  //     "tri cetiri dena" (3-4 days) — the owner gives a RANGE and Ana must
+  //     memorize the LOWER bound (the earliest the property can be free):
+  //     "dva tri" → 2 days, "tri cetiri" → 3 days. Same for weeks ("dve tri
+  //     nedeli" → 2 weeks) and months ("dva tri meseca" → 2 months). Both
+  //     digits ("za 2 3 dena", "za 2-3 dena") and word numbers ("dva tri")
+  //     with space/hyphen/dash/comma separators.
+  const rangeDays = t.match(/(?:za|за)\s+(\d{1,2}|[a-zа-я]{2,})\s*(?:-|–|—|\/|,|\s+)\s*(\d{1,2}|[a-zа-я]{2,})\s*(dena|дена|denovi|денови|nedeli|недели|meseca|месеца)(?:\s|$)/i);
+  if (rangeDays) {
+    const n1 = /^\d{1,2}$/.test(rangeDays[1]) ? parseInt(rangeDays[1], 10) : parseMacedonianNumber(rangeDays[1]);
+    const n2 = /^\d{1,2}$/.test(rangeDays[2]) ? parseInt(rangeDays[2], 10) : parseMacedonianNumber(rangeDays[2]);
+    if (n1 !== null && n2 !== null && n1 >= 1 && n1 <= 90 && n2 >= 1 && n2 <= 90) {
+      const lower = Math.min(n1, n2);
+      const unit = rangeDays[3].toLowerCase();
+      if (/nedeli|недели/.test(unit)) return _addDays(lower * 7);
+      if (/meseca|месеца/.test(unit)) return _addMonths(lower);
+      return _addDays(lower);
+    }
+  }
+
+  // 2c. GENERIC DAY COUNT (reported): "ZA DVA DENA" (in 2 days), "za tri
+  //     dena", "za 5 dena", "za eden den" (1 day), "za deset denovi" — a
+  //     plain day count, which previously had NO rule at all (only the
+  //     month/week/year specifics above) so the answer was never registered
+  //     and Ana re-asked until the 4-attempt skip. Digit or word number,
+  //     singular/plural (den/ден, dena/дена, denovi/денови).
+  const daysRel = t.match(/(?:za|за)\s+(\d{1,2}|[a-zа-я]{2,})\s+(dena|дена|den|ден|denovi|денови)(?:\s|$)/i);
+  if (daysRel) {
+    const n = /^\d{1,2}$/.test(daysRel[1]) ? parseInt(daysRel[1], 10) : parseMacedonianNumber(daysRel[1]);
+    if (n !== null && n >= 1 && n <= 90) return _addDays(n);
+  }
+
   // 2. NEXT MONTH — "sledniot mesec" / "следниот месец" → 1st of next month.
   if (/(?:sledniot|следниот)\s+(?:mesec|месец)/i.test(t)) {
     const today = new Date();
@@ -1526,14 +1569,31 @@ export function parseAvailableFromDate(text) {
   // answers ("od 15ti", "od 15 ќе биде слободен", "од 1.6.2026") survive.
   const AVAILABLE_FROM_UNIT_LOOKAHEAD = '(?!\\s*(?:m2|м2|kv|кв|kvadrat|квадрат|kvadr|квадр|teras|терас|evr|евр|iljad|илјад|mesec|месец|nedel|недел|godin|годин|sprat|спрат|kat|кат|kata|ката|kati|кати|den|ден|cas|час|sati|сати))';
 
-  // 3. NUMERIC DATE — "od 1.6.2026", "од 15.06", "od 1.6." (day.month[.year]).
-  //    REQUIRES the od/од marker so a floor answer ("8/10") or a bare number
-  //    can never become a date. Two separators (. or / or -) accepted.
-  const numMatch = t.match(new RegExp('(?:od|од)\\s*(\\d{1,2})[.\\-/](\\d{1,2})(?:[.\\-/](\\d{2,4}))?' + AVAILABLE_FROM_UNIT_LOOKAHEAD, 'i'));
+  // 3. NUMERIC DATE — "od 1.6.2026", "од 15.06", "od 1.6." (day.month[.year])
+  //    AND US-STYLE (reported): "OD 7.15.2026" = July 15, 2026 — the owner
+  //    types month.day (American order). Separators: dot, slash, dash OR
+  //    SPACE ("od 7 15 2026", "od 07.15", "od 07 15" — all reported
+  //    variants). DISAMBIGUATION: day.month wins when both are valid
+  //    (Macedonian convention — "1.6" = June 1); month.day (US) only when
+  //    day.month is impossible (second number > 12 — "7.15" can't be day 7
+  //    month 15, so it's July 15). REQUIRES the od/од marker so a floor
+  //    answer ("8/10") or a bare number can never become a date.
+  const numMatch = t.match(new RegExp('(?:od|од)\\s*(\\d{1,2})\\s*[.\\-/ ]\\s*(\\d{1,2})(?:\\s*[.\\-/ ]\\s*(\\d{2,4}))?' + AVAILABLE_FROM_UNIT_LOOKAHEAD, 'i'));
   if (numMatch) {
-    const day = parseInt(numMatch[1], 10);
-    const month = parseInt(numMatch[2], 10);
-    if (day >= 1 && day <= 31 && month >= 1 && month <= 12) {
+    const first = parseInt(numMatch[1], 10);
+    const second = parseInt(numMatch[2], 10);
+    let day = null;
+    let month = null;
+    if (first >= 1 && first <= 12 && second > 12 && second <= 31) {
+      // US-style month.day: "7.15" → July 15 (month 15 doesn't exist).
+      month = first;
+      day = second;
+    } else if (first >= 1 && first <= 31 && second >= 1 && second <= 12) {
+      // Macedonian day.month: "1.6" → June 1, "15.09" → Sep 15.
+      day = first;
+      month = second;
+    }
+    if (day !== null && month !== null) {
       if (numMatch[3]) {
         const year = parseInt(numMatch[3], 10);
         if (year >= 2020 && year <= 2100) {
@@ -1542,6 +1602,50 @@ export function parseAvailableFromDate(text) {
           return _isoDate(new Date(year, month - 1, day));
         }
       }
+      return _nextMonthDay(day, month);
+    }
+  }
+
+  // 3b. BARE NUMERIC DATE WITH YEAR (reported variants "7.15.2026",
+  //     "07 15 2026" — the owner sometimes types just the date, no od/од
+  //     marker). A 3-component date carrying a valid year is unambiguous, so
+  //     the od requirement is relaxed here only (a floor "8/10" has no
+  //     year). Same day.month/US-month.day disambiguation as rule 3.
+  const bareNum = t.match(new RegExp('(?:^|[^a-zа-я\\d])(\\d{1,2})\\s*[.\\-/ ]\\s*(\\d{1,2})\\s*[.\\-/ ]\\s*(\\d{4})(?:$|[^a-zа-я\\d])', 'i'));
+  if (bareNum) {
+    const first = parseInt(bareNum[1], 10);
+    const second = parseInt(bareNum[2], 10);
+    const year = parseInt(bareNum[3], 10);
+    if (year >= 2020 && year <= 2100) {
+      let day = null;
+      let month = null;
+      if (first >= 1 && first <= 12 && second > 12 && second <= 31) {
+        month = first;
+        day = second;
+      } else if (first >= 1 && first <= 31 && second >= 1 && second <= 12) {
+        day = first;
+        month = second;
+      }
+      if (day !== null && month !== null) {
+        return _isoDate(new Date(year, month - 1, day));
+      }
+    }
+  }
+
+  // 3c. BARE US-STYLE MONTH.DAY, no year, no od marker (reported variants
+  //     "7 15", "07.15", "07 15" — the owner answers with just the date).
+  //     Fires ONLY when the SECOND number > 12, which makes the month.day
+  //     reading UNAMBIGUOUS (Macedonian day.month with month 15 is
+  //     impossible — "7.15" can only be July 15). Separators dot/space/dash;
+  //     SLASH deliberately excluded because "5/15" is the compound-FLOOR
+  //     answer (5th of 15), never a date (A17 keeps "8/10" → null). Unit
+  //     lookahead still applies so "7.15 m2" (terrace) and "7.15 evra"
+  //     (price) stay null.
+  const bareMonthDay = t.match(new RegExp('(?:^|[^a-zа-я\\d])(\\d{1,2})\\s*[.\\- ]\\s*(\\d{1,2})(?:$|[^a-zа-я\\d])' + AVAILABLE_FROM_UNIT_LOOKAHEAD, 'i'));
+  if (bareMonthDay) {
+    const month = parseInt(bareMonthDay[1], 10);
+    const day = parseInt(bareMonthDay[2], 10);
+    if (month >= 1 && month <= 12 && day > 12 && day <= 31) {
       return _nextMonthDay(day, month);
     }
   }

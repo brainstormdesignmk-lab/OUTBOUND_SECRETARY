@@ -142,6 +142,99 @@ assert('A49: "sega ne e dostapen, za dve nedeli ke bide" → +14 days (negated n
   parseAvailableFromDate('sega ne e dostapen, za dve nedeli ke bide') === fromTodayDays(14),
   `got ${parseAvailableFromDate('sega ne e dostapen, za dve nedeli ke bide')}`);
 
+// --- GENERIC DAY-COUNT RULES (reported): "ZA DVA DENA" (in 2 days) had NO
+// rule at all — only month/week/year specifics — so the answer was never
+// registered and Ana re-asked until the 4-attempt skip. "za N dena" with
+// digit OR word number, singular/plural (den/dena/denovi).
+assert('A50: "ZA DVA DENA" → +2 days (generic day count, reported re-ask loop)',
+  parseAvailableFromDate('ZA DVA DENA') === fromTodayDays(2), `got ${parseAvailableFromDate('ZA DVA DENA')}`);
+assert('A50b: "за три дена" → +3 days (Cyrillic)',
+  parseAvailableFromDate('за три дена') === fromTodayDays(3), `got ${parseAvailableFromDate('за три дена')}`);
+assert('A50c: "za 5 dena" → +5 days (digit)',
+  parseAvailableFromDate('za 5 dena') === fromTodayDays(5), `got ${parseAvailableFromDate('za 5 dena')}`);
+assert('A50d: "za eden den" → +1 day (singular)',
+  parseAvailableFromDate('za eden den') === fromTodayDays(1), `got ${parseAvailableFromDate('za eden den')}`);
+assert('A50e: "za deset denovi" → +10 days (denovi plural)',
+  parseAvailableFromDate('za deset denovi') === fromTodayDays(10), `got ${parseAvailableFromDate('za deset denovi')}`);
+assert('A50f: "za petnaeset dena" → +15 days (compound word number)',
+  parseAvailableFromDate('za petnaeset dena') === fromTodayDays(15), `got ${parseAvailableFromDate('za petnaeset dena')}`);
+assert('A50g: "za dvaeset dena" → +20 days',
+  parseAvailableFromDate('za dvaeset dena') === fromTodayDays(20), `got ${parseAvailableFromDate('za dvaeset dena')}`);
+// CONTROL: a bare "dva dena" without "za" is NOT a date answer (no marker)
+assert('A50h: "dva dena" alone → null (no za/за marker)',
+  parseAvailableFromDate('dva dena') === null, `got ${parseAvailableFromDate('dva dena')}`);
+
+// --- DAY-COUNT RANGE (reported): "ZA DVA TRI DENA" (in 2-3 days) — memorize
+// the LOWER bound (the earliest the property can be free). "tri cetiri" → 3.
+// Same for weeks/months; digit and word numbers, space/hyphen separators.
+assert('A51: "ZA DVA TRI DENA" → +2 days (LOWER bound, reported)',
+  parseAvailableFromDate('ZA DVA TRI DENA') === fromTodayDays(2), `got ${parseAvailableFromDate('ZA DVA TRI DENA')}`);
+assert('A51b: "за три четири дена" → +3 days (lower bound, Cyrillic)',
+  parseAvailableFromDate('за три четири дена') === fromTodayDays(3), `got ${parseAvailableFromDate('за три четири дена')}`);
+assert('A51c: "za 2 3 dena" → +2 days (digit range, space)',
+  parseAvailableFromDate('za 2 3 dena') === fromTodayDays(2), `got ${parseAvailableFromDate('za 2 3 dena')}`);
+assert('A51d: "za 4-5 dena" → +4 days (hyphen range)',
+  parseAvailableFromDate('za 4-5 dena') === fromTodayDays(4), `got ${parseAvailableFromDate('za 4-5 dena')}`);
+assert('A51e: "za dve tri nedeli" → +14 days (week range lower bound)',
+  parseAvailableFromDate('za dve tri nedeli') === fromTodayDays(14), `got ${parseAvailableFromDate('za dve tri nedeli')}`);
+assert('A51f: "за два три месеца" → +2 months (month range lower bound)',
+  parseAvailableFromDate('за два три месеца') === fromTodayMonths(2), `got ${parseAvailableFromDate('за два три месеца')}`);
+// CONTROL: single-number month/week rules are untouched (specific beats range)
+assert('A51g: "za dve nedeli" still → +14 days (single-week rule)',
+  parseAvailableFromDate('za dve nedeli') === fromTodayDays(14), `got ${parseAvailableFromDate('za dve nedeli')}`);
+assert('A51h: "za mesec dena" still → +1 month (month rule)',
+  parseAvailableFromDate('za mesec dena') === fromTodayMonths(1), `got ${parseAvailableFromDate('za mesec dena')}`);
+
+// --- US-STYLE MONTH.DAY DATES (reported): "OD 7.15.2026" = July 15, 2026 —
+// the owner types the American month.day order. Only fires when day.month is
+// impossible (second number > 12, so "7.15" can't be day 7 month 15).
+// Separators: dot/slash/dash/space, with or without the od/од marker when a
+// year is present.
+assert('A52: "OD 7.15.2026" → 2026-07-15 (US month.day, reported)',
+  parseAvailableFromDate('OD 7.15.2026') === '2026-07-15', `got ${parseAvailableFromDate('OD 7.15.2026')}`);
+assert('A52b: "7.15.2026" (bare, no od) → 2026-07-15',
+  parseAvailableFromDate('7.15.2026') === '2026-07-15', `got ${parseAvailableFromDate('7.15.2026')}`);
+assert('A52c: "07 15 2026" (space separators) → 2026-07-15',
+  parseAvailableFromDate('07 15 2026') === '2026-07-15', `got ${parseAvailableFromDate('07 15 2026')}`);
+assert('A52d: "od 7 15 2026" → 2026-07-15 (od + spaces)',
+  parseAvailableFromDate('od 7 15 2026') === '2026-07-15', `got ${parseAvailableFromDate('od 7 15 2026')}`);
+assert('A52e: "od 07.15.2026" → 2026-07-15 (leading-zero month)',
+  parseAvailableFromDate('od 07.15.2026') === '2026-07-15', `got ${parseAvailableFromDate('od 07.15.2026')}`);
+assert('A52f: "od 7/15/2026" → 2026-07-15 (slash)',
+  parseAvailableFromDate('od 7/15/2026') === '2026-07-15', `got ${parseAvailableFromDate('od 7/15/2026')}`);
+assert('A52g: "od 7-15-2026" → 2026-07-15 (dash)',
+  parseAvailableFromDate('od 7-15-2026') === '2026-07-15', `got ${parseAvailableFromDate('od 7-15-2026')}`);
+// CONTROL: Macedonian day.month stays day.month when both valid
+assert('A52h: "od 1.6.2026" still → 2026-06-01 (day.month wins when valid)',
+  parseAvailableFromDate('od 1.6.2026') === '2026-06-01', `got ${parseAvailableFromDate('od 1.6.2026')}`);
+assert('A52i: "od 15.09." → next Sep 15 (day.month roll-forward unchanged)',
+  parseAvailableFromDate('od 15.09.') === nextMonthDay(9, 15), `got ${parseAvailableFromDate('od 15.09.')}`);
+
+// --- BARE US-STYLE MONTH.DAY WITHOUT YEAR/od (reported variants "7 15",
+// "07.15", "07 15"): only fires when the second number > 12, making the
+// month.day reading unambiguous (month 15 can't be a Macedonian month).
+assert('A53: "7 15" (bare, no year, space) → next Jul 15',
+  parseAvailableFromDate('7 15') === nextMonthDay(7, 15), `got ${parseAvailableFromDate('7 15')}`);
+assert('A53b: "07.15" (bare, no year, dot) → next Jul 15',
+  parseAvailableFromDate('07.15') === nextMonthDay(7, 15), `got ${parseAvailableFromDate('07.15')}`);
+assert('A53c: "07 15" (bare, no year) → next Jul 15',
+  parseAvailableFromDate('07 15') === nextMonthDay(7, 15), `got ${parseAvailableFromDate('07 15')}`);
+assert('A53d: "12.31" (bare) → next Dec 31',
+  parseAvailableFromDate('12.31') === nextMonthDay(12, 31), `got ${parseAvailableFromDate('12.31')}`);
+// CONTROLS: ambiguous both-≤-12 stays day.month-null (no marker to pin it);
+// the compound-FLOOR slash form stays null (A17 "8/10" → null); and
+// unit-bound forms stay null (terrace m2, price evra).
+assert('A53e: "3.5" (both ≤ 12, no marker) → null (ambiguous, no od)',
+  parseAvailableFromDate('3.5') === null, `got ${parseAvailableFromDate('3.5')}`);
+assert('A53f: "5/15" (slash — compound floor, not a date) → null',
+  parseAvailableFromDate('5/15') === null, `got ${parseAvailableFromDate('5/15')}`);
+assert('A53g: "7.15 m2" (terrace size) → null',
+  parseAvailableFromDate('7.15 m2') === null, `got ${parseAvailableFromDate('7.15 m2')}`);
+assert('A53h: "7.15 evra" (price) → null',
+  parseAvailableFromDate('7.15 evra') === null, `got ${parseAvailableFromDate('7.15 evra')}`);
+assert('A53i: "7.15 2026" (no od, no leading 0, year present) → 2026-07-15',
+  parseAvailableFromDate('7.15 2026') === '2026-07-15', `got ${parseAvailableFromDate('7.15 2026')}`);
+
 // --- BARE-brzo FALSE-POSITIVE GUARD (reviewer finding): "ke ti odgovoram
 // brzo" (I'll reply quickly) is NOT an availability answer — only the "za
 // brzo" phrase the user asked for may fire.

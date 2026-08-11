@@ -74,6 +74,20 @@ assert('A2: total-sqm phrase + bare "terasa golema" → null (no phantom 60/8)',
 assert('A2: "osum kvadrata i terasa" → null (number glued to kvadrata is the total)',
   extractTerraceNumber('osum kvadrata i terasa') === null,
   `got ${extractTerraceNumber('osum kvadrata i terasa')}`);
+// TIME-UNIT GUARD (reported): "ZA DVA DENA" (in 2 days) / "za tri dena" are
+// available-from DATE answers — the number word belongs to the day count,
+// never a terrace size. Before the fix, "dva"/"tri" passed the ≤3-word bare
+// fallback and a phantom terraceSqm=2 was stored while availableFrom stayed
+// missing (the reported re-ask loop).
+assert('A2: "ZA DVA DENA" → null (day-count date answer, no phantom 2)',
+  extractTerraceNumber('ZA DVA DENA') === null,
+  `got ${extractTerraceNumber('ZA DVA DENA')}`);
+assert('A2: "za tri dena" → null (day-count date answer)',
+  extractTerraceNumber('za tri dena') === null,
+  `got ${extractTerraceNumber('za tri dena')}`);
+assert('A2: "dva dena" → null (time-unit bare answer)',
+  extractTerraceNumber('dva dena') === null,
+  `got ${extractTerraceNumber('dva dena')}`);
 // CONTROL: an explicit terrace size with its own unit is still extracted
 // even when a total-sqm phrase precedes it (the reported lead 5540516 case).
 assert('A2: "VKUPNO IMA OSUMDESET I SES I TERASA OD 3 M2" → 3 (own unit wins)',
