@@ -223,11 +223,60 @@ assert('TP29 uncertainty in prior clause does not leak — deca preferred',
   JSON.stringify(tp29?.preferred) === JSON.stringify(['children']),
   `got ${JSON.stringify(tp29)}`);
 
+// ETHNICITY / NATIONALITY CATEGORIES (reported): "NE SAKAM TURCI I ALBANCI"
+// must register both exclusions, "samo semejstva makedonski" must register
+// families + macedonians, and "ne muslimani" the muslims exclusion.
+const tp30 = extractTenantPreferences('ne sakam turci i albanci');
+assert('TP30 excluded=[turks, albanians]',
+  JSON.stringify(tp30?.excluded) === JSON.stringify(['turks', 'albanians']),
+  `got ${JSON.stringify(tp30)}`);
+assert('TP30 nothing preferred', (tp30?.preferred || []).length === 0, '');
+
+const tp31 = extractTenantPreferences('ne sakam turci, i albanci');
+assert('TP31 comma+i nationality list stays one clause — both excluded',
+  JSON.stringify(tp31?.excluded) === JSON.stringify(['turks', 'albanians']),
+  `got ${JSON.stringify(tp31)}`);
+
+const tp32 = extractTenantPreferences('samo semejstva makedonski');
+assert('TP32 preferred=[families, macedonians]',
+  JSON.stringify(tp32?.preferred) === JSON.stringify(['families', 'macedonians']),
+  `got ${JSON.stringify(tp32)}`);
+
+const tp33 = extractTenantPreferences('ne muslimani');
+assert('TP33 excluded=[muslims]', JSON.stringify(tp33?.excluded) === JSON.stringify(['muslims']),
+  `got ${JSON.stringify(tp33)}`);
+
+const tp34 = extractTenantPreferences('NE SAKAM TURSKI I MUSLIMANI');
+assert('TP34 Cyrillic adjective form — excluded=[turks, muslims]',
+  JSON.stringify(tp34?.excluded) === JSON.stringify(['turks', 'muslims']),
+  `got ${JSON.stringify(tp34)}`);
+
+const tp35 = extractTenantPreferences('stanot e na Makedonski bulevar 12');
+assert('TP35 street name — adjective gated, no fabricated macedonians',
+  (tp35?.preferred || []).includes('macedonians') !== true &&
+  (tp35?.excluded || []).includes('macedonians') !== true,
+  `got ${JSON.stringify(tp35)}`);
+
+const tp36 = extractTenantPreferences('ul. Albanska 5, do mostot');
+assert('TP36 street name — adjective gated, no fabricated albanians',
+  (tp36?.preferred || []).includes('albanians') !== true &&
+  (tp36?.excluded || []).includes('albanians') !== true,
+  `got ${JSON.stringify(tp36)}`);
+
+const tp37 = extractTenantPreferences('ne sakam muslimki');
+assert('TP37 female form — excluded=[muslims]',
+  JSON.stringify(tp37?.excluded) === JSON.stringify(['muslims']),
+  `got ${JSON.stringify(tp37)}`);
+
 // New labels map to Macedonian for the broker comment
 assert('label children → деца', tenantCategoryLabel('children') === 'деца', '');
 assert('label elders → старци', tenantCategoryLabel('elders') === 'старци', '');
 assert('label women → жени', tenantCategoryLabel('women') === 'жени', '');
 assert('label men → мажи', tenantCategoryLabel('men') === 'мажи', '');
+assert('label turks → турци', tenantCategoryLabel('turks') === 'турци', '');
+assert('label albanians → албанци', tenantCategoryLabel('albanians') === 'албанци', '');
+assert('label muslims → муслимани', tenantCategoryLabel('muslims') === 'муслимани', '');
+assert('label macedonians → македонци', tenantCategoryLabel('macedonians') === 'македонци', '');
 
 // E2E through generateResponse: the tenant answer must be CAPTURED, not
 // swallowed by the agency handler (which matches the bare word "vraboteni"

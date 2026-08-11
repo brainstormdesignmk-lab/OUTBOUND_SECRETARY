@@ -122,8 +122,30 @@ const TENANT_CATEGORIES = [
   // (zenski/mashki) forms are covered; boundary-guarded so "zenski" never
   // matches inside compound words.
   { key: 'women', mk: 'жени', re: /(?:^|[^a-zа-я])(?:zeni|жени|zenski|женски|zenska|женска)(?:$|[^a-zа-я])/i },
-  { key: 'men', mk: 'мажи', re: /(?:^|[^a-zа-я])(?:mazi|мажи|mashki|машки|mashka|машка)(?:$|[^a-zа-я])/i }
+  { key: 'men', mk: 'мажи', re: /(?:^|[^a-zа-я])(?:mazi|мажи|mashki|машки|mashka|машка)(?:$|[^a-zа-я])/i },
+  // ETHNICITY / NATIONALITY RESTRICTIONS (reported): "NE SAKAM TURCI I
+  // ALBANCI", "samo semejstva makedonski". The plural NOUNS (turci,
+  // albanci, makedonci, muslimani) are unambiguous person words and fire
+  // directly. The -ski ADJECTIVE forms (turski, albanski, makedonski) are
+  // NOT in the main regex — "Македонски булевар" / "Албанска улица" are
+  // real Skopje street names, and extractTenantPrefs runs globally (even
+  // during PERSUASION), so an address or property description would
+  // fabricate a preference. Adjectives only fire via cat.adjRe below, which
+  // requires a co-occurring tenant-person context token (reviewer finding).
+  { key: 'turks', mk: 'турци', re: /(?:^|[^a-zа-я])(?:turci|турци)(?:$|[^a-zа-я])/i, adjRe: /(?:^|[^a-zа-я])(?:turski|турски|turska|турска)(?:$|[^a-zа-я])/i },
+  { key: 'albanians', mk: 'албанци', re: /(?:^|[^a-zа-я])(?:albanci|албанци)(?:$|[^a-zа-я])/i, adjRe: /(?:^|[^a-zа-я])(?:albanski|албански|albanska|албанска)(?:$|[^a-zа-я])/i },
+  { key: 'muslims', mk: 'муслимани', re: /(?:^|[^a-zа-я])(?:muslimani|муслимани|musliman|муслиман|muslimka|муслимка|muslimki|муслимки)(?:$|[^a-zа-я])/i },
+  { key: 'macedonians', mk: 'македонци', re: /(?:^|[^a-zа-я])(?:makedonci|македонци)(?:$|[^a-zа-я])/i, adjRe: /(?:^|[^a-zа-я])(?:makedonski|македонски|makedonska|македонска)(?:$|[^a-zа-я])/i }
 ];
+
+// TENANT-PERSON CONTEXT TOKEN — the gate for the -ski ADJECTIVE category
+// forms above. A nationality adjective ("makedonski") only counts as a
+// tenant restriction when the same message talks about tenants/people
+// (another category noun, or stanari/klienti/zakupci/lice/lugje). This
+// keeps "samo semejstva makedonski" (families present → macedonians fires)
+// while "Македонски булевар 12" (address, no person token → adjective
+// dropped) can never fabricate a preference.
+const TENANT_CONTEXT_RE = /stanari|станари|zakupci|закупци|klienti|клиенти|lica|лица|lugje|луѓе|semejst|семејст|studenti|студенти|vraboten|вработен|samohran|самохран|penzioner|пензионер|stranci|странци|samci|самци|milenici|миленици|deca|деца|starci|старци|zeni|жени|mazi|мажи|musliman|муслиман|muslimani|муслимани|turci|турци|albanci|албанци|makedonci|македонци/i;
 
 // Negation phrases that mark EXCLUDED categories. "ne sakam milenici",
 // "bez milenici", "nema milenici", "ne dozvoluvam milenici", "odbivam...".
@@ -201,7 +223,14 @@ export function extractTenantPreferences(u) {
     // lead 5502969 phrasing shape). A marker AFTER the category never flips it.
     let clauseBefore = null;
     for (const clause of polarityClauses) {
-      const firstIdx = clause.search(cat.re);
+      let firstIdx = clause.search(cat.re);
+      // ADJECTIVE-FORM GATE (reviewer finding): the -ski nationality
+      // adjectives only match when the message ALSO carries a tenant-person
+      // context token — otherwise "Македонски булевар" (a street) would be
+      // read as a tenant preference.
+      if (firstIdx === -1 && cat.adjRe && TENANT_CONTEXT_RE.test(low)) {
+        firstIdx = clause.search(cat.adjRe);
+      }
       if (firstIdx !== -1) { clauseBefore = clause.slice(0, firstIdx); break; }
     }
     if (clauseBefore === null) continue;

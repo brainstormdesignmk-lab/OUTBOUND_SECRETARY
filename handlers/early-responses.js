@@ -426,8 +426,13 @@ export function runEarlyResponses({ u, isRent, session }) {
     const tenantMarker = TENANT_PREFER_RE.test(u) || TENANT_EXCLUDE_RE.test(u);
     const tenantQuestionAsked =
       /(?:станари|закупци|клиенти|преферирате|профил)/i.test(recentContextText(session));
+    // NOTE: only NOUN / female forms — the -ski nationality ADJECTIVES
+    // (turski, albanski, makedonski) are context-gated in the extractor and
+    // can never extract on their own, so listing them here would be dead
+    // entries that shadow nothing (see TENANT_CONTEXT_RE in
+    // property-intelligence.js).
     const bareDirectAnswer =
-      /^\s*(?:deca|деца|vraboten|вработен|zeni|жени|zensk|женск|mazi|мажи|mashk|машки|starci|старци|semejst|семејст|studenti|студенти|milenici|миленици|samci|самци|stranci|странци|samohran|самохран|penzioner|пензионер)\s*$/i.test(u);
+      /^\s*(?:deca|деца|vraboten|вработен|zeni|жени|zensk|женск|mazi|мажи|mashk|машки|starci|старци|semejst|семејст|studenti|студенти|milenici|миленици|samci|самци|stranci|странци|samohran|самохран|penzioner|пензионер|turci|турци|albanci|албанци|musliman|муслиман|muslimka|муслимка|muslimki|муслимки|makedonci|македонци)\s*$/i.test(u);
     return tenantMarker || tenantQuestionAsked || bareDirectAnswer;
   })();
 
