@@ -989,12 +989,20 @@ const FIELD_CONFIDENCE_KEYWORDS = {
   // price keeps its own currency keywords on cleanPrice. A bare "350" (no
   // currency word) still scores MEDIUM → confirmation re-ask (unchanged).
   'monthlyRent': /kirija|кирија|mesecno|месечно|izdavam|издавам|izdava|издава|iznajmuvam|изнајмувам|iznajmuva|изнајмува|pod kirija|под кирија|evra|евра|evro|евро|eur|reziski|режиски/i,
-  // AVAILABLE-FROM DATE — month names, day markers, and immediate words are
-  // unambiguous date answers to "Од кога ќе биде слободен?". The parser only
-  // fires on real date context (od/од + number, a month word, or immediate
-  // vocabulary), so a HIGH here can't be a false positive from unrelated
-  // numbers (sqm, price, floor).
-  'availableFrom': /januar|јануар|fevruar|февруар|mart|март|april|април|maj|мај|juni|јуни|juli|јули|avgust|август|septemvri|септември|oktomvri|октомври|noemvri|ноември|dekemvri|декември|odma|одма|sega|сега|vednash|веднаш|sledniot|следниот|mesec|месец|od \d|од \d/i,
+  // AVAILABLE-FROM DATE — month names, day markers, immediate words, and the
+  // RELATIVE-DATE vocabulary are unambiguous date answers to "Од кога ќе биде
+  // слободен?". RELATIVE FORMS (reported): "ZA DVA DENA" (in 2 days), "za dve
+  // nedeli", "za mesec dena", "od utre", "zadutre", "sloboden momentalno",
+  // "za brzo" — parseAvailableFromDate computes the date, but these words were
+  // missing here so the parsed value scored LOW and was DISCARDED → Ana
+  // re-asked until the skip ("date NOT collected" through 4 attempts).
+  // The parser only fires on real date context (od/од + number, a month word,
+  // immediate vocabulary, or a relative day count), so a HIGH here can't be a
+  // false positive from unrelated numbers (sqm, price, floor). The singular
+  // "den"/"ден" is boundary-guarded (standalone token) so it never matches
+  // inside unrelated words ("sloboden", "ograden") — the plural day forms and
+  // all other stems are unambiguous.
+  'availableFrom': /januar|јануар|fevruar|февруар|mart|март|april|април|maj|мај|juni|јуни|juli|јули|avgust|август|septemvri|септември|oktomvri|октомври|noemvri|ноември|dekemvri|декември|odma|одма|sega|сега|vednash|веднаш|sledniot|следниот|slednata|следната|sledna|следна|mesec|месец|meseca|месеца|od \d|од \d|dena|дена|denovi|денови|(?:^|[^a-zа-я])(?:den|ден)(?:$|[^a-zа-я])|nedel|недел|nedela|недела|nedeli|недели|utre|утре|zadutre|задутре|prekosutra|прекосутра|momentalno|моментално|momentno|моментно|instant|инстант|brzo|брзо|sloboden|слободен|dostapen|достапен|godina|година|ke bide|ќе биде|denes|денес/i,
   'orientation': /orientacija|ориентација|strana|страна|jug|север|istok|запад|zapad|sever|jugoistok|jugozapad|severoistok|severozapad|исток|југ|североисток|северозапад|југоисток|југозапад|pravec|правец/i,
   'terraceSqm': /terasa|тераса|teras|терас|тераси|terrace|m2|м2|kvadrati|квадрати/i,
   // TENANT PREFERENCES — tenant-profile vocabulary is unambiguous: the

@@ -26,7 +26,7 @@
 // ============================================================
 import { createHarness } from './test-helpers.js';
 import { parseAvailableFromDate, formatAvailableFromDate, parseYearBuilt } from './property-extractor.js';
-import { runGlobalExtraction } from './data-collector.js';
+import { runGlobalExtraction, assessConfidence } from './data-collector.js';
 import { runEarlyResponses } from './handlers/early-responses.js';
 import { generateResponse } from './service.js';
 
@@ -418,6 +418,36 @@ assert('D2: sale next question is totalSqm (sale order unchanged)',
 assert('D2: sale never sets availableFrom',
   d2.collectedData.availableFrom === undefined, `got ${JSON.stringify(d2.collectedData.availableFrom)}`);
 
+// D3: RELATIVE-DATE ANSWER (reported): \"ZA DVA DENA\" (in 2 days) must store
+// availableFrom = today+2 at HIGH and ADVANCE — previously the parser computed
+// the date but assessConfidence scored it LOW (missing relative vocabulary),
+// the value was discarded, and Ana re-asked until the 4-attempt skip. Also
+// locks the terrace-leak regression: the \"2\" in \"DVA\" must NEVER become
+// terraceSqm=2 (the pasted log showed a phantom hasTerrace=true/terraceSqm=2).
+const d3 = {
+  adMemory: { transactionType: 'rent', propertyType: 'apartment', propertyLabel: 'станот' },
+  collectedData: { cooperationAccepted: true, transactionType: 'rent', monthlyRent: 260, monthlyRentConfidence: 0.95 },
+  messages: [{ role: 'model', text: 'Од кога ќе биде слободен станот?' }],
+  phone: '+38970123456',
+  phase: 'DATA_COLLECTION'
+};
+const d3r1 = await generateResponse(d3, 'ZA DVA DENA');
+// Expectation computed through the PARSER itself (the unit under test) — its
+// _addDays uses Date#setDate which rolls over month boundaries correctly, so
+// this stays green year-round (a naive `new Date().getDate() + 2` would wrap
+// to 1-3 on month-end days and fail intermittently — reviewer finding).
+const expPlus2 = parseAvailableFromDate('ZA DVA DENA');
+assert('D3: \"ZA DVA DENA\" → availableFrom = today+2 stored',
+  d3.collectedData.availableFrom === expPlus2, `got ${JSON.stringify(d3.collectedData.availableFrom)} (exp ${expPlus2})`);
+assert('D3: availableFrom stored at HIGH (0.95) — no confirmation re-ask',
+  d3.collectedData.availableFromConfidence === 0.95, `got ${d3.collectedData.availableFromConfidence}`);
+assert('D3: terrace NOT leaked — hasTerrace stays undefined',
+  d3.collectedData.hasTerrace === undefined, `got ${JSON.stringify(d3.collectedData.hasTerrace)}`);
+assert('D3: terrace NOT leaked — terraceSqm stays undefined',
+  d3.collectedData.terraceSqm === undefined, `got ${JSON.stringify(d3.collectedData.terraceSqm)}`);
+assert('D3: flow advanced past availableFrom (next field question asked)',
+  d3r1.type === 'QUESTION', `got type=${d3r1.type} \"${(d3r1.text || '').slice(0, 60)}\"`);
+
 console.log('\n========================================');
 console.log('🧪 E: yearBuilt must never be backfilled from the available-from date');
 console.log('========================================\n');
@@ -522,6 +552,57 @@ assert('E6: "izgradena 2015" still extracts 2015',
     s.collectedData.yearBuilt === 2015, `got yearBuilt=${JSON.stringify(s.collectedData.yearBuilt)}`);
   assert('E7: flow advanced past yearBuilt to renovated',
     r.type === 'QUESTION' && r.nextField === 'renovated', `got ${r.type} next=${r.nextField}`);
+}
+
+// ------------------------------------------------------------
+// F: assessConfidence — relative-date answers must score HIGH so the
+// parsed date is STORED, not discarded (reported: "ZA DVA DENA" never
+// registered — the parser computed today+2 but the missing relative
+// vocabulary scored LOW → value dropped → Ana re-asked until the skip).
+// ------------------------------------------------------------
+console.log('\n========================================');
+console.log('🧪 F: assessConfidence — relative/immediate date answers score HIGH');
+console.log('========================================\n');
+
+{
+  const VAL = '2026-08-13'; // any parsed ISO date — only the INPUT text matters here
+  const highCases = [
+    ['ZA DVA DENA', 'generic day count'],
+    ['za dva tri dena', 'day-count range (lower bound)'],
+    ['za dve nedeli', 'two weeks'],
+    ['za mesec dena', 'one month'],
+    ['za eden den', 'one day'],
+    ['sloboden momentalno', 'immediate + sloboden'],
+    ['odma', 'immediate'],
+    ['sega', 'immediate'],
+    ['za brzo', 'immediate'],
+    ['od utre', 'tomorrow'],
+    ['zadutre', 'day after tomorrow'],
+    ['utre', 'tomorrow (bare)'],
+    ['OD 7.15.2026', 'US numeric'],
+    ['od 1 juli', 'month word'],
+    ['slednata nedela', 'next week']
+  ];
+  for (const [input, label] of highCases) {
+    assert(`F: "${input}" (${label}) → HIGH (stored, no re-ask)`, assessConfidence('availableFrom', VAL, input) === 'HIGH', `got ${assessConfidence('availableFrom', VAL, input)}`);
+  }
+  // The boundary-guarded singular "den"/"ден" must NOT match inside unrelated
+  // words — a sqm/floor/price message mentioning "sloboden" as a substring of
+  // another word must never score HIGH for availableFrom. (Digit-bearing
+  // messages fall to the generic MEDIUM net — the confirm-re-ask path — so
+  // the negative checks use word-only inputs.)
+  // NOTE: a word-number answer like "dvesta evra" scores MEDIUM (the generic
+  // number-word net) — that's the pre-existing confirmation path, correct for
+  // a price, and NOT an availableFrom false-HIGH.
+  const lowCases = [
+    ['kvadrati so terasa', 'sqm answer (word only)'],
+    ['tret kat', 'floor answer (word only)'],
+    ['ima parking mesto', 'parking answer (word only)']
+  ];
+  for (const [input, label] of lowCases) {
+    assert(`F: "${input}" (${label}) → LOW`, assessConfidence('availableFrom', VAL, input) === 'LOW', `got ${assessConfidence('availableFrom', VAL, input)}`);
+  }
+  assert(`F: word-price "dvesta evra" → MEDIUM (not HIGH, not LOW)`, assessConfidence('availableFrom', VAL, 'dvesta evra') === 'MEDIUM', `got ${assessConfidence('availableFrom', VAL, 'dvesta evra')}`);
 }
 
 // ------------------------------------------------------------
