@@ -159,6 +159,7 @@ function makeSession(extra = {}) {
     collectedData: {
       cooperationAccepted: true, transactionType: 'rent',
       tenantPreferences: { preferred: [], excluded: [], notes: '' },
+      petsAllowed: true,
       monthlyRent: 350, monthlyRentConfidence: 0.95,
       availableFrom: '2026-06-01', availableFromConfidence: 0.95,
       totalSqm: 63, totalSqmConfidence: 0.95,

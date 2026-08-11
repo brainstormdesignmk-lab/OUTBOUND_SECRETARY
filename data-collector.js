@@ -54,7 +54,58 @@ function extractTenantPrefs(u, data) {
   if (data.transactionType !== 'rent') return null;
   if (data.tenantPreferences !== undefined && data.tenantPreferences !== null) return null;
   const tp = extractTenantPreferences(u);
-  return tp !== null ? { tenantPreferences: tp } : null;
+  if (tp === null) return null;
+  const out = { tenantPreferences: tp };
+  // PETS SYNERGY (reported): a tenant answer like "NE SAKAM MILENICI I
+  // SAMOHRANI MAJKI" states the pets policy too. STEP 1 early-returns on
+  // the bare tenant answer (no property keywords → STEP 2 skipped), so the
+  // dedicated "Дали се дозволени миленици?" question would be asked
+  // REDUNDANTLY right after the owner already answered it. Capture
+  // petsAllowed from the same message so the workflow advances straight to
+  // the next field. extractPetsAllowed's own rent-guard + no-overwrite
+  // contract keep this safe.
+  if (data.petsAllowed === undefined || data.petsAllowed === null) {
+    const pets = extractPetsAllowed(u, data);
+    if (pets && pets.petsAllowed !== undefined) out.petsAllowed = pets.petsAllowed;
+  }
+  return out;
+}
+
+// ========================================
+// PETS ALLOWED — rent-only boolean (reported requirement: right after the
+// tenant-type question, ask whether pets are allowed — a couple of varying
+// question phrasings). The dedicated question's answer is a YES/NO, so the
+// extractor maps explicit allow/deny phrases with pet vocabulary:
+//   POSITIVE: "da, milenici se dozvoleni", "dozvoleni se", "moze so
+//             milenici", "nema problem so milenici", "prihakat", "sakam so
+//             milenici", "slobodno so milenici"...
+//   NEGATIVE: "ne, bez milenici", "ne sakam milenici", "ne dozvoluvam
+//             milenici", "zabraneto", "nema milenici", "samo bez
+//             kucinja"...
+// Bare "da"/"ne" answers are handled by the BARE_YES_NO_FIELDS mapping in
+// runGlobalExtraction (preferredField path only). REQUIRES pet vocabulary —
+// a bare "ne" in another context can never become petsAllowed=false. The
+// tenant-preferences extractor ALSO knows "milenici" as a category
+// (preferred/excluded); this field is the dedicated follow-up question's
+// own answer, stored separately for the listing (pets_allowed in the Hermes
+// payload + broker comment). Rent-only: a sale listing never asks about
+// tenants/pets.
+// ========================================
+function extractPetsAllowed(u, data) {
+  if (data.transactionType !== 'rent') return null;
+  if (data.petsAllowed !== undefined && data.petsAllowed !== null) return null;
+  // NEGATIVE checked first (mirror extractAC): the positive branch below
+  // matches ANY "milenici" mention, so "ne sakam milenici" would otherwise
+  // collect petsAllowed=true. Covers both word orders, the definite forms
+  // ("milenicite ne se dozvoleni"), and the "samo bez" restriction family.
+  if (/(?:ne|не)\s+(?:sakam|сакам|dozvoluvam|дозволувам|primam|примам)\s+(?:milenici|миленици|kucinja|кучиња|kuche|куче|macka|мачка)|(?:ne|не)\s+se\s+(?:dozvoleni|дозволени)\s+(?:milenici|миленици|kucinja|кучиња)|(?:milenici|миленици|kucinja|кучиња)\s+(?:ne|не)\s+se\s+(?:dozvoleni|дозволени)|bez\s+(?:milenici|миленици|kucinja|кучиња|kuche|куче|macka|мачка|zivotni|животни|zivotno|животно)|nema\s+(?:milenici|миленици|kucinja|кучиња|zivotni|животни)|samo\s+bez\s+(?:milenici|миленици|kucinja|кучиња)|zabraneto|забрането|zabraneni|забранети|ne\s+moze\s+(?:milenici|миленици)|не\s+може\s+(?:миленици|миленици)/i.test(u)) return { petsAllowed: false };
+  // POSITIVE: pet vocabulary with an allow verb/adjective. Both word orders:
+  // pets-first ("milenici se dozvoleni") and allow-word-first ("dozvoleni se
+  // kucinja", "moze so milenici"). The separator between the allow word and
+  // the pet word is "se"/"се" (copula) OR "so"/"со" (with) — "dozvoleni se
+  // kucinja" (dogs ARE allowed) and "moze so milenici" (OK with pets).
+  if (/(?:milenici|миленици|kucinja|кучиња|kuche|куче|macka|мачка|zivotni|животни|pets)\s+(?:se\s+)?(?:dozvoleni|дозволени|prihakat|прифаќаат|ok|ок|moze|може|slobodni|слободни)|(?:dozvoleni|дозволени|prihakat|прифаќаат|moze|може|slobodno|слободно|nema\s+problem|нема\s+проблем|sakam|сакам)\s+(?:(?:se|се|so|со)\s+)?(?:milenici|миленици|kucinja|кучиња|kuche|куче|macka|мачка|zivotni|животни|pets)/i.test(u)) return { petsAllowed: true };
+  return null;
 }
 
 function extractPricePerSqmField(u, data) {
@@ -902,6 +953,7 @@ const EXTRACTION_RULES = [
   extractPricePerSqmField,
   extractMonthlyRent,
   extractTenantPrefs,
+  extractPetsAllowed,
   extractAvailableFrom,
   extractTotalSqm,
   extractBedrooms,
@@ -1011,13 +1063,17 @@ const FIELD_CONFIDENCE_KEYWORDS = {
   // Extended (reported): children/elders/gender restrictions — deca, starci,
   // zeni/zenski, mazi/mashki — plus the "samo za" restrictive marker.
   'tenantPreferences': /stanari|станари|zakupci|закупци|klienti|клиенти|milenici|миленици|semejst|семејст|studenti|студенти|vraboten|вработен|samohran|самохран|penzioner|пензионер|stranci|странци|samci|самци|pensioner|пенсионер|deca|деца|starci|старци|zeni|жени|zenski|женски|zenska|женска|mazi|мажи|mashki|машки|mashka|машка|turci|турци|turski|турски|albanci|албанци|albanski|албански|muslimani|муслимани|musliman|муслиман|makedonci|македонци|makedonski|македонски|samo\s+za|само\s+за/i,
+  // PETS ALLOWED — pet vocabulary is unambiguous: the dedicated extractor
+  // only fires on allow/deny phrases WITH pet words, so any extraction is a
+  // direct answer to "Дали се дозволени миленици?" → HIGH.
+  'petsAllowed': /milenici|миленици|kucinja|кучиња|kuche|куче|macka|мачка|zivotni|животни|zivotno|животно|pets|dozvolen|дозволен|zabranet|забранет/i,
   // PRICE PER M² — "e/е za m2" phrasings are an explicit per-sqm answer.
   'pricePerSqm': /m2|м2|kvadrat|квадрат|kvadrata|квадрата/i
 };
 
 // Binary fields that require explicit keyword match for HIGH confidence
 const BINARY_CONFIDENCE_FIELDS = new Set([
-  'elevator', 'ac', 'parking', 'furnished', 'documentationClean', 'renovated', 'heating'
+  'elevator', 'ac', 'parking', 'furnished', 'documentationClean', 'renovated', 'heating', 'petsAllowed'
 ]);
 
 // Derived sub-keys from multi-field extractors (e.g., furnishedLevel from extractFurnished).
@@ -1278,6 +1334,7 @@ const FIELD_TO_EXTRACTOR = {
   pricePerSqm: extractPricePerSqmField,
   monthlyRent: extractMonthlyRent,
   tenantPreferences: extractTenantPrefs,
+  petsAllowed: extractPetsAllowed,
   availableFrom: extractAvailableFrom,
   totalSqm: extractTotalSqm,
   bedrooms: extractBedrooms,
@@ -1356,7 +1413,7 @@ const NUMBER_SNIFFING_EXTRACTORS = new Set([
 // rejecting cooperation). Reported bug: "NE E" to the renovation re-ask was
 // ignored → max-2-attempts skip → renovationYear wrongly asked next.
 // ========================================
-const BARE_YES_NO_FIELDS = new Set(['renovated', 'elevator', 'ac', 'parking', 'furnished', 'documentationClean']);
+const BARE_YES_NO_FIELDS = new Set(['renovated', 'elevator', 'ac', 'parking', 'furnished', 'documentationClean', 'petsAllowed']);
 // Whole-message anchors — a message with ANY extra content ("ne, 55 kvadrati")
 // or property keywords must NOT be treated as a bare yes/no.
 // 1st-person possession forms ("imam", "имам" = I have, "go imam" = I have
@@ -1389,7 +1446,12 @@ const BARE_NO_RE = /^(?:ne|не|nema|нема|nemam|немам|bez|без|go nem
   // documentation question is CURRENT, these ownership assertions are the
   // answer → documentationClean=true.
   const BARE_YES_FIELD_RE = {
-  documentationClean: /^(?:se e cisto|се е чисто|cisto e|чисто е|cista e|чиста е|se e cist|се е чист|cist e|чист е|cisto|чисто|sve e cisto|све е чисто|sve cisto|све чисто|se cisti|се чисти|cisti se|чисти се|site dokumenti cisti|сите документи чисти|dokumentite se cisti|документите се чисти|uredno e|уредно е|sredeno e|средено е|kompletno cisto|комплетно чисто|nema problemi|нема проблеми|nema problem|нема проблем|nemam problemi|немам проблеми|nema nikakvi problemi|нема никакви проблеми|nemam nikakvi problemi|немам никакви проблеми|nema vekje problemi|нема веќе проблеми|sve e vo red|сè е во ред|se e vo red|се е во ред|sve vo red|сè во ред|se e cisto, nema problemi|се е чисто, нема проблеми|cisto e, nema problemi|чисто е, нема проблеми|nema problemi so dokumentite|нема проблеми со документите|se e cisto so dokumentite|се е чисто со документите|imam na moe ime|имам на мое име|na moe ime|на мое име|e na moe ime|е на мое име|imam imoten list|имам имотен лист|imam dokumenti|имам документи|imam cist|имам чист|cisto e na moe ime|чисто е на мое име|imam na moe ime, cisto e|имам на мое име, чисто е|imam na moe ime, nema problemi|имам на мое име, нема проблеми|se e cisto, imam na moe ime|се е чисто, имам на мое име|cisto e, na moe ime|чисто е, на мое име|se e cisto, na moe ime|се е чисто, на мое име|ti rekov deka imam|ти реков дека имам|rekov deka imam|реков дека имам|ti kazav deka imam|ти кажав дека имам|kazav deka imam|кажав дека имам|ti rekov deka go imam|ти реков дека го имам|ti rekov deka imam na moe ime|ти реков дека имам на мое име|rekov deka imam na moe ime|реков дека имам на мое име)$/i
+  documentationClean: /^(?:se e cisto|се е чисто|cisto e|чисто е|cista e|чиста е|se e cist|се е чист|cist e|чист е|cisto|чисто|sve e cisto|све е чисто|sve cisto|све чисто|se cisti|се чисти|cisti se|чисти се|site dokumenti cisti|сите документи чисти|dokumentite se cisti|документите се чисти|uredno e|уредно е|sredeno e|средено е|kompletno cisto|комплетно чисто|nema problemi|нема проблеми|nema problem|нема проблем|nemam problemi|немам проблеми|nema nikakvi problemi|нема никакви проблеми|nemam nikakvi problemi|немам никакви проблеми|nema vekje problemi|нема веќе проблеми|sve e vo red|сè е во ред|se e vo red|се е во ред|sve vo red|сè во ред|se e cisto, nema problemi|се е чисто, нема проблеми|cisto e, nema problemi|чисто е, нема проблеми|nema problemi so dokumentite|нема проблеми со документите|se e cisto so dokumentite|се е чисто со документите|imam na moe ime|имам на мое име|na moe ime|на мое име|e na moe ime|е на мое име|imam imoten list|имам имотен лист|imam dokumenti|имам документи|imam cist|имам чист|cisto e na moe ime|чисто е на мое име|imam na moe ime, cisto e|имам на мое име, чисто е|imam na moe ime, nema problemi|имам на мое име, нема проблеми|se e cisto, imam na moe ime|се е чисто, имам на мое име|cisto e, na moe ime|чисто е, на мое име|se e cisto, na moe ime|се е чисто, на мое име|ti rekov deka imam|ти реков дека имам|rekov deka imam|реков дека имам|ti kazav deka imam|ти кажав дека имам|kazav deka imam|кажав дека имам|ti rekov deka go imam|ти реков дека го имам|ti rekov deka imam na moe ime|ти реков дека имам на мое име|rekov deka imam na moe ime|реков дека имам на мое име)$/i,
+  // PETS ALLOWED (reported): "DOZVOLENI SE" (they're allowed) / "SLOBODNO E"
+  // are natural direct answers to "Дали се дозволени миленици?" but carry no
+  // pet word — the keyword extractor can't fire. When the pets question is
+  // CURRENT, these bare allow-phrases are the answer → petsAllowed=true.
+  petsAllowed: /^(?:dozvoleni se|дозволени се|dozvoleno e|дозволено е|se dozvoleni|се дозволени|slobodno e|слободно е|slobodno|слободно|dozvoleni|дозволени|nema problem|нема проблем|nema problemi|нема проблеми|ok|ок|okej|океј|moze|може|prihakat|прифаќаат|se prihakaat|се прифаќаат|prihakaat se|прифаќаат се|sekako|секако)$/i
   };
 
 // FIELD-SPECIFIC BARE-NO IDIOMS (negative mirror of BARE_YES_FIELD_RE).
@@ -1400,7 +1462,11 @@ const BARE_NO_RE = /^(?:ne|не|nema|нема|nemam|немам|bez|без|go nem
 // this map they'd be re-asked twice and SKIPPED (data lost), the exact mirror
 // of the reported "IMAM NA MOE IME" bug.
 const BARE_NO_FIELD_RE = {
-  documentationClean: /^(?:nemam na moe ime|немам на мое име|ne e na moe ime|не е на мое име|nema imoten list|нема имотен лист|nemam imoten list|немам имотен лист|nema dokumenti|нема документи|nemam dokumenti|немам документи)$/i
+  documentationClean: /^(?:nemam na moe ime|немам на мое име|ne e na moe ime|не е на мое име|nema imoten list|нема имотен лист|nemam imoten list|немам имотен лист|nema dokumenti|нема документи|nemam dokumenti|немам документи)$/i,
+  // PETS ALLOWED (reported): "ZABRANETO E" / "NE SE DOZVOLENI" / "NEMA" are
+  // natural negative answers to "Дали се дозволени миленици?" with no pet
+  // word — mapped when the pets question is CURRENT → petsAllowed=false.
+  petsAllowed: /^(?:zabraneto e|забрането е|zabraneto|забрането|zabraneni|забранети|ne se dozvoleni|не се дозволени|nema|нема|ne moze|не може|ne moze da|не може да|ne|не)$/i
 };
 
 // ========================================

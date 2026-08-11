@@ -395,6 +395,13 @@ export function buildBrokerComment(data) {
     if (tp.notes) lines.push(tp.notes);
   }
 
+  // PETS ALLOWED (reported requirement): the dedicated pets question asked
+  // right after the tenant-type question — its YES/NO answer is a separate
+  // boolean stored for agents, surfaced here next to the tenant profile.
+  if (data.petsAllowed !== undefined && data.petsAllowed !== null) {
+    lines.push(`Миленици: ${data.petsAllowed ? 'дозволени' : 'не се дозволени'}`);
+  }
+
   return lines.join('\n');
 }
 
@@ -496,6 +503,9 @@ export function buildPropertyJson(data, adMemory = {}, phone = '', propertyId = 
     broker_comment: data.brokerComment || '',
 
     tenant_preferences: tenantPreferences,
+    // PETS ALLOWED (reported requirement): the dedicated pets question's
+    // YES/NO answer — surfaced for agents next to the tenant profile.
+    pets_allowed: data.petsAllowed ?? null,
 
     // source + id context for Hermes dedup/audit
     property_id: propertyId,

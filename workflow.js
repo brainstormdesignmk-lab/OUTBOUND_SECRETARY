@@ -72,6 +72,7 @@ export function getNextMissingField(data) {
     "monthlyRent",
     "availableFrom",
     "tenantPreferences",
+    "petsAllowed",
     "totalSqm",
     "terraceSqm",
     "bedrooms",
@@ -201,6 +202,10 @@ export function getQuestion(field, propertyType, hasScraperPhotos = false, photo
     // question variants exist (handlers/data-collection.js rotates them so
     // the owner is not asked identically on a re-ask).
     tenantPreferences: 'Каков тип на станари преферирате?',
+    // PETS ALLOWED (reported requirement): right after the tenant-type
+    // question, ask whether pets are allowed — several question variants
+    // rotate on re-asks (see PETS_ALLOWED_QUESTIONS below).
+    petsAllowed: 'Дали се дозволени миленици?',
     ownerName: 'Како да ве запишам?',
     address: 'Која е точната адреса?'
   };
@@ -218,6 +223,20 @@ export const TENANT_PREF_QUESTIONS = [
   'Дали имате преференци за профилот на закупците?',
   'На какви лица би сакале да се издаде станот?',
   'Дали постојат категории на станари што ги преферирате или не ги преферирате?'
+];
+
+// ========================================
+// PETS-ALLOWED QUESTION VARIANTS (reported requirement: "add a question
+// about pets allowed. couple of variating questions"). The DATA_COLLECTION
+// flow rotates these on repeated attempts — one fresh sentence per variant,
+// so a re-ask never sounds robotic (same treatment as TENANT_PREF_QUESTIONS
+// and AVAILABLE_FROM_QUESTIONS).
+// ========================================
+export const PETS_ALLOWED_QUESTIONS = [
+  (label) => `Дали се дозволени миленици во ${label}?`,
+  (label) => `Дали прифаќате станари со миленици?`,
+  (label) => `Дали е дозволено да се чуваат домашни миленици во ${label}?`,
+  (label) => `Може ли закупецот да има миленик?`
 ];
 
 // ========================================

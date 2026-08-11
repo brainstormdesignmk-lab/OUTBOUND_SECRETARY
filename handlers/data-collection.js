@@ -8,7 +8,7 @@
 //   3. Complex stateful handlers (terrace, heating, photos, ownerName, address)
 //   4. History scan + close flow + field question flow (with re-ask phrasings)
 // ========================================
-import { getNextMissingField, getQuestion, TENANT_PREF_QUESTIONS, AVAILABLE_FROM_QUESTIONS } from '../workflow.js';
+import { getNextMissingField, getQuestion, TENANT_PREF_QUESTIONS, AVAILABLE_FROM_QUESTIONS, PETS_ALLOWED_QUESTIONS } from '../workflow.js';
 import { runGlobalExtraction, assessConfidence, confidenceToNumeric, scanHistoryForField, isExplicitPriceCorrection } from '../data-collector.js';
 
 // ========================================
@@ -23,12 +23,16 @@ import { runGlobalExtraction, assessConfidence, confidenceToNumeric, scanHistory
 //       the rotation would never be heard.
 // tenantPreferences: static strings. availableFrom: label functions (the
 // property word "станот"/"куќата" adapts per lead, mirroring
-// CONFIRMATORY_QUESTIONS). Reported requirements: "couple of variations of
-// the type of clients preferred" + the same rotation for the date question.
+// CONFIRMATORY_QUESTIONS). petsAllowed: label functions (the pets question
+// names the property too — "Дали се дозволени миленици во станот?").
+// Reported requirements: "couple of variations of the type of clients
+// preferred" + the same rotation for the date question + a pets-allowed
+// question right after the tenant question (with variants).
 // ========================================
 const ROTATING_QUESTION_VARIANTS = {
   tenantPreferences: TENANT_PREF_QUESTIONS,
-  availableFrom: AVAILABLE_FROM_QUESTIONS
+  availableFrom: AVAILABLE_FROM_QUESTIONS,
+  petsAllowed: PETS_ALLOWED_QUESTIONS
 };
 
 /** Pick the variant for the current attempt: strings pass through, label

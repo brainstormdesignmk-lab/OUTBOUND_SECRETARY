@@ -60,7 +60,8 @@ function freshSession({ transactionType = 'sale' } = {}) {
     },
     collectedData: {
       cooperationAccepted: false,
-      tenantPreferences: { preferred: [], excluded: [], notes: '' }
+      tenantPreferences: { preferred: [], excluded: [], notes: '' },
+      petsAllowed: true
     },
     messages: [
       { role: 'model', text: isRent

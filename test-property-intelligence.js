@@ -342,10 +342,11 @@ assert('label macedonians → македонци', tenantCategoryLabel('macedoni
       `got [${r3.type}] next=${r3.nextField} "${(r3.text || '').slice(0, 90)}"`);
   }
   // Fifth non-answer → max attempts (variant count) reached → field skipped,
-  // flow advances to the next field (totalSqm) — no infinite loop.
+  // flow advances to the next field (petsAllowed — the dedicated pets
+  // question that sits right after the tenant question) — no infinite loop.
   const r3skip = await generateResponse(s3, 'KAKO KJE BIDE');
-  assert('ROT-5: after 4 non-answers the field is skipped (moves on, no loop)',
-    r3skip.type === 'QUESTION' && r3skip.nextField === 'totalSqm',
+  assert('ROT-5: after 4 non-answers the field is skipped (moves on to petsAllowed, no loop)',
+    r3skip.type === 'QUESTION' && r3skip.nextField === 'petsAllowed',
     `got [${r3skip.type}] next=${r3skip.nextField} "${(r3skip.text || '').slice(0, 90)}"`);
   assert('ROT-6: skipped marker set after max attempts', s3.collectedData.tenantPreferencesSkipped === true,
     `got ${JSON.stringify(s3.collectedData.tenantPreferencesSkipped)}`);
@@ -545,6 +546,146 @@ assert('GE tenant → tenantPreferences.excluded=[pets]', JSON.stringify(upT.ten
 // Sale leads never extract tenant prefs
 const upT2 = runGlobalExtraction('NE SAKAM MILENICI', { transactionType: 'sale' }, 'tenantPreferences');
 assert('GE tenant → sale leads never', upT2.tenantPreferences === undefined, `got ${JSON.stringify(upT2)}`);
+
+// ============================================================
+// PETS-ALLOWED (reported requirement): a dedicated question about pets
+// asked right after the tenant-type question, with a couple of varying
+// phrasings. The answer is a YES/NO boolean stored as petsAllowed.
+// ============================================================
+console.log(`\n=== 6b. petsAllowed extraction + flow ===`);
+
+// POSITIVE answers → petsAllowed=true
+for (const [input, label] of [
+  ['DA, MILENICI SE DOZVOLENI', 'explicit positive'],
+  ['dozvoleni se', 'bare positive'],
+  ['MOZE SO MILENICI', 'moze + pets'],
+  ['NEMA PROBLEM SO MILENICI', 'no-problem idiom'],
+  ['PRIHAKAT SO MILENICI', 'prihakat verb'],
+  ['SAKAM SO MILENICI', 'sakam verb'],
+  ['SLOBODNO SO MILENICI', 'slobodno'],
+  ['DOZVOLENI SE KUCINJA', 'dogs allowed']
+]) {
+  const r = runGlobalExtraction(input, { transactionType: 'rent' }, 'petsAllowed');
+  assert(`PETS: "${input}" (${label}) → petsAllowed=true`, r.petsAllowed === true, `got ${JSON.stringify(r)}`);
+}
+// NEGATIVE answers → petsAllowed=false
+for (const [input, label] of [
+  ['NE, BEZ MILENICI', 'bez + pets'],
+  ['NE SAKAM MILENICI', 'ne sakam + pets'],
+  ['NE DOZVOLUVAM MILENICI', 'ne dozvoluvam + pets'],
+  ['ZABRANETO E', 'zabraneto'],
+  ['NEMA MILENICI', 'nema + pets'],
+  ['SAMO BEZ KUCINJA', 'samo bez + dogs']
+]) {
+  const r = runGlobalExtraction(input, { transactionType: 'rent' }, 'petsAllowed');
+  assert(`PETS: "${input}" (${label}) → petsAllowed=false`, r.petsAllowed === false, `got ${JSON.stringify(r)}`);
+}
+// Sale leads never extract petsAllowed
+const upPetsSale = runGlobalExtraction('DOZVOLENI SE MILENICI', { transactionType: 'sale' }, 'petsAllowed');
+assert('PETS: sale leads never extract', upPetsSale.petsAllowed === undefined, `got ${JSON.stringify(upPetsSale)}`);
+// TENANT-ANSWER SYNERGY (reported): "NE SAKAM MILENICI I SAMOHRANI MAJKI"
+// as the tenant-type answer also states the pets policy. STEP 1 early-returns
+// on the bare tenant answer (no property keywords → STEP 2 skipped), so
+// extractTenantPrefs must capture petsAllowed from the SAME message — the
+// dedicated "Дали се дозволени миленици?" question is then skipped and the
+// workflow advances straight to totalSqm (no redundant re-ask).
+const upSyn = runGlobalExtraction('NE SAKAM MILENICI I SAMOHRANI MAJKI', { transactionType: 'rent' }, 'tenantPreferences');
+assert('PETS-SYNERGY: tenant answer also sets petsAllowed=false',
+  upSyn.petsAllowed === false,
+  `got ${JSON.stringify(upSyn)}`);
+const upSyn2 = runGlobalExtraction('DA, MILENICI SE DOZVOLENI, SAMO VRABOTENI', { transactionType: 'rent' }, 'tenantPreferences');
+assert('PETS-SYNERGY: positive tenant answer also sets petsAllowed=true',
+  upSyn2.petsAllowed === true,
+  `got ${JSON.stringify(upSyn2)}`);
+// Synergy must never fire for sale leads (extractPetsAllowed rent guard)
+const upSynSale = runGlobalExtraction('NE SAKAM MILENICI I SAMOHRANI MAJKI', { transactionType: 'sale' }, 'tenantPreferences');
+assert('PETS-SYNERGY: sale leads never get petsAllowed',
+  upSynSale.petsAllowed === undefined,
+  `got ${JSON.stringify(upSynSale)}`);
+// Non-pets binary answers don't touch petsAllowed
+const upPetsOther = runGlobalExtraction('DA IMA LIFT', { transactionType: 'rent' }, 'petsAllowed');
+assert('PETS: "DA IMA LIFT" → petsAllowed ABSENT', upPetsOther.petsAllowed === undefined, `got ${JSON.stringify(upPetsOther)}`);
+// RENT order: petsAllowed sits right after tenantPreferences in the rent walk.
+const wfPets = getNextMissingField({
+  transactionType: 'rent', monthlyRent: 350, availableFrom: '2026-07-01',
+  tenantPreferences: { preferred: [], excluded: [], notes: '' }
+});
+assert('PETS: next missing field after tenantPreferences is petsAllowed', wfPets === 'petsAllowed', `next=${wfPets}`);
+
+// E2E: tenant-type answer → pets question asked (rotating variants) → DA
+// answer stored → flow advances to totalSqm.
+{
+  const sP = {
+    adMemory: { transactionType: 'rent', propertyType: 'apartment', propertyLabel: 'станот' },
+    collectedData: {
+      cooperationAccepted: true, transactionType: 'rent',
+      monthlyRent: 350, monthlyRentConfidence: 0.95,
+      availableFrom: '2026-07-01', availableFromConfidence: 0.95,
+      tenantPreferences: { preferred: ['students'], excluded: [], notes: 'Сопственикот изјави: SAKAM STUDENTI' },
+      tenantPreferencesConfidence: 0.95
+    },
+    messages: [{ role: 'model', text: 'Одлично. Каков тип на станари преферирате?' }],
+    phone: '+38976000011'
+  };
+  // First pets question → variant 0
+  const rP1 = await generateResponse(sP, 'KAKO KJE BIDE');
+  assert('PETS-FLOW-1: first pets question uses variant 0 ("Дали се дозволени миленици во станот?")',
+    rP1.type === 'QUESTION' && rP1.nextField === 'petsAllowed' && (rP1.text || '').includes('Дали се дозволени миленици во станот?'),
+    `got [${rP1.type}] next=${rP1.nextField} "${(rP1.text || '').slice(0, 90)}"`);
+  // Re-ask rotates to variant 1
+  const rP2 = await generateResponse(sP, 'KAKO KJE BIDE');
+  assert('PETS-FLOW-2: re-ask rotates to variant 1 ("Дали прифаќате станари со миленици?")',
+    rP2.type === 'QUESTION' && rP2.nextField === 'petsAllowed' && (rP2.text || '').includes('Дали прифаќате станари со миленици?'),
+    `got [${rP2.type}] next=${rP2.nextField} "${(rP2.text || '').slice(0, 90)}"`);
+  // Real answer → stored at HIGH, flow advances to totalSqm
+  const rP3 = await generateResponse(sP, 'DA, MILENICI SE DOZVOLENI');
+  assert('PETS-FLOW-3: "DA, MILENICI SE DOZVOLENI" → petsAllowed=true stored',
+    sP.collectedData.petsAllowed === true, `got ${JSON.stringify(sP.collectedData.petsAllowed)}`);
+  assert('PETS-FLOW-4: flow advances to totalSqm',
+    rP3.type === 'QUESTION' && rP3.nextField === 'totalSqm',
+    `got [${rP3.type}] next=${rP3.nextField} "${(rP3.text || '').slice(0, 60)}"`);
+}
+
+// BARE "DA"/"NE" answers to the pets question work (BARE_YES_NO_FIELDS).
+{
+  const sPB = {
+    adMemory: { transactionType: 'rent', propertyType: 'apartment', propertyLabel: 'станот' },
+    collectedData: {
+      cooperationAccepted: true, transactionType: 'rent',
+      monthlyRent: 350, monthlyRentConfidence: 0.95,
+      availableFrom: '2026-07-01', availableFromConfidence: 0.95,
+      tenantPreferences: { preferred: ['students'], excluded: [], notes: '' }, tenantPreferencesConfidence: 0.95
+    },
+    messages: [{ role: 'model', text: 'Дали се дозволени миленици во станот?' }],
+    phone: '+38976000012'
+  };
+  const rB = await generateResponse(sPB, 'DA');
+  assert('PETS-BARE: bare "DA" → petsAllowed=true stored', sPB.collectedData.petsAllowed === true, `got ${JSON.stringify(sPB.collectedData.petsAllowed)}`);
+  assert('PETS-BARE: flow advances after bare DA',
+    rB.type === 'QUESTION' && rB.nextField === 'totalSqm',
+    `got [${rB.type}] next=${rB.nextField} "${(rB.text || '').slice(0, 60)}"`);
+}
+
+// Broker comment includes the pets line
+const petsBroker = buildBrokerComment({
+  transactionType: 'rent',
+  monthlyRent: 350,
+  tenantPreferences: { preferred: ['students'], excluded: [], notes: '' },
+  petsAllowed: true
+});
+assert('PETS-BROKER: petsAllowed=true → "Миленици: дозволени" line', petsBroker.includes('Миленици: дозволени'), `got ${JSON.stringify(petsBroker)}`);
+const petsBrokerNo = buildBrokerComment({
+  transactionType: 'rent',
+  monthlyRent: 350,
+  petsAllowed: false
+});
+assert('PETS-BROKER: petsAllowed=false → "Миленици: не се дозволени" line', petsBrokerNo.includes('Миленици: не се дозволени'), `got ${JSON.stringify(petsBrokerNo)}`);
+
+// Hermes payload carries pets_allowed
+const petsPayload = buildPropertyJson(
+  { transactionType: 'rent', monthlyRent: 350, petsAllowed: true },
+  { city: 'Skopje' }, '+38970123456', 'P1');
+assert('PETS-PAYLOAD: pets_allowed=true in Hermes payload', petsPayload.pets_allowed === true, `got ${JSON.stringify(petsPayload.pets_allowed)}`);
 
 // ============================================================
 // 7. FLOW: sale per-sqm → workflow skips cleanPrice, close computes pricing

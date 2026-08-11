@@ -82,7 +82,12 @@ res = await sendMessage(session, 'SUPER, KAZI MI STO TI TREBA PA DA POCNEME', 'c
 const remaining = [
   { input: '350 evra mesecno', field: 'monthlyRent' },
   { input: 'od 1 juli e sloboden', field: 'availableFrom' },
-  { input: 'NE SAKAM MILENICI I SAMOHRANI MAJKI', field: 'tenantPreferences' },
+  // NOTE: the tenant answer avoids pet words on purpose — "NE SAKAM
+  // MILENICI..." would already extract petsAllowed=false and SKIP the
+  // dedicated pets question. This answer (the reported one) leaves
+  // petsAllowed open so the new question is actually heard below.
+  { input: 'SAKAM STUDENTI, MLADI BRACNI PAROVI, SAMCI VRABOTENI', field: 'tenantPreferences' },
+  { input: 'DA, MILENICI SE DOZVOLENI', field: 'petsAllowed' },
   { input: '55 kvadrati', field: 'totalSqm' },
   { input: 'ima terasa od 5 m2', field: 'terraceSqm' },
   { input: '2 spalni', field: 'bedrooms' },
@@ -135,8 +140,9 @@ const d = session.collectedData;
 console.log(`phase: ${session.phase}  |  close type: ${res.type}`);
 console.log(`monthlyRent: ${d.monthlyRent}  |  availableFrom: ${d.availableFrom}`);
 console.log(`tenantPreferences: ${JSON.stringify(d.tenantPreferences)}`);
+console.log(`petsAllowed: ${JSON.stringify(d.petsAllowed)}`);
 console.log('\n--- broker comment (Интерен коментар — agent-visible only) ---');
-console.log(buildBrokerComment({ transactionType: 'rent', monthlyRent: d.monthlyRent, tenantPreferences: d.tenantPreferences }));
+console.log(buildBrokerComment({ transactionType: 'rent', monthlyRent: d.monthlyRent, tenantPreferences: d.tenantPreferences, petsAllowed: d.petsAllowed }));
 
 // ---- Variant demonstration
 console.log('\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');

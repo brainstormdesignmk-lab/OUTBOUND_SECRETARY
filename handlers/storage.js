@@ -135,7 +135,7 @@ export function saveToCSV(data, phone, propertyId) {
     // leaves misaligned rows byte-identical (pre-existing comma-in-address
     // convention), and these are the LAST columns so they never shift
     // earlier values.
-    'tenantPreferences', 'pricePerSqm', 'ownerPrice', 'sellingPrice', 'priceWarning',
+    'tenantPreferences', 'petsAllowed', 'pricePerSqm', 'ownerPrice', 'sellingPrice', 'priceWarning',
     'brokerComment', 'descriptionPublic'
   ]);
 
@@ -202,6 +202,7 @@ export function saveToCSV(data, phone, propertyId) {
     data.tenantPreferences
       ? `pref:${(data.tenantPreferences.preferred || []).join(';')};excl:${(data.tenantPreferences.excluded || []).join(';')};${data.tenantPreferences.notes || ''}`
       : '',
+    csvBool(data.petsAllowed),
     csvNum(data.pricePerSqm),
     csvNum(data.ownerPrice),
     csvNum(data.sellingPrice),
