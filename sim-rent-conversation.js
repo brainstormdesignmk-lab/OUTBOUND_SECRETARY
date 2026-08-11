@@ -142,13 +142,28 @@ console.log(buildBrokerComment({ transactionType: 'rent', monthlyRent: d.monthly
 console.log('\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
 console.log('TENANT-PREFERENCES QUESTION VARIANTS');
 console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-const { TENANT_PREF_QUESTIONS } = await import('./workflow.js');
-TENANT_PREF_QUESTIONS.forEach((v, i) => console.log(`  variant ${i}: "${v}"`));
+const { TENANT_PREF_QUESTIONS, AVAILABLE_FROM_QUESTIONS } = await import('./workflow.js');
+TENANT_PREF_QUESTIONS.forEach((v, i) => console.log(`  tenant variant ${i}: "${v}"`));
+AVAILABLE_FROM_QUESTIONS.forEach((v, i) => console.log(`  date variant ${i}: "${v('станот')}"`));
 
-// ---- Re-ask demonstration: drive straight to the tenant question and give
-// four non-answers, so the variant rotation is heard live — one fresh
-// sentence per attempt (attempts are capped at the variant count).
-console.log('\n--- re-ask demo: straight to the tenant question, four non-answers, then the real answer ---');
+// ---- Re-ask demonstration 1: AVAILABLE-FROM rotation — drive straight to
+// the date question and give four non-answers, so the date variants are
+// heard live (attempts capped at the variant count).
+console.log('\n--- re-ask demo 1: availableFrom rotation (four non-answers) ---');
+const s1 = freshSession();
+await sendMessage(s1, 'DA, DOSTAPEN E', 'availability');
+await sendMessage(s1, 'SUPER, KAZI MI STO TI TREBA PA DA POCNEME', 'cooperation');
+await sendMessage(s1, '350 evra mesecno', 'monthlyRent');
+await sendMessage(s1, 'NE ZNAM USTE', 'date — non-answer 1');
+await sendMessage(s1, 'NE ZNAM USTE', 'date — non-answer 2');
+await sendMessage(s1, 'NE ZNAM USTE', 'date — non-answer 3');
+await sendMessage(s1, 'NE ZNAM USTE', 'date — non-answer 4');
+await sendMessage(s1, 'od 1 juli e sloboden', 'date — real answer');
+console.log(`\nfirst session availableFrom: ${JSON.stringify(s1.collectedData.availableFrom)}`);
+
+// ---- Re-ask demonstration 2: TENANT-PREFERENCES rotation — four
+// non-answers, so the tenant variants are heard live.
+console.log('\n--- re-ask demo 2: tenantPreferences rotation (four non-answers) ---');
 const s2 = freshSession();
 await sendMessage(s2, 'DA, DOSTAPEN E', 'availability');
 await sendMessage(s2, 'SUPER, KAZI MI STO TI TREBA PA DA POCNEME', 'cooperation');

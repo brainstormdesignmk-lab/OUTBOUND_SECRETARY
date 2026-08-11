@@ -302,6 +302,39 @@ assert('label men → мажи', tenantCategoryLabel('men') === 'мажи', '');
     `got ${JSON.stringify(s3.collectedData.tenantPreferencesSkipped)}`);
 }
 
+// AVAILABLE-FROM ROTATION (reported requirement: same rotation treatment as
+// the tenant question): re-asks of "Од кога ќе биде слободен?" must rotate
+// through AVAILABLE_FROM_QUESTIONS variants — NOT be shadowed by the fixed
+// confirmatory phrasing and NOT be skipped after 2 attempts.
+{
+  const s4 = {
+    adMemory: { transactionType: 'rent', propertyType: 'apartment', propertyLabel: 'станот' },
+    collectedData: { cooperationAccepted: true, transactionType: 'rent', monthlyRent: 350 },
+    messages: [{ role: 'model', text: 'Добро. Од кога ќе биде слободен станот?' }],
+    phone: '+38976000010'
+  };
+  const dateVariantTexts = [
+    'Од кога ќе биде слободен',
+    'Од кој датум ќе биде слободен',
+    'Кога точно ќе биде слободен',
+    'Од кога ќе може да се издаде'
+  ];
+  for (let i = 0; i < dateVariantTexts.length; i++) {
+    const r4 = await generateResponse(s4, 'NE ZNAM USTE');
+    assert(`DATE-ROT-${i + 1}: attempt ${i + 1} asks date variant ${i} ("${dateVariantTexts[i]}")`,
+      r4.type === 'QUESTION' && r4.nextField === 'availableFrom' && (r4.text || '').includes(dateVariantTexts[i]),
+      `got [${r4.type}] next=${r4.nextField} "${(r4.text || '').slice(0, 90)}"`);
+  }
+  // Fifth non-answer → max attempts (variant count) reached → field skipped,
+  // flow advances to the next field (tenantPreferences) — no infinite loop.
+  const r4skip = await generateResponse(s4, 'NE ZNAM USTE');
+  assert('DATE-ROT-5: after 4 non-answers the date field is skipped (moves on, no loop)',
+    r4skip.type === 'QUESTION' && r4skip.nextField === 'tenantPreferences',
+    `got [${r4skip.type}] next=${r4skip.nextField} "${(r4skip.text || '').slice(0, 90)}"`);
+  assert('DATE-ROT-6: skipped marker set after max date attempts', s4.collectedData.availableFromSkipped === true,
+    `got ${JSON.stringify(s4.collectedData.availableFromSkipped)}`);
+}
+
 // ============================================================
 // 3. BROKER COMMENT
 // ============================================================

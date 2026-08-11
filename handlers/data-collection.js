@@ -8,8 +8,45 @@
 //   3. Complex stateful handlers (terrace, heating, photos, ownerName, address)
 //   4. History scan + close flow + field question flow (with re-ask phrasings)
 // ========================================
-import { getNextMissingField, getQuestion, TENANT_PREF_QUESTIONS } from '../workflow.js';
+import { getNextMissingField, getQuestion, TENANT_PREF_QUESTIONS, AVAILABLE_FROM_QUESTIONS } from '../workflow.js';
 import { runGlobalExtraction, assessConfidence, confidenceToNumeric, scanHistoryForField, isExplicitPriceCorrection } from '../data-collector.js';
+
+// ========================================
+// ROTATING QUESTION VARIANTS BY FIELD — the single source of truth for
+// fields whose re-asks rotate through fresh sentences instead of the fixed
+// confirmatory phrasing ("Само да потврдам…"). A field present in this map
+// is EXEMPT from both generic re-ask gates below:
+//   (1) the max-attempts precheck caps it at the VARIANT COUNT (one ask per
+//       variant), not the strict 2-attempt cap, and
+//   (2) the confirmatory override skips it — each attempt already carries a
+//       fresh sentence, so the fixed phrasing would shadow variants 1-3 and
+//       the rotation would never be heard.
+// tenantPreferences: static strings. availableFrom: label functions (the
+// property word "станот"/"куќата" adapts per lead, mirroring
+// CONFIRMATORY_QUESTIONS). Reported requirements: "couple of variations of
+// the type of clients preferred" + the same rotation for the date question.
+// ========================================
+const ROTATING_QUESTION_VARIANTS = {
+  tenantPreferences: TENANT_PREF_QUESTIONS,
+  availableFrom: AVAILABLE_FROM_QUESTIONS
+};
+
+/** Pick the variant for the current attempt: strings pass through, label
+ *  functions are called with the property label. Clamps past the list end
+ *  (a guard — the attempt cap below already stops before that). */
+function pickRotatingVariant(field, attempts, propertyLabel) {
+  const variants = ROTATING_QUESTION_VARIANTS[field];
+  if (!variants || variants.length === 0) return null;
+  const raw = variants[Math.min(attempts - 1, variants.length - 1)];
+  return typeof raw === 'function' ? raw(propertyLabel) : raw;
+}
+
+/** Max attempts before skip for a field: variant count for rotating fields,
+ *  2 for everything else. Math.max(1, …) guards an empty variant list. */
+function rotatingMaxAttempts(field) {
+  const variants = ROTATING_QUESTION_VARIANTS[field];
+  return variants && variants.length > 0 ? Math.max(1, variants.length) : 2;
+}
 import {
   extractTerraceNumber,
   isPositive,
@@ -55,7 +92,10 @@ function confirmsAvailability(text) {
 const CONFIRMATORY_QUESTIONS = {
   cleanPrice: (label) => `Само да потврдам, која би била последната чиста цена за ${label}?`,
   monthlyRent: (label) => `Само да потврдам, колкава е месечната кирија за ${label}?`,
-  availableFrom: (label) => `Само да потврдам, од кога ќе биде слободен ${label}?`,
+  // NOTE: NO availableFrom entry — the date question rotates through
+  // AVAILABLE_FROM_QUESTIONS variants (one fresh sentence per attempt), so
+  // the fixed confirmatory phrasing would shadow variants 1-3 and the
+  // rotation would never be heard (same treatment as tenantPreferences).
   totalSqm: () => `Само да потврдам, колкава е вкупната квадратура?`,
   terraceSqm: () => `Само да потврдам, дали има тераса?`,
   bedrooms: (label) => `Само да потврдам, колку спални соби има ${label}?`,
@@ -1313,16 +1353,15 @@ export function runDataCollectionFlow({ u, userInput, session, adMemory, hasScra
     // block below handles the "all fields exhausted" case naturally.
     // This prevents infinite loops on fields like "furnished" or "renovated".
     // ========================================
-    // TENANT-PREFERENCE ATTEMPTS EXEMPTION (reported requirement: "couple of
-    // variations of the type of clients preferred"): the tenant question is
-    // asked once per TENANT_PREF_QUESTIONS variant, so it may re-ask up to
-    // the variant count — the generic 2-attempt cap would skip the field
-    // right after variant 1 and variants 2-3 would never be spoken. Every
-    // other field keeps the strict 2-attempt cap.
-    // Math.max(1, …) guard: a hypothetical empty variant list can never make
-    // the while-loop non-terminating (attempts >= 0 would always be true).
-    const tenantPrefMaxAttempts = Math.max(1, TENANT_PREF_QUESTIONS.length);
-    while (nextField && (session.questionAttempts[nextField] || 0) >= (nextField === 'tenantPreferences' ? tenantPrefMaxAttempts : 2)) {
+    // ROTATING-VARIANT ATTEMPTS EXEMPTION (reported requirements: "couple of
+    // variations of the type of clients preferred" + the same rotation for
+    // the availableFrom date question): rotating fields are asked once per
+    // variant, so they may re-ask up to the variant count — the generic
+    // 2-attempt cap would skip the field right after variant 1 and variants
+    // 2-3 would never be spoken. Every other field keeps the strict 2-attempt
+    // cap. Math.max(1, …) inside rotatingMaxAttempts guarantees the while-loop
+    // terminates even with an empty variant list.
+    while (nextField && (session.questionAttempts[nextField] || 0) >= rotatingMaxAttempts(nextField)) {
       // Fallback: run global extraction with NO preferredField to catch
       // any keyword in the owner's message that might have been missed.
       const fallbackUpdates = runGlobalExtraction(u, session.collectedData);
@@ -1353,7 +1392,8 @@ export function runDataCollectionFlow({ u, userInput, session, adMemory, hasScra
       // (null value + confidence < 0.7 both read as "missing" in workflow.js
       // — without the marker the while-loop below spins forever.)
       session.collectedData[nextField + 'Skipped'] = true;
-      console.log(`[SKIP: ${nextField} — max attempts reached (${nextField === 'tenantPreferences' ? '4 tenant variants' : '2'}), owner not providing answer, storing null]`);
+      const skipCap = rotatingMaxAttempts(nextField);
+      console.log(`[SKIP: ${nextField} — max attempts reached (${skipCap === 2 ? '2' : `${skipCap} rotating variants`}), owner not providing answer, storing null]`);
       const updatedKnown = { ...adMemory, ...session.collectedData };
       nextField = getNextMissingField(updatedKnown);
     }
@@ -1377,34 +1417,36 @@ export function runDataCollectionFlow({ u, userInput, session, adMemory, hasScra
       // question (stale question-text bug).
       const question = getQuestion(nextField, known.propertyType || 'apartment', hasScraperPhotos, session.collectedData.photosStatus);
 
-      // TENANT-PREFERENCE VARIANT ROTATION (reported requirement: "couple of
-      // variations of the type of clients preferred"). The first ask uses
-      // variant 0; re-asks rotate through the list so the owner is never
-      // asked the identical sentence twice. tenantPreferences is EXEMPT from
-      // both generic re-ask gates: the max-attempts precheck above caps it at
-      // TENANT_PREF_QUESTIONS.length (one ask per variant, NOT 2), and the
-      // confirmatory override below deliberately skips it — each attempt
-      // already carries a fresh variant sentence, so the fixed
-      // "Само да потврдам…" phrasing would shadow variants 1-3 and the
-      // rotation would never be heard.
-      let tenantPrefVariant = null;
-      if (nextField === 'tenantPreferences') {
-        tenantPrefVariant = TENANT_PREF_QUESTIONS[Math.min(attempts - 1, TENANT_PREF_QUESTIONS.length - 1)] || TENANT_PREF_QUESTIONS[0];
-      }
+      // ROTATING-VARIANT QUESTION (reported requirements: "couple of
+      // variations of the type of clients preferred" + the same rotation for
+      // the availableFrom date question). The first ask uses variant 0;
+      // re-asks rotate through the list so the owner is never asked the
+      // identical sentence twice. Rotating fields are EXEMPT from both
+      // generic re-ask gates: the max-attempts precheck above caps them at
+      // the variant count (one ask per variant, NOT 2), and the confirmatory
+      // override below deliberately skips them — each attempt already
+      // carries a fresh variant sentence, so the fixed "Само да потврдам…"
+      // phrasing would shadow variants 1-3 and the rotation would never be
+      // heard. ROTATING_QUESTION_VARIANTS is the single source of truth.
+      const rotatedVariant = pickRotatingVariant(nextField, attempts, propertyLabel);
 
       // If the question is generic, replace with property-specific
       let finalQuestion = question;
-      if (nextField === 'tenantPreferences' && tenantPrefVariant) {
-        finalQuestion = tenantPrefVariant;
+      if (rotatedVariant) {
+        finalQuestion = rotatedVariant;
       } else if (question && question.includes('станот')) {
         finalQuestion = question.replace(/станот/g, propertyLabel);
       }
 
-      // Override question text on re-asks — EXCEPT tenantPreferences, whose
-      // variant rotation above already supplies a fresh sentence for every
-      // attempt (the confirmatory phrasing would shadow variants 1-3 and
-      // the rotation would never be heard — reported requirement).
-      if (attempts >= 2 && nextField !== 'tenantPreferences') {
+      // Override question text on re-asks — EXCEPT rotating-variant fields
+      // (tenantPreferences, availableFrom), whose variant rotation above
+      // already supplies a fresh sentence for every attempt — the
+      // confirmatory phrasing would shadow variants 1-3 and the rotation
+      // would never be heard (reported requirements). Guard on the variant
+      // LIST being non-empty (not just the map key) so a hypothetical empty
+      // list degrades to the confirmatory phrasing instead of silently
+      // repeating the plain question.
+      if (attempts >= 2 && !pickRotatingVariant(nextField, attempts, propertyLabel)) {
         const confQuestion = CONFIRMATORY_QUESTIONS[nextField];
         if (confQuestion) {
           finalQuestion = confQuestion(propertyLabel);

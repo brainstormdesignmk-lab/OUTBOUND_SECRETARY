@@ -212,6 +212,21 @@ export const TENANT_PREF_QUESTIONS = [
   'Дали постојат категории на станари што ги преферирате или не ги преферирате?'
 ];
 
+// ========================================
+// AVAILABLE-FROM DATE QUESTION VARIANTS (reported requirement: the same
+// rotation treatment as the tenant question). Each variant is a LABEL
+// FUNCTION — the property word ("станот"/"куќата"/"плацот"/"локалот")
+// adapts per lead, mirroring CONFIRMATORY_QUESTIONS' signature. The
+// DATA_COLLECTION flow rotates these on re-asks so "Од кога ќе биде
+// слободен?" is never asked identically twice.
+// ========================================
+export const AVAILABLE_FROM_QUESTIONS = [
+  (label) => `Од кога ќе биде слободен ${label}?`,
+  (label) => `Од кој датум ќе биде слободен ${label}?`,
+  (label) => `Кога точно ќе биде слободен ${label}?`,
+  (label) => `Од кога ќе може да се издаде ${label}?`
+];
+
 function getPhotosQuestion(propertyType, hasScraperPhotos, photosStatus) {
   // If photos are already set, we shouldn't be asking this
   if (hasScraperPhotos) {
