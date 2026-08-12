@@ -533,13 +533,23 @@ export function runEarlyResponses({ u, isRent, session }) {
     if (isRent) {
       return {
         text: `Вие барате ${price.toLocaleString()} евра месечна кирија. За издавање, вашата обврска е стандардната провизија: 50% од една месечна кирија (100% ако е над 1000 евра), платена на денот на потпишување на договорот. Дали сте расположени да соработуваме?`,
-        type: "NORMAL"
+        type: "NORMAL",
+        // PRICE-QUOTE MARKER (reported, lead 5536052): this rebuttal returns
+        // BEFORE the global extraction pass, so features volunteered in the
+        // SAME price-quote message ("SO KLIMA, GARAZA I PARNO, KOMPLETNO
+        // NAMESTEN") were never extracted live. service.js sees this marker
+        // and runs the extraction pass anyway (features only — the price
+        // extractors never fire on "baram X" quotes, so the HIGH
+        // mentionedPrice→backfill path stays the sole price source).
+        priceQuote: true
       };
     }
 
     return {
       text: `Вие барате ${price.toLocaleString()} евра. Тоа е вашата чиста цена, а ние додаваме над неа. Дали сте расположени да соработуваме?`,
-      type: "NORMAL"
+      type: "NORMAL",
+      // PRICE-QUOTE MARKER — see the rent branch above.
+      priceQuote: true
     };
   }
 

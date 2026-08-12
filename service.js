@@ -313,7 +313,48 @@ export async function generateResponse(session, userInput) {
     // Returns a response immediately if the message matches a known pattern.
     // ========================================
     const early = runEarlyResponses({ u, isRent, session });
-    if (early) return guardResponse(early);
+    if (early) {
+      // PRICE-QUOTE FEATURE EXTRACTION (reported, lead 5536052): the
+      // hardcoded price rebuttal returns BEFORE the global extraction pass,
+      // so features volunteered in the SAME price-quote message ("JAS BARAM
+      // 150.000 ZA MENE, KOMPLETNO NAMESTEN, SO KLIMA, GARAZA I PARNO") were
+      // never extracted live — the owner's answers looked lost even though
+      // the extractors would have found them all at HIGH. When the price
+      // handler fires, ALSO run the extraction pass (nextField=null → every
+      // MEDIUM counts as volunteered, no confirmation question). The price
+      // field itself stays in mentionedPrice: the price extractors never
+      // fire on "baram/sakam X" quote forms, so the HIGH backfill below
+      // remains the only path that stores the price — no double-store.
+      if (early.priceQuote) {
+        runGlobalExtractionPass({ u, userInput, session, nextField: null });
+        // PRICE STAGING RECONCILIATION (reviewer + C1 regression): the pass
+        // can store the quoted price DIRECTLY, which makes the
+        // mentionedPrice→backfill below a no-op on the next message. Two
+        // cases:
+        //   - HIGH (>=0.7) — rent quotes with currency ("BARAM 350 EVRA
+        //     MESECNO"), some sale forms ("SAKAM 120000"): the price is
+        //     already accepted at 0.95, so clear the staging mentionedPrice
+        //     (it would otherwise linger, inflating the question-prefix
+        //     fieldCount — the exact thing the backfill's delete guards).
+        //   - MEDIUM (<0.7) — bare quote forms ("baram 500", "baram 500
+        //     iljadi") extract at volunteered 0.60: too weak to keep (a
+        //     0.60 price is treated as missing and re-asked, and the
+        //     non-undefined value blocks the 0.95 backfill). Roll it back so
+        //     mentionedPrice still lands at 0.95 on the next message.
+        for (const k of ['monthlyRent', 'cleanPrice']) {
+          const v = session.collectedData[k];
+          if (typeof v !== 'number') continue;
+          const conf = session.collectedData[k + 'Confidence'];
+          if (conf != null && conf >= 0.7) {
+            delete session.collectedData.mentionedPrice;
+          } else {
+            delete session.collectedData[k];
+            delete session.collectedData[k + 'Confidence'];
+          }
+        }
+      }
+      return guardResponse(early);
+    }
 
     // ========================================
     // PHASE 2: AWAITING_PHOTOS RESOLUTION

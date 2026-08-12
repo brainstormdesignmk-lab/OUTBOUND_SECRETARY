@@ -597,6 +597,37 @@ const saleAvailSession = createSession('sale');
 const saleAvailRes = await generateResponse(saleAvailSession, 'uste go imam');
 assert(`sale availability → keeps no-commission phrasing`, saleAvailRes.type === 'NORMAL' && FORBIDDEN_RENT_CLAIMS.test(saleAvailRes.text), `got "${(saleAvailRes.text || '').substring(0, 100)}"`);
 
+// 9. PRICE-QUOTE FEATURE EXTRACTION (reported, lead 5536052): the price
+// rebuttal returns BEFORE the global extraction pass, so features
+// volunteered in the SAME price-quote message ("SO KLIMA, GARAZA I PARNO,
+// KOMPLETNO NAMESTEN") were never extracted live. The price-quote handler
+// now tags the response and service.js runs the extraction pass anyway.
+const priceQuoteSession = createSession('sale');
+const priceQuoteRes = await generateResponse(priceQuoteSession, 'JAS BARAM 150.000 ZA MENE , KOMPLETNO NAMESTEN , SO KLIMA , GARAZA I PARNO');
+assert(`price-quote e2e → NORMAL price rebuttal reply`, priceQuoteRes.type === 'NORMAL' && /150,000/.test(priceQuoteRes.text), `got [${priceQuoteRes.type}] "${(priceQuoteRes.text || '').substring(0, 80)}"`);
+assert(`price-quote e2e → mentionedPrice stored`, priceQuoteSession.collectedData.mentionedPrice === 150000, `got ${priceQuoteSession.collectedData.mentionedPrice}`);
+assert(`price-quote e2e → ac extracted from "SO KLIMA"`, priceQuoteSession.collectedData.ac === true, `got ${priceQuoteSession.collectedData.ac}`);
+assert(`price-quote e2e → parking extracted from "GARAZA" (garage)`, priceQuoteSession.collectedData.parking === true && priceQuoteSession.collectedData.parkingType === 'garage', `got ${JSON.stringify(priceQuoteSession.collectedData.parking)}/${priceQuoteSession.collectedData.parkingType}`);
+assert(`price-quote e2e → furnished extracted from "KOMPLETNO NAMESTEN" (full)`, priceQuoteSession.collectedData.furnished === true && priceQuoteSession.collectedData.furnishedLevel === 'full', `got ${JSON.stringify(priceQuoteSession.collectedData.furnished)}/${priceQuoteSession.collectedData.furnishedLevel}`);
+// The price field itself must NOT be stored from the quote (mentionedPrice →
+// cleanPrice backfill at HIGH on the next message is the only price path).
+assert(`price-quote e2e → cleanPrice NOT stored yet (backfill comes later)`, priceQuoteSession.collectedData.cleanPrice === undefined, `got ${priceQuoteSession.collectedData.cleanPrice}`);
+// Bare "PARNO" must NOT auto-extract heating (needs the gradsko/sopstveno
+// clarification question — by design).
+assert(`price-quote e2e → heating NOT auto-set from bare "PARNO"`, priceQuoteSession.collectedData.heating === undefined, `got ${priceQuoteSession.collectedData.heating}`);
+
+// RENT variant — same feature extraction on a rent price quote.
+const rentQuoteSession = createSession('rent');
+const rentQuoteRes = await generateResponse(rentQuoteSession, 'BARAM 350 EVRA MESECNO , SO KLIMA I GARAZA');
+assert(`rent price-quote e2e → rent rebuttal reply`, rentQuoteRes.type === 'NORMAL' && /350/.test(rentQuoteRes.text), `got [${rentQuoteRes.type}] "${(rentQuoteRes.text || '').substring(0, 80)}"`);
+assert(`rent price-quote e2e → ac + parking extracted too`, rentQuoteSession.collectedData.ac === true && rentQuoteSession.collectedData.parking === true && rentQuoteSession.collectedData.parkingType === 'garage', `got ac=${rentQuoteSession.collectedData.ac} parking=${rentQuoteSession.collectedData.parking}/${rentQuoteSession.collectedData.parkingType}`);
+// Rent price stores DIRECTLY at HIGH via the pass (extractMonthlyRent fires
+// on "BARAM 350 EVRA MESECNO" with currency → HIGH) — and mentionedPrice
+// must be cleared so the skipped backfill can't leave it lingering
+// (reviewer finding).
+assert(`rent price-quote e2e → monthlyRent stored at HIGH by the pass`, rentQuoteSession.collectedData.monthlyRent === 350 && rentQuoteSession.collectedData.monthlyRentConfidence === 0.95, `got ${rentQuoteSession.collectedData.monthlyRent} (${rentQuoteSession.collectedData.monthlyRentConfidence})`);
+assert(`rent price-quote e2e → mentionedPrice cleared (no lingering stale sum)`, rentQuoteSession.collectedData.mentionedPrice === undefined, `got ${rentQuoteSession.collectedData.mentionedPrice}`);
+
 console.log(`\n==================================================`);
 console.log(`   ❌ Failed: ${harness.failed}`);
 console.log(`   📋 Total: ${harness.passed + harness.failed}`);

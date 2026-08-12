@@ -113,8 +113,15 @@ console.log('  Persuasion reply:', c1.text);
 assert('C1: persuasion price quote still gets the rent commission pitch',
   c1.type === 'NORMAL' && /50% од една месечна кирија/.test(c1.text || ''),
   `got type=${c1.type} text=${JSON.stringify((c1.text || '').slice(0, 90))}`);
-assert('C1: mentionedPrice tracked during persuasion',
-  freshRent.collectedData.mentionedPrice === 500,
+// The price-quote extraction pass now stores the rent price DIRECTLY at
+// HIGH when the quote carries currency ("baram 500 evra" → monthlyRent=500
+// at 0.95), and the staging mentionedPrice is cleared — the backfill is a
+// no-op, the price question is skipped after acceptance either way.
+assert('C1: rent price stored directly at HIGH during persuasion',
+  freshRent.collectedData.monthlyRent === 500 && freshRent.collectedData.monthlyRentConfidence === 0.95,
+  `got monthlyRent=${JSON.stringify(freshRent.collectedData.monthlyRent)} conf=${freshRent.collectedData.monthlyRentConfidence}`);
+assert('C1: staging mentionedPrice cleared (no lingering stale sum)',
+  freshRent.collectedData.mentionedPrice === undefined,
   `got mentionedPrice=${JSON.stringify(freshRent.collectedData.mentionedPrice)}`);
 
 const freshSale = {

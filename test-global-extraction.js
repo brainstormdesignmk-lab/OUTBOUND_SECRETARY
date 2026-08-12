@@ -371,6 +371,37 @@ assert("E9d: Cyrillic 'пред 4 години' joined → currentYear−4",
   result.renovationYear === relYear, `got ${result.renovationYear}, expected ${relYear}`);
 
 // ========================================
+// TEST GROUP: NEW-BUILD vs EXPLICIT RENOVATION ordering (user-approved,
+// reported lead 5536052: "NOV STAN 2024" must stay renovated=false — the
+// word "nov" decides, never the year — but an explicit renovation mention
+// must WIN: "NOV STAN RENOVIRAN 2023" → renovated=true + 2023).
+// ========================================
+// The reported case: new-build word → never renovated, ANY year.
+result = runGlobalExtraction("NOV STAN 2024", {});
+assert("N1: 'NOV STAN 2024' → renovated=false (word-based, not year-based)",
+  result.renovated === false && result.renovationYear === null,
+  `got ${JSON.stringify(result.renovated)}/${result.renovationYear}`);
+// Same word, OLDER year — the year is NOT the trigger (no year-based
+// presumption — "STAN OD 2010" without "nov" still gets the question).
+result = runGlobalExtraction("NOV STAN 2010", {});
+assert("N2: 'NOV STAN 2010' → renovated=false too (year irrelevant to the rule)",
+  result.renovated === false, `got ${JSON.stringify(result.renovated)}`);
+// Older year WITHOUT the new-build word → renovated stays unset (question asked).
+result = runGlobalExtraction("STAN OD 2010", { cleanPrice: 120000 });
+assert("N3: 'STAN OD 2010' (no 'nov') → renovated NOT extracted (question still asked)",
+  result.renovated === undefined, `got ${JSON.stringify(result.renovated)}`);
+// NEW BUILD + EXPLICIT RENOVATION (the ordering fix): renovation info wins.
+result = runGlobalExtraction("NOV STAN RENOVIRAN 2023", {});
+assert("N4: 'NOV STAN RENOVIRAN 2023' → renovated=true + 2023 (explicit wins)",
+  result.renovated === true && result.renovationYear === 2023,
+  `got ${JSON.stringify(result.renovated)}/${result.renovationYear}`);
+// Negated new-build + explicit renovation still resolves positive (regression).
+result = runGlobalExtraction("NE E NOVOGRADBA, NO E RENOVIRAN 2019", {});
+assert("N5: 'NE E NOVOGRADBA, NO E RENOVIRAN 2019' → renovated=true + 2019",
+  result.renovated === true && result.renovationYear === 2019,
+  `got ${JSON.stringify(result.renovated)}/${result.renovationYear}`);
+
+// ========================================
 // TEST GROUP: Context awareness (no false matches)
 // ========================================
 console.log(`\n📦 GROUP: Context-specific extraction`);

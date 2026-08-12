@@ -928,23 +928,6 @@ function extractRenovated(u, data) {
   if (/(?:^|\s)(?:ne|не)\s+(?:(?:go|se|me|ti|ga|gi|sme|ste|e|ja|bea|sum|si|го|се|ме|ти|га|ги|сме|сте|е|ја|беа|сум|си)\s+){0,2}(?:renoviran[аоие]?|реновиран[аоие]?|renoviravme|реновиравме|renoviraa|реновираа|renovirav|реновирав|renovira|реновира|renoviral|renovirale|renovirali|реновирал|реновирале|реновирали|obnoven[аоие]?|обновен[аоие]?|osvezen[аоие]?|освежен[аоие]?)/i.test(u)) {
     return { renovated: false, renovationYear: null };
   }
-  // NEW-BUILD / FIRST-HAND → NOT renovated. A brand-new apartment (new
-  // construction, first hand, unused) has never been renovated. Direct
-  // answers to "Дали е реновиран?" like "NOV E 2025" (it's new, built 2025)
-  // previously fell through to a re-ask and then the max-2-attempts skip.
-  // Fully bilingual (Latin + Cyrillic) so НОВ Е / nov е / нов e / NOV E all
-  // match. Letter-boundary matching (not \b — that doesn't work with Cyrillic)
-  // prevents "nov" from matching inside "obnoven" (renovated).
-  // NEGATION GUARD (reported): "NE E NOVOGRADBA, NO E RENOVIRAN 2019" (it's
-  // NOT new construction, but it IS renovated) previously matched the bare
-  // "novogradba" keyword first and wrongly returned renovated=false —
-  // clobbering the owner's explicit positive answer. When any new-build
-  // keyword is directly negated ("ne e X"), the whole branch is skipped so
-  // the message falls through to the renovation checks below.
-  const newBuildNegated = /(?:ne|не)\s+(?:e|е)\s+(?:novogradba|новоградба|novogradbena|новоградбена|novoizgraden|новоизграден|nova gradba|нова градба|novo gradba|ново градба|nov stan|нов стан|nova zgrada|нова зграда|prva raka|прва рака|neupotreben|неупотребен)/i.test(u);
-  if (!newBuildNegated && /(?:^|[^a-zа-я])(?:nov|нов)\s+(?:e|е)(?:$|[^a-zа-я])|(?:^|[^a-zа-я])(?:nova|нова)\s+(?:e|е)(?:$|[^a-zа-я])|(?:^|[^a-zа-я])(?:novo|ново)\s+(?:e|е)(?:$|[^a-zа-я])|novogradba|новоградба|novogradbena|новоградбена|(?:nova|нова)\s+(?:gradba|градба)|(?:novo|ново)\s+(?:gradba|градба)|(?:nov|нов)\s+(?:stan|стан)|(?:nova|нова)\s+(?:zgrada|зграда)|novoizgraden|новоизграден|(?:prva|прва)\s+(?:raka|рака)|neupotreben|неупотребен/i.test(u)) {
-    return { renovated: false, renovationYear: null };
-  }
   // Check if year is embedded — prefer year near renovation keywords
   // Also matches past-tense verb forms: renoviravme (we renovated), renoviral (he renovated)
   // First, try to find year specifically near renovation words
@@ -1048,6 +1031,32 @@ function extractRenovated(u, data) {
   const yearMatch = u.match(/(?:19|20)\d{2}(?=[taтг\s,.;!]|$)/);
   if (yearMatch && /renoviran|реновиран|obnoven|обновен|osvezh|освеж/i.test(u)) {
     return { renovated: true, renovationYear: parseInt(yearMatch[0].substring(0, 4)) };
+  }
+
+  // NEW-BUILD / FIRST-HAND → NOT renovated. A brand-new apartment (new
+  // construction, first hand, unused) has never been renovated. Direct
+  // answers to "Дали е реновиран?" like "NOV E 2025" (it's new, built 2025)
+  // previously fell through to a re-ask and then the max-2-attempts skip.
+  // Fully bilingual (Latin + Cyrillic) so НОВ Е / nov е / нов e / NOV E all
+  // match. Letter-boundary matching (not \b — that doesn't work with Cyrillic)
+  // prevents "nov" from matching inside "obnoven" (renovated).
+  //
+  // ORDERING (user-approved): this branch runs LAST, AFTER every
+  // renovation-positive check above. An EXPLICIT renovation mention wins
+  // over the new-build default — "NOV STAN RENOVIRAN 2023" (new build, but
+  // renovated in 2023) now extracts renovated=true + 2023, where the old
+  // ordering let "nov stan" clobber it with renovated=false. The new-build
+  // word only decides when the message carries NO renovation info at all
+  // ("NOV STAN 2024" → renovated=false, as before).
+  // NEGATION GUARD (reported): "NE E NOVOGRADBA, NO E RENOVIRAN 2019" (it's
+  // NOT new construction, but it IS renovated) previously matched the bare
+  // "novogradba" keyword first and wrongly returned renovated=false —
+  // clobbering the owner's explicit positive answer. When any new-build
+  // keyword is directly negated ("ne e X"), the whole branch is skipped so
+  // the message falls through to the renovation checks below.
+  const newBuildNegated = /(?:ne|не)\s+(?:e|е)\s+(?:novogradba|новоградба|novogradbena|новоградбена|novoizgraden|новоизграден|nova gradba|нова градба|novo gradba|ново градба|nov stan|нов стан|nova zgrada|нова зграда|prva raka|прва рака|neupotreben|неупотребен)/i.test(u);
+  if (!newBuildNegated && /(?:^|[^a-zа-я])(?:nov|нов)\s+(?:e|е)(?:$|[^a-zа-я])|(?:^|[^a-zа-я])(?:nova|нова)\s+(?:e|е)(?:$|[^a-zа-я])|(?:^|[^a-zа-я])(?:novo|ново)\s+(?:e|е)(?:$|[^a-zа-я])|novogradba|новоградба|novogradbena|новоградбена|(?:nova|нова)\s+(?:gradba|градба)|(?:novo|ново)\s+(?:gradba|градба)|(?:nov|нов)\s+(?:stan|стан)|(?:nova|нова)\s+(?:zgrada|зграда)|novoizgraden|новоизграден|(?:prva|прва)\s+(?:raka|рака)|neupotreben|неупотребен/i.test(u)) {
+    return { renovated: false, renovationYear: null };
   }
   return null;
 }
@@ -1610,6 +1619,13 @@ const NUMBER_SNIFFING_EXTRACTORS = new Set([
   'extractFloor',
   'extractTotalSqm',
   'extractTotalFloors'  // Added: bare number fallback (needs preferredField guard)
+  // extractYearBuilt is DELIBERATELY NOT here: global discovery must keep
+  // capturing year volunteers that carry decade/suffix markers ("80ti",
+  // "2015ta") or a 4-digit year ("NOVA ZGRADA OD 2024") — three suites pin
+  // that behavior. The reported "10 → 2010" false positive is killed at the
+  // source in parseYearBuilt (pure-phrase/year-context gate) for the MIXED
+  // messages the history scan produces; a bare "10" typed alone in
+  // persuasion is pre-existing and ambiguous.
 ]);
 
 // ========================================
