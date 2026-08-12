@@ -1093,6 +1093,57 @@ assert("RH8c: 'go staviv da se prodava' → heating stays null", result.heating 
 result = runGlobalExtraction("OD 7.15.2026", { transactionType: 'rent' });
 assert("RH9: 'OD 7.15.2026' → no phantom monthlyRent", result.monthlyRent === undefined, `got ${JSON.stringify(result)}`);
 
+// ── 2c. "togas" must NEVER phantom as gas heating (reported lead 5536052) ──
+// "PA TOGAS MOZE" (well then, OK — тогаш = "then") was extracted as
+// heating="gas" because the old /gas|гас/ matched INSIDE the Latin
+// transliteration "togas". "gas"/"гас" now requires a word boundary on
+// both sides (Cyrillic-aware — JS \b is ASCII-only).
+result = runGlobalExtraction("PA TOGAS MOZE", {});
+assert("HG1: 'PA TOGAS MOZE' → heating stays null (тогаш ≠ gas)", result.heating === undefined, `got ${JSON.stringify(result.heating)}`);
+result = runGlobalExtraction("togas", {});
+assert("HG2: bare 'togas' → heating stays null", result.heating === undefined, `got ${JSON.stringify(result.heating)}`);
+result = runGlobalExtraction("тогаш", {});
+assert("HG3: 'тогаш' (Cyrillic) → heating stays null", result.heating === undefined, `got ${JSON.stringify(result.heating)}`);
+result = runGlobalExtraction("Togas da probame so agencija", {});
+assert("HG4: 'Togas da probame' (then let's try) → heating stays null", result.heating === undefined, `got ${JSON.stringify(result.heating)}`);
+// Genuine gas answers still extract (boundary form):
+result = runGlobalExtraction("ima gas", {});
+assert("HG5: 'ima gas' → heating=gas (unchanged)", result.heating === 'gas', `got ${JSON.stringify(result.heating)}`);
+result = runGlobalExtraction("priroden gas", {});
+assert("HG6: 'priroden gas' → heating=gas (unchanged)", result.heating === 'gas', `got ${JSON.stringify(result.heating)}`);
+result = runGlobalExtraction("parno na gas", {});
+assert("HG7: 'parno na gas' → heating=gas (unchanged)", result.heating === 'gas', `got ${JSON.stringify(result.heating)}`);
+result = runGlobalExtraction("има гас", {});
+assert("HG8: 'има гас' (Cyrillic) → heating=gas (unchanged)", result.heating === 'gas', `got ${JSON.stringify(result.heating)}`);
+result = runGlobalExtraction("природен гас", {});
+assert("HG9: 'природен гас' (Cyrillic) → heating=gas (unchanged)", result.heating === 'gas', `got ${JSON.stringify(result.heating)}`);
+// "glas" (voice) / "глас" must also stay null — same substring class:
+result = runGlobalExtraction("so glas na sorabotka", {});
+assert("HG10: 'glas' (voice) → heating stays null", result.heating === undefined, `got ${JSON.stringify(result.heating)}`);
+result = runGlobalExtraction("глас на народот", {});
+assert("HG11: 'глас' (Cyrillic voice) → heating stays null", result.heating === undefined, `got ${JSON.stringify(result.heating)}`);
+// Bare "gas" (exact word) still works:
+result = runGlobalExtraction("gas", {});
+assert("HG12: bare 'gas' → heating=gas", result.heating === 'gas', `got ${JSON.stringify(result.heating)}`);
+// Derived forms (reviewer-caught regression): "гасна котларница" (gas boiler
+// room), "гасно греење" — the boundary fix must NOT drop these common gas
+// phrasings. Boundaries keep "togasna" (тогашна = of that time) safe.
+result = runGlobalExtraction("gasna kotlarnica", {});
+assert("HG13: 'gasna kotlarnica' → heating=gas", result.heating === 'gas', `got ${JSON.stringify(result.heating)}`);
+result = runGlobalExtraction("гасна котларница", {});
+assert("HG14: 'гасна котларница' → heating=gas (Cyrillic)", result.heating === 'gas', `got ${JSON.stringify(result.heating)}`);
+result = runGlobalExtraction("гасно греење", {});
+assert("HG14b: 'гасно греење' → heating=gas (Cyrillic)", result.heating === 'gas', `got ${JSON.stringify(result.heating)}`);
+// "decentralno" (децентрално — decentralized heating) contains "centralno"
+// as a substring but is NOT district heating (reviewer-caught, same class):
+result = runGlobalExtraction("decentralno greenje", {});
+assert("HG15: 'decentralno greenje' → heating stays null", result.heating === undefined, `got ${JSON.stringify(result.heating)}`);
+result = runGlobalExtraction("децентрално греење", {});
+assert("HG16: 'децентрално греење' → heating stays null", result.heating === undefined, `got ${JSON.stringify(result.heating)}`);
+// Standalone "centralno" must still resolve to district:
+result = runGlobalExtraction("parno centralno", {});
+assert("HG17: 'parno centralno' → heating=district (unchanged)", result.heating === 'district', `got ${JSON.stringify(result.heating)}`);
+
 // ── 3. Parking: "vo cenata" = private, "slobodno parkiranje" = public ──
 result = runGlobalExtraction("PARKING MESTO VO CENATA", {});
 assert("RP1: 'parking mesto vo cenata' → parking=true, type=private", result.parking === true && result.parkingType === 'private', `got ${JSON.stringify(result.parking)}/${result.parkingType}`);

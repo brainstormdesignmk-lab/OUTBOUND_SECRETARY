@@ -641,8 +641,28 @@ function extractHeating(u, data) {
   if (data.heating !== undefined && data.heating !== null) return null;
 
   // District/central: parno gradsko, gradsko parno, centralno, toplovod, gradsko
-  if (/parno\s+gradsko|gradsko\s+parno|централно|centralno|топловод|toplovod|градско|gradsko/i.test(u)) {
+  // "centralno"/"централно" are WORD-BOUNDARY guarded (same disease class as
+  // the "togas"→gas phantom): "decentralno" (децентрално — decentralized
+  // heating) contains "centralno" as a substring but is NOT district heating.
+  if (/parno\s+gradsko|gradsko\s+parno|(?:^|[^a-zа-я])(?:centralno|централно)(?:$|[^a-zа-я])|топловод|toplovod|градско|gradsko/i.test(u)) {
     return { heating: "district", heatingType: "district" };
+  }
+
+  // Gas: gas / priroden gas / има гас — WORD-BOUNDARY REQUIRED both sides
+  // (reported, lead 5536052): "PA TOGAS MOZE" (well then, OK — тогаш)
+  // phantomed heating="gas" because /gas/ matched INSIDE the
+  // transliteration "togas". "gas"/"гас" must be a standalone word
+  // (preceded AND followed by a non-letter; Cyrillic-aware — JS \b is
+  // ASCII-only). Derived forms "gasna"/"гасна"/"gasno"/"гасно"
+  // ("гасна котларница" = gas boiler room, "гасно греење") are included
+  // WITH the same boundary so "togasna" (тогашна — "of that time") can
+  // never match either. "gasa" (a rare declension) is deliberately not
+  // matched: the substring false-positive risk outweighs the coverage loss.
+  // This branch runs BEFORE the private branch (kotlarnica → private): a
+  // "гасна котларница" is a GAS boiler room, so the fuel wins over the
+  // "own boiler" classification.
+  if (/(?:^|[^a-zа-я])(?:gas|гас|gasna|гасна|gasno|гасно)(?:$|[^a-zа-я])/i.test(u)) {
+    return { heating: "gas", heatingType: "gas" };
   }
 
   // Private/own: parno sopstveno, sopstveno parno, sopstveno, moe licno,
@@ -682,11 +702,6 @@ function extractHeating(u, data) {
   // Oil: nafta
   if (/nafta|нафта/i.test(u)) {
     return { heating: "oil", heatingType: "oil" };
-  }
-
-  // Gas: gas, priroden gas
-  if (/gas|гас|priroden gas|природен гас/i.test(u)) {
-    return { heating: "gas", heatingType: "gas" };
   }
 
   // Inverter as heating: ONLY if no higher-priority heating keyword matched.

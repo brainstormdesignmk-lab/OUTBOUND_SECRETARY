@@ -692,11 +692,15 @@ export function runComplexStatefulHandlers({ u, userInput, session, nextField, h
   // clarification. Only an explicit "не знам"-family reply defaults; anything
   // else while the follow-up is pending re-asks the question.
   const heatingNonAnswer = /(?:^|[^a-zа-я])(?:ne|не)\s+(?:znam|знам)(?:\s+(?:tocno|tochno|точно|sigurno|сигурно))?(?:$|[^a-zа-я])|(?:^|[^a-zа-я])(?:ne|не)\s+sum\s+(?:siguren|сигурен|sigurna|сигурна)(?:$|[^a-zа-я])|(?:^|[^a-zа-я])(?:ne|не)\s+(?:mozam|можам)\s+da\s+(?:kazam|кажам)(?:$|[^a-zа-я])|(?:^|[^a-zа-я])(?:ne|не)\s+se\s+(?:secavam|сеќавам)(?:$|[^a-zа-я])|(?:^|[^a-zа-я])(?:nema|нема|nemam|немам)\s+(?:poim|поим)(?:$|[^a-zа-я])/i;
-  const parnoMentioned = /parno|парно/i.test(u) && !/nema parno|нема парно|nemame parno|немаме парно|nemaat parno|немаат парно|bez parno|без парно|ne e parno|не е парно/i.test(u);
+  // WORD-BOUNDARY REQUIRED (same disease as the "togas"→gas phantom,
+  // reported lead 5536052): bare "parno" must be a standalone word —
+  // "SPARNO E DENES" (sultry weather, спарно) contains "parno" but is not
+  // a heating mention. Cyrillic-aware boundary (JS \b is ASCII-only).
+  const parnoMentioned = /(?:^|[^a-zа-я])(?:parno|парно)(?:$|[^a-zа-я])/i.test(u) && !/nema parno|нема парно|nemame parno|немаме парно|nemaat parno|немаат парно|bez parno|без парно|ne e parno|не е парно/i.test(u);
   // (isLandLead skips this entire branch — see the LAND GUARD at the top.)
   if (!isLandLead && (nextField === 'heating' || session.collectedData.heatingFollowUp ||
       (parnoMentioned && !session.collectedData.heating))) {
-    if (/gradsko|градско|граѓско|dalinsko|dalecno|далечно|toplovod|beg|centralno|централно|central/i.test(u)) {
+    if (/gradsko|градско|граѓско|dalinsko|dalecno|далечно|toplovod|beg|(?:^|[^a-zа-я])(?:centralno|централно|central)(?:$|[^a-zа-я])/i.test(u)) {
       session.collectedData.heating = "district";
       session.collectedData.heatingType = "district";
       session.collectedData.heatingFollowUp = false;

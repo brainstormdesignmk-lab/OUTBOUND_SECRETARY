@@ -98,7 +98,7 @@ const heatingNonAnswer = /(?:^|[^a-zа-я])(?:ne|не)\s+(?:znam|знам)(?:\s+
 function handleHeating(u, data, nextField) {
   // Returns { response } if follow-up question, null otherwise
   if (nextField === 'heating' || data.heatingFollowUp) {
-    if (/gradsko|градско|граѓско|dalinsko|dalecno|далечно|toplovod|beg|centralno|централно|central/i.test(u)) {
+    if (/gradsko|градско|граѓско|dalinsko|dalecno|далечно|toplovod|beg|(?:^|[^a-zа-я])(?:centralno|централно|central)(?:$|[^a-zа-я])/i.test(u)) {
       data.heating = "district";
       data.heatingType = "district";
       data.heatingFollowUp = false;
@@ -123,7 +123,7 @@ function handleHeating(u, data, nextField) {
         data.heatingType = "oil";
       }
       data.heatingFollowUp = false;
-    } else if (/parno|парно/i.test(u) && !data.heatingFollowUp) {
+    } else if (/(?:^|[^a-zа-я])(?:parno|парно)(?:$|[^a-zа-я])/i.test(u) && !data.heatingFollowUp) {
       data.heatingFollowUp = true;
       return { type: "QUESTION" }; // "Kakvo parno? Gradsko ili sopstveno?"
     }
@@ -679,6 +679,47 @@ console.log(`━━━━━━━━━━━━━━━━━━━━━━�
   const result = handleHeating("парно", d, 'heating');
   assert("H19: 'парно' → follow-up question", result !== null && result.type === "QUESTION", `got ${JSON.stringify(result)}`);
   assert("H19: 'парно' → heatingFollowUp=true", d.heatingFollowUp === true, `got ${d.heatingFollowUp}`);
+})();
+
+// H19b: "SPARNO" (sultry weather, спарно) contains "parno" but is NOT a
+// heating mention — must NOT trigger the follow-up (same substring disease as
+// the "togas"→gas phantom, reported lead 5536052).
+(() => {
+  const d = freshData();
+  const result = handleHeating("sparno e denes", d, 'heating');
+  assert("H19b: 'sparno e denes' → NO follow-up question", result === null, `got ${JSON.stringify(result)}`);
+  assert("H19b: 'sparno e denes' → heatingFollowUp stays unset", d.heatingFollowUp === undefined, `got ${d.heatingFollowUp}`);
+})();
+
+// H19c: Cyrillic "спарно" (sultry) — same guard
+(() => {
+  const d = freshData();
+  const result = handleHeating("спарно е денес", d, 'heating');
+  assert("H19c: 'спарно е денес' → NO follow-up question", result === null, `got ${JSON.stringify(result)}`);
+  assert("H19c: 'спарно е денес' → heatingFollowUp stays unset", d.heatingFollowUp === undefined, `got ${d.heatingFollowUp}`);
+})();
+
+// H19d: "decentralno" (децентрално — decentralized heating) contains
+// "centralno" as a substring but is NOT district heating — must not set
+// heating=district (same substring disease as togas→gas, lead 5536052).
+(() => {
+  const d = freshData();
+  handleHeating("decentralno greenje", d, 'heating');
+  assert("H19d: 'decentralno greenje' → heating stays unset", d.heating === undefined, `got heating=${d.heating}`);
+})();
+
+// H19e: Cyrillic "децентрално" — same guard
+(() => {
+  const d = freshData();
+  handleHeating("децентрално греење", d, 'heating');
+  assert("H19e: 'децентрално греење' → heating stays unset", d.heating === undefined, `got heating=${d.heating}`);
+})();
+
+// H19f: standalone "centralno" still resolves to district
+(() => {
+  const d = freshData();
+  handleHeating("centralno", d, 'heating');
+  assert("H19f: 'centralno' → heating=district", d.heating === "district", `got heating=${d.heating}`);
 })();
 
 // H20: Cyrillic follow-up answer — "градско"
