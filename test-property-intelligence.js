@@ -24,7 +24,7 @@ import {
   tenantCategoryLabel
 } from './property-intelligence.js';
 import { extractPrice, extractPricePerSqm } from './property-extractor.js';
-import { runGlobalExtraction } from './data-collector.js';
+import { runGlobalExtraction, assessConfidence } from './data-collector.js';
 import { generateResponse } from './service.js';
 import { getNextMissingField } from './workflow.js';
 
@@ -143,6 +143,26 @@ assert('TP10 empty → null', extractTenantPreferences('') === null, '');
 // Cyrillic-only phrasings
 const tpCy = extractTenantPreferences('НЕ САКАМ МИЛЕНИЦИ');
 assert('TP11 Cyrillic negation', JSON.stringify(tpCy?.excluded) === JSON.stringify(['pets']), `got ${JSON.stringify(tpCy?.excluded)}`);
+
+// STRONG-NEGATOR PETS (reported, lead 3571074): the owner's no-pets answer
+// "nikako milenici" (никако = absolutely not) was NOT caught — the category
+// precedes the negator, so the before-slice was empty and pets fell through
+// to PREFERRED. Both word orders must register the pets exclusion.
+const tpCy2 = extractTenantPreferences('MILENICI NIKAKO');
+assert('TP11b "MILENICI NIKAKO" → excluded=[pets] (negator after category)',
+  JSON.stringify(tpCy2?.excluded) === JSON.stringify(['pets']),
+  `got ${JSON.stringify(tpCy2)}`);
+assert('TP11b preferred empty', (tpCy2?.preferred || []).length === 0, '');
+const tpCy3 = extractTenantPreferences('nikako milenici, se mi e novo');
+assert('TP11c "nikako milenici, se mi e novo" → excluded=[pets] (negator before category)',
+  JSON.stringify(tpCy3?.excluded) === JSON.stringify(['pets']),
+  `got ${JSON.stringify(tpCy3)}`);
+// GUARD: the after-category negator is scoped to STRONG "nikako" only — a
+// softer/distant tail must never flip a category the owner accepts.
+const tpCy4 = extractTenantPreferences('semejstva ne sakam deca');
+assert('TP11d "semejstva ne sakam deca" → families still preferred (distant ne not applied)',
+  (tpCy4?.preferred || []).includes('families') && !(tpCy4?.excluded || []).includes('families'),
+  `got ${JSON.stringify(tpCy4)}`);
 
 assert('label pets → миленици', tenantCategoryLabel('pets') === 'миленици', '');
 
@@ -563,22 +583,36 @@ for (const [input, label] of [
   ['PRIHAKAT SO MILENICI', 'prihakat verb'],
   ['SAKAM SO MILENICI', 'sakam verb'],
   ['SLOBODNO SO MILENICI', 'slobodno'],
-  ['DOZVOLENI SE KUCINJA', 'dogs allowed']
+  ['DOZVOLENI SE KUCINJA', 'dogs allowed'],
+  ['PAPAGAL MOZE', 'small caged pet ok']
 ]) {
   const r = runGlobalExtraction(input, { transactionType: 'rent' }, 'petsAllowed');
   assert(`PETS: "${input}" (${label}) → petsAllowed=true`, r.petsAllowed === true, `got ${JSON.stringify(r)}`);
 }
-// NEGATIVE answers → petsAllowed=false
+// NEGATIVE answers → petsAllowed=false (incl. the reported lead-3571074
+// phrasings that previously looped the question 4×: "nikako milenici",
+// "kuce, mace ne", "nikako osven papagal i ribi" — cats/dogs are the usual
+// pet problem; parrots/fish/small caged pets are not).
 for (const [input, label] of [
   ['NE, BEZ MILENICI', 'bez + pets'],
   ['NE SAKAM MILENICI', 'ne sakam + pets'],
   ['NE DOZVOLUVAM MILENICI', 'ne dozvoluvam + pets'],
   ['ZABRANETO E', 'zabraneto'],
   ['NEMA MILENICI', 'nema + pets'],
-  ['SAMO BEZ KUCINJA', 'samo bez + dogs']
+  ['SAMO BEZ KUCINJA', 'samo bez + dogs'],
+  ['NIKAKO MILENICI', 'nikako + pets'],
+  ['MILENICI NIKAKO', 'pets + nikako (reported)'],
+  ['nikako milenici, se mi e novo', 'reported first answer'],
+  ['KUCE, MACE NE', 'dog, cat no (reported)'],
+  ['kuce , mace ne', 'reported comma-spaced'],
+  ['NIKAKO OSVEN PAPAGAL I RIBI', 'nothing except parrot+fish (reported)'],
+  ['KUCE NE', 'single pet + trailing ne'],
+  ['MACA NE', 'cat + trailing ne']
 ]) {
   const r = runGlobalExtraction(input, { transactionType: 'rent' }, 'petsAllowed');
   assert(`PETS: "${input}" (${label}) → petsAllowed=false`, r.petsAllowed === false, `got ${JSON.stringify(r)}`);
+  assert(`PETS: "${input}" scores HIGH (no confirmation re-ask)`, assessConfidence('petsAllowed', false, input) === 'HIGH',
+    `got ${assessConfidence('petsAllowed', false, input)}`);
 }
 // Sale leads never extract petsAllowed
 const upPetsSale = runGlobalExtraction('DOZVOLENI SE MILENICI', { transactionType: 'sale' }, 'petsAllowed');
@@ -644,6 +678,68 @@ assert('PETS: next missing field after tenantPreferences is petsAllowed', wfPets
   assert('PETS-FLOW-4: flow advances to totalSqm',
     rP3.type === 'QUESTION' && rP3.nextField === 'totalSqm',
     `got [${rP3.type}] next=${rP3.nextField} "${(rP3.text || '').slice(0, 60)}"`);
+}
+
+// TWO-ATTEMPT CAP (reported, lead 3571074): the pets question used to rotate
+// through ALL 4 variants when the owner's no-pets answers weren't recognized
+// ("nikako milenici", "kuce, mace ne" → NOT caught → attempt 3, attempt 4...
+// "she asks 4 times for the pets ... like an idiot not understanding"). Now
+// the extraction catches those phrasings on attempt 1, AND the re-ask cap is
+// hard-set to 2: a genuinely unanswerable owner is skipped (stores null) after
+// the second ask, never looped. Variant rotation still applies within those 2
+// asks (attempt 1 = variant 0, attempt 2 = variant 1).
+{
+  const sP2 = {
+    adMemory: { transactionType: 'rent', propertyType: 'apartment', propertyLabel: 'станот' },
+    collectedData: {
+      cooperationAccepted: true, transactionType: 'rent',
+      monthlyRent: 350, monthlyRentConfidence: 0.95,
+      availableFrom: '2026-07-01', availableFromConfidence: 0.95,
+      tenantPreferences: { preferred: ['students'], excluded: [], notes: '' }, tenantPreferencesConfidence: 0.95
+    },
+    messages: [{ role: 'model', text: 'Дали се дозволени миленици во станот?' }],
+    phone: '+38976000013'
+  };
+  const rC1 = await generateResponse(sP2, 'NE ZNAM USTE');
+  assert('PETS-CAP-1: attempt 1 asks variant 0',
+    rC1.type === 'QUESTION' && rC1.nextField === 'petsAllowed' && (rC1.text || '').includes('Дали се дозволени миленици во станот?'),
+    `got [${rC1.type}] next=${rC1.nextField} "${(rC1.text || '').slice(0, 90)}"`);
+  const rC2 = await generateResponse(sP2, 'NE ZNAM USTE');
+  assert('PETS-CAP-2: attempt 2 rotates to variant 1',
+    rC2.type === 'QUESTION' && rC2.nextField === 'petsAllowed' && (rC2.text || '').includes('Дали прифаќате станари со миленици?'),
+    `got [${rC2.type}] next=${rC2.nextField} "${(rC2.text || '').slice(0, 90)}"`);
+  // Third non-answer → SKIPPED after 2 asks (never a 3rd/4th variant) → the
+  // flow advances to totalSqm with petsAllowedSkipped=true, storing null.
+  const rC3 = await generateResponse(sP2, 'NE ZNAM USTE');
+  assert('PETS-CAP-3: after 2 non-answers the pets field is skipped (no 3rd/4th ask)',
+    rC3.type === 'QUESTION' && rC3.nextField === 'totalSqm',
+    `got [${rC3.type}] next=${rC3.nextField} "${(rC3.text || '').slice(0, 90)}"`);
+  assert('PETS-CAP-4: petsAllowedSkipped=true after the 2-attempt cap',
+    sP2.collectedData.petsAllowedSkipped === true,
+    `got ${JSON.stringify(sP2.collectedData.petsAllowedSkipped)}`);
+  assert('PETS-CAP-5: petsAllowed stored null (nothing guessed)',
+    sP2.collectedData.petsAllowed === null || sP2.collectedData.petsAllowed === undefined,
+    `got ${JSON.stringify(sP2.collectedData.petsAllowed)}`);
+  // The reported first answer IS caught on attempt 1 — petsAllowed=false at
+  // HIGH, flow advances immediately, no re-ask at all.
+  const sP3 = {
+    adMemory: { transactionType: 'rent', propertyType: 'apartment', propertyLabel: 'станот' },
+    collectedData: {
+      cooperationAccepted: true, transactionType: 'rent',
+      monthlyRent: 350, monthlyRentConfidence: 0.95,
+      availableFrom: '2026-07-01', availableFromConfidence: 0.95,
+      tenantPreferences: { preferred: ['students'], excluded: [], notes: '' }, tenantPreferencesConfidence: 0.95
+    },
+    messages: [{ role: 'model', text: 'Дали се дозволени миленици во станот?' }],
+    phone: '+38976000014'
+  };
+  const rP4 = await generateResponse(sP3, 'nikako milenici, se mi e novo');
+  assert('PETS-FLOW-5: reported "nikako milenici, se mi e novo" → petsAllowed=false on attempt 1',
+    sP3.collectedData.petsAllowed === false,
+    `got ${JSON.stringify(sP3.collectedData.petsAllowed)}`);
+  assert('PETS-FLOW-6: flow advances to totalSqm immediately (no re-ask)',
+    rP4.type === 'QUESTION' && rP4.nextField === 'totalSqm',
+    `got [${rP4.type}] next=${rP4.nextField} "${(rP4.text || '').slice(0, 60)}"`);
 }
 
 // BARE "DA"/"NE" answers to the pets question work (BARE_YES_NO_FIELDS).

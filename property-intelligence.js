@@ -162,7 +162,7 @@ const TENANT_CONTEXT_RE = /stanari|станари|zakupci|закупци|klienti
 // fabricate an exclusion. The bare "ne" lives ONLY in the near-tail check
 // inside extractTenantPreferences (reviewer finding), where it can only be
 // the immediate token before the category ("NE DECA", "ne, starci").
-export const TENANT_EXCLUDE_RE = /(?:ne\s+sakam|не\s+сакам|ne\s+dozvoluvam|не\s+дозволувам|ne\s+primam|не\s+примам|odbivam|одбивам|bez|без|nema|нема|nemaat|немаат|ne\s+mi|не\s+ми|ne\s+gi|не\s+ги|ne\s+gu|не\s+гу)/i;
+export const TENANT_EXCLUDE_RE = /(?:ne\s+sakam|не\s+сакам|ne\s+dozvoluvam|не\s+дозволувам|ne\s+primam|не\s+примам|odbivam|одбивам|bez|без|nema|нема|nemaat|немаат|ne\s+mi|не\s+ми|ne\s+gi|не\s+ги|ne\s+gu|не\s+гу|(?:^|[^a-zа-я])nikako(?:$|[^a-zа-я])|(?:^|[^a-zа-я])никако(?:$|[^a-zа-я]))/i;
 
 // Positive phrases that mark PREFERRED categories. "preferiram semejstva",
 // "semejstva se ok", "dobri se studenti", "bi sakal vraboteni",
@@ -222,6 +222,10 @@ export function extractTenantPreferences(u) {
     // negation and misclassify "NE SAKAM MILENICI" as preferred (reported
     // lead 5502969 phrasing shape). A marker AFTER the category never flips it.
     let clauseBefore = null;
+    // The clause + match index of this category — needed BOTH for the
+    // before-slice polarity AND the after-category negator check below.
+    let catClause = null;
+    let catIdx = -1;
     for (const clause of polarityClauses) {
       let firstIdx = clause.search(cat.re);
       // ADJECTIVE-FORM GATE (reviewer finding): the -ski nationality
@@ -231,7 +235,12 @@ export function extractTenantPreferences(u) {
       if (firstIdx === -1 && cat.adjRe && TENANT_CONTEXT_RE.test(low)) {
         firstIdx = clause.search(cat.adjRe);
       }
-      if (firstIdx !== -1) { clauseBefore = clause.slice(0, firstIdx); break; }
+      if (firstIdx !== -1) {
+        clauseBefore = clause.slice(0, firstIdx);
+        catClause = clause;
+        catIdx = firstIdx;
+        break;
+      }
     }
     if (clauseBefore === null) continue;
     // UNCERTAINTY GUARD: "ne sum siguren za deca", "ne znam za starci" —
@@ -250,8 +259,22 @@ export function extractTenantPreferences(u) {
     // The verb forms ("ne sakam", "ne dozvoluvam", "bez", "nema") stay
     // whole-clause in TENANT_EXCLUDE_RE.
     const clauseTail = clauseBefore.trim().split(/\s+/).slice(-2).join(' ');
-    const isExcluded = TENANT_EXCLUDE_RE.test(clauseBefore) ||
+    let isExcluded = TENANT_EXCLUDE_RE.test(clauseBefore) ||
       /(?:^|\s)(?:ne|не)(?=[\s,;:!?.]|$)/i.test(clauseTail);
+    // AFTER-CATEGORY NEGATOR (reported, lead 3571074): "MILENICI NIKAKO" —
+    // the category PRECEDES the strong negator, so the before-slice is empty
+    // and the checks above miss it → pets fell through to PREFERRED (wrong).
+    // Only the strong "nikako"/"никако" (absolutely not) directly after the
+    // category is consulted (within the same clause) — a distant or softer
+    // tail ("milenici se dozvoleni, ama...", "semejstva ne sakam deca") can
+    // never flip the category the owner explicitly accepts.
+    if (!isExcluded && catClause !== null) {
+      const afterIdx = catIdx + ((catClause.match(cat.re) || [''])[0] || '').length;
+      const afterCat = catClause.slice(afterIdx);
+      if (/(?:^|[\s,;:])nikako(?:$|[\s,;:!?.])|(?:^|[\s,;:])никако(?:$|[\s,;:!?.])/i.test(afterCat)) {
+        isExcluded = true;
+      }
+    }
     const isPreferred = !isExcluded && TENANT_PREFER_RE.test(clauseBefore);
     if (isExcluded) excluded.push(cat.key);
     else preferred.push(cat.key); // explicit prefer OR bare answer → preference

@@ -78,10 +78,15 @@ function extractTenantPrefs(u, data) {
 // extractor maps explicit allow/deny phrases with pet vocabulary:
 //   POSITIVE: "da, milenici se dozvoleni", "dozvoleni se", "moze so
 //             milenici", "nema problem so milenici", "prihakat", "sakam so
-//             milenici", "slobodno so milenici"...
+//             milenici", "slobodno so milenici", "papagal moze" (small
+//             caged pets are never the problem — parrots/fish are fine)...
 //   NEGATIVE: "ne, bez milenici", "ne sakam milenici", "ne dozvoluvam
 //             milenici", "zabraneto", "nema milenici", "samo bez
-//             kucinja"...
+//             kucinja", "nikako milenici" (никако = absolutely not),
+//             "kuce, mace ne" (cats/dogs are the usual pet problem — a
+//             trailing "ne" after the pet list is a ban), "nikako osven
+//             papagal i ribi" (nothing except parrot and fish → cats/dogs
+//             NOT allowed)...
 // Bare "da"/"ne" answers are handled by the BARE_YES_NO_FIELDS mapping in
 // runGlobalExtraction (preferredField path only). REQUIRES pet vocabulary —
 // a bare "ne" in another context can never become petsAllowed=false. The
@@ -98,13 +103,13 @@ function extractPetsAllowed(u, data) {
   // matches ANY "milenici" mention, so "ne sakam milenici" would otherwise
   // collect petsAllowed=true. Covers both word orders, the definite forms
   // ("milenicite ne se dozvoleni"), and the "samo bez" restriction family.
-  if (/(?:ne|не)\s+(?:sakam|сакам|dozvoluvam|дозволувам|primam|примам)\s+(?:milenici|миленици|kucinja|кучиња|kuche|куче|macka|мачка)|(?:ne|не)\s+se\s+(?:dozvoleni|дозволени)\s+(?:milenici|миленици|kucinja|кучиња)|(?:milenici|миленици|kucinja|кучиња)\s+(?:ne|не)\s+se\s+(?:dozvoleni|дозволени)|bez\s+(?:milenici|миленици|kucinja|кучиња|kuche|куче|macka|мачка|zivotni|животни|zivotno|животно)|nema\s+(?:milenici|миленици|kucinja|кучиња|zivotni|животни)|samo\s+bez\s+(?:milenici|миленици|kucinja|кучиња)|zabraneto|забрането|zabraneni|забранети|ne\s+moze\s+(?:milenici|миленици)|не\s+може\s+(?:миленици|миленици)/i.test(u)) return { petsAllowed: false };
+  if (/(?:ne|не)\s+(?:sakam|сакам|dozvoluvam|дозволувам|primam|примам)\s+(?:milenici|миленици|kucinja|кучиња|kuche|куче|kuce|куце|mace|маче|maca|маца|macka|мачка)|(?:ne|не)\s+se\s+(?:dozvoleni|дозволени)\s+(?:milenici|миленици|kucinja|кучиња)|(?:milenici|миленици|kucinja|кучиња)\s+(?:ne|не)\s+se\s+(?:dozvoleni|дозволени)|bez\s+(?:milenici|миленици|kucinja|кучиња|kuche|куче|kuce|куце|mace|маче|maca|маца|macka|мачка|zivotni|животни|zivotno|животно)|nema\s+(?:milenici|миленици|kucinja|кучиња|zivotni|животни)|samo\s+bez\s+(?:milenici|миленици|kucinja|кучиња)|zabraneto|забрането|zabraneni|забранети|ne\s+moze\s+(?:milenici|миленици)|не\s+може\s+(?:миленици|миленици)|nikako\s+(?:milenici|миленици|kucinja|кучиња|kuche|куче|kuce|куце|mace|маче|maca|маца|macka|мачка|zivotni|животни|pets)|(?:milenici|миленици|kucinja|кучиња|zivotni|животни)\s+nikako|(?:kuche|куче|kuce|куце|mace|маче|maca|маца|macka|мачка|kucinja|кучиња)(?:[\s,;]+(?:kuche|куче|kuce|куце|mace|маче|maca|маца|macka|мачка|kucinja|кучиња))*[\s,;]+(?:ne|не)\s*$|(?:nikako|никако)\s+(?:osven|освен)\s+(?:milenici|миленици|kucinja|кучиња|kuche|куче|kuce|куце|mace|маче|maca|маца|macka|мачка|zivotni|животни|papagal|папагал|ribi|риби|ptici|птици|pets)/i.test(u)) return { petsAllowed: false };
   // POSITIVE: pet vocabulary with an allow verb/adjective. Both word orders:
   // pets-first ("milenici se dozvoleni") and allow-word-first ("dozvoleni se
   // kucinja", "moze so milenici"). The separator between the allow word and
   // the pet word is "se"/"се" (copula) OR "so"/"со" (with) — "dozvoleni se
   // kucinja" (dogs ARE allowed) and "moze so milenici" (OK with pets).
-  if (/(?:milenici|миленици|kucinja|кучиња|kuche|куче|macka|мачка|zivotni|животни|pets)\s+(?:se\s+)?(?:dozvoleni|дозволени|prihakat|прифаќаат|ok|ок|moze|може|slobodni|слободни)|(?:dozvoleni|дозволени|prihakat|прифаќаат|moze|може|slobodno|слободно|nema\s+problem|нема\s+проблем|sakam|сакам)\s+(?:(?:se|се|so|со)\s+)?(?:milenici|миленици|kucinja|кучиња|kuche|куче|macka|мачка|zivotni|животни|pets)/i.test(u)) return { petsAllowed: true };
+  if (/(?:milenici|миленици|kucinja|кучиња|kuche|куче|kuce|куце|mace|маче|maca|маца|macka|мачка|zivotni|животни|papagal|папагал|ribi|риби|ptici|птици|pets)\s+(?:se\s+)?(?:dozvoleni|дозволени|prihakat|прифаќаат|ok|ок|moze|може|slobodni|слободни)|(?:dozvoleni|дозволени|prihakat|прифаќаат|moze|може|slobodno|слободно|nema\s+problem|нема\s+проблем|sakam|сакам)\s+(?:(?:se|се|so|со)\s+)?(?:milenici|миленици|kucinja|кучиња|kuche|куче|kuce|куце|mace|маче|maca|маца|macka|мачка|zivotni|животни|papagal|папагал|ribi|риби|ptici|птици|pets)/i.test(u)) return { petsAllowed: true };
   return null;
 }
 
@@ -1109,7 +1114,7 @@ const FIELD_CONFIDENCE_KEYWORDS = {
   // PETS ALLOWED — pet vocabulary is unambiguous: the dedicated extractor
   // only fires on allow/deny phrases WITH pet words, so any extraction is a
   // direct answer to "Дали се дозволени миленици?" → HIGH.
-  'petsAllowed': /milenici|миленици|kucinja|кучиња|kuche|куче|macka|мачка|zivotni|животни|zivotno|животно|pets|dozvolen|дозволен|zabranet|забранет/i,
+  'petsAllowed': /milenici|миленици|kucinja|кучиња|kuche|куче|kuce|куце|mace|маче|maca|маца|macka|мачка|zivotni|животни|zivotno|животно|papagal|папагал|ribi|риби|ptici|птици|pets|dozvolen|дозволен|zabranet|забранет|nikako|никако/i,
   // PRICE PER M² — "e/е za m2" phrasings are an explicit per-sqm answer.
   'pricePerSqm': /m2|м2|kvadrat|квадрат|kvadrata|квадрата/i
 };

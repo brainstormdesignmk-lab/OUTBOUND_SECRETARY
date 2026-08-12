@@ -46,8 +46,18 @@ function pickRotatingVariant(field, attempts, propertyLabel) {
 }
 
 /** Max attempts before skip for a field: variant count for rotating fields,
- *  2 for everything else. Math.max(1, …) guards an empty variant list. */
+ *  2 for everything else. Math.max(1, …) guards an empty variant list.
+ *
+ *  PETS-ALLOWED HARD CAP (reported, lead 3571074): the dedicated pets
+ *  question must NEVER loop through all 4 variants. It is a YES/NO binary
+ *  whose answers the owner already gave clearly ("milenici nikako", "kuce,
+ *  mace ne", bare "ne") — a 4× rotation made Ana look like she wasn't
+ *  understanding ("she asks 4 times for the pets … like an idiot not
+ *  understanding"). Cap at the generic 2 so the second non-answer skips the
+ *  field (stores null) and the flow moves on. The variant rotation still
+ *  applies WITHIN those 2 asks (attempt 1 = variant 0, attempt 2 = variant 1). */
 function rotatingMaxAttempts(field) {
+  if (field === 'petsAllowed') return 2;
   const variants = ROTATING_QUESTION_VARIANTS[field];
   return variants && variants.length > 0 ? Math.max(1, variants.length) : 2;
 }
