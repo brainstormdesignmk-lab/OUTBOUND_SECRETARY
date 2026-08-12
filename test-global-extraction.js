@@ -311,6 +311,10 @@ result = runGlobalExtraction("na potkrovje od 10", {}, "floor");
 assert("E2b: 'na potkrovje od 10' → floor=11", result.floor === 11, `got ${result.floor}`);
 assert("E2b: 'na potkrovje od 10' → totalFloors=10", result.totalFloors === 10, `got ${result.totalFloors}`);
 
+// Test 16c: A year volunteered WITH context in global discovery still captures
+result = runGlobalExtraction("izgradena 2010", {});
+assert("E2c: global 'izgradena 2010' → yearBuilt=2010 (year context unlocks)", result.yearBuilt === 2010, `got ${result.yearBuilt}`);
+
 // Test 17: Ordinal floor
 result = runGlobalExtraction("vtor kat", {});
 assert("E3: 'vtor kat' → floor=2", result.floor === 2, `got ${result.floor}`);

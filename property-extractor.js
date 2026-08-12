@@ -1390,6 +1390,21 @@ export function parseYearBuilt(text) {
     // is a compound number, never a decade. Boundary is CYRILLIC-AWARE
     // (?=$|[^a-zа-я\d]) — JS `\b` is ASCII-only and fails after "шес".
     if (/^[iи]\s+(?:eden|edna|edno|dva|dve|tri|cetiri|pet|sest|ses|sedum|osum|devet|deset|шес)(?=$|[^a-zа-я\d])/i.test(afterMatch)) return null;
+    // PURE-PHRASE / YEAR-CONTEXT GATE (reported): a 2-digit year is only ever
+    // accepted when the message is (a) PURELY NUMERIC — a bare direct answer
+    // to the construction-year question ("98" → 1998, "10" → 2010), possibly
+    // with an annoyed-repeat or uncertainty tail ("98 TI KAZAV", "98 mislam")
+    // — or (b) carries explicit year vocabulary ("izgraden 98", "98 godina").
+    // Any OTHER 2-digit number in a mixed message is a different field's
+    // answer: scanHistoryForField joins ALL owner messages and re-runs this
+    // extractor, so a leftover number would otherwise be crowned yearBuilt and
+    // the construction-year question SILENTLY SKIPPED. Reported: the
+    // potkrovje-deferral totalFloors answer "10" (combined history
+    // "NA POTKROVJE ... 10") became yearBuilt=2010 — the question was never
+    // asked. The old comment claimed this gate but the code never enforced it.
+    const pureNumeric = /^\s*\d{2}(?:\s+(?:ti\s+|ти\s+)?(?:kazav|кажав|rekov|реков))?(?:\s+(?:mislam|мислам|okolu|околу|mozda|можеби|можда|valjda|ваљда|negde|негде|neshto|нешто)(?:\s+vaka|\s+вака)?)?[.,!?]*\s*$/i.test(text);
+    const hasYearContext = /izgraden|изграден|izgradena|изградена|graden|граден|gradena|градена|zidan|ѕидан|zidana|ѕидана|зидана|godina|година|godinata|годината|izgradb|изградб|gradb|градб|praven|правен|napraven|направен/i.test(text);
+    if (!pureNumeric && !hasYearContext) return null;
     if (year >= 0 && year <= 30) return 2000 + year;
     if (year >= 70 && year <= 99) return 1900 + year;
   }

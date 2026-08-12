@@ -132,6 +132,33 @@ function freshSaleSession() {
   assert('B4: next question is elevator', res.type === 'QUESTION' && /лифт/i.test(res.text || ''), `got [${res.type}] "${(res.text || '').substring(0, 140)}"`);
 }
 
+// B6: the potkrovje-deferral "10" (totalFloors answer) must NEVER backfill
+// yearBuilt from the combined owner history (reported: HISTORY SCAN found
+// yearBuilt=2010 from combined messages and the construction-year question
+// was silently skipped).
+{
+  const s = freshSaleSession();
+  await generateResponse(s, 'NA POTKROVJE');
+  await generateResponse(s, '10');
+  // Advance collectedData to just-before yearBuilt and take a turn — the
+  // pre-question history scan must NOT crown yearBuilt from the "10".
+  s.collectedData.elevator = true; s.collectedData.elevatorConfidence = 0.95;
+  s.collectedData.heating = 'central'; s.collectedData.heatingConfidence = 0.95;
+  s.collectedData.heatingType = 'central'; s.collectedData.heatingTypeConfidence = 0.95;
+  s.collectedData.ac = true; s.collectedData.acConfidence = 0.95;
+  s.collectedData.parking = true; s.collectedData.parkingConfidence = 0.95;
+  s.collectedData.parkingType = 'public'; s.collectedData.parkingTypeConfidence = 0.95;
+  s.collectedData.orientation = 'jug'; s.collectedData.orientationConfidence = 0.95;
+  s.collectedData.furnished = true; s.collectedData.furnishedConfidence = 0.95;
+  s.collectedData.furnishedLevel = 'polno'; s.collectedData.furnishedLevelConfidence = 0.95;
+  const res = await generateResponse(s, 'da');
+  assert('B6: yearBuilt NOT backfilled from the totalFloors "10"',
+    s.collectedData.yearBuilt === undefined, `got ${JSON.stringify(s.collectedData.yearBuilt)}`);
+  assert('B6: construction-year question IS ASKED (not silently skipped)',
+    res.type === 'QUESTION' && /годин/i.test(res.text || ''),
+    `got [${res.type}] "${(res.text || '').substring(0, 140)}"`);
+}
+
 // ------------------------------------------------------------
 // SUMMARY
 // ------------------------------------------------------------

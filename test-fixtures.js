@@ -262,6 +262,25 @@ assertEqual(parseYearBuilt("2000ta"), 2000, "'2000ta' → 2000");  // B11: Word-
   assertEqual(parseYearBuilt("devedeset"), 1990, "B18: bare 'devedeset' (90s Latin) → 1990");
   assertEqual(parseYearBuilt("sedumdeset"), 1970, "B18: bare 'sedumdeset' (70s Latin) → 1970");
 
+  // B19: PURE-PHRASE / YEAR-CONTEXT GATE (reported) — a 2-digit number in a
+  // MIXED message is a different field's answer. scanHistoryForField joins
+  // all owner messages, so a leftover "10" (the potkrovje-deferral
+  // totalFloors answer, combined history "NA POTKROVJE ... 10") must never
+  // become yearBuilt=2010 and silently skip the construction-year question.
+  assertEqual(parseYearBuilt("NA POTKROVJE 10"), null, "B19: 'NA POTKROVJE 10' → null (potkrovje totalFloors answer is NOT a year)");
+  assertEqual(parseYearBuilt("280000 evra 75 nema terasa 3 NA POTKROVJE 10"), null, "B19: full combined history → null (no year volunteered)");
+  assertEqual(parseYearBuilt("10 katnica"), null, "B19: '10 katnica' → null (building-story context)");
+  // Bare 2-digit DIRECT answers still map (the legit case)
+  assertEqual(parseYearBuilt("98"), 1998, "B19: bare '98' → 1998 (direct answer)");
+  assertEqual(parseYearBuilt("10"), 2010, "B19: bare '10' → 2010 (direct answer)");
+  assertEqual(parseYearBuilt("98 TI KAZAV"), 1998, "B19: '98 TI KAZAV' → 1998 (annoyed repeat)");
+  assertEqual(parseYearBuilt("98 mislam"), 1998, "B19: '98 mislam' → 1998 (uncertainty tail)");
+  assertEqual(parseYearBuilt("98."), 1998, "B19: '98.' → 1998 (sentence punctuation on a bare answer)");
+  assertEqual(parseYearBuilt("98 neshto vaka"), 1998, "B19: '98 neshto vaka' → 1998 (two-word uncertainty phrase)");
+  // Year-context words still unlock the 2-digit fallback
+  assertEqual(parseYearBuilt("izgraden 98"), 1998, "B19: 'izgraden 98' → 1998");
+  assertEqual(parseYearBuilt("98 godina"), 1998, "B19: '98 godina' → 1998");
+
 // ============================================================
 // TEST GROUP: parseOrdinalFloor
 // ============================================================
