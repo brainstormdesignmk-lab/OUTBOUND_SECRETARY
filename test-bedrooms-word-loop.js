@@ -71,13 +71,16 @@ assert('A6: "triest" (30) is NOT a bedroom direct answer (cap 20)',
 assert('A7: "dvaeset" (20) phantom — countBedrooms=null → NOT HIGH',
   assessConfidence('bedrooms', 20, 'dvaeset') !== 'HIGH',
   `got ${assessConfidence('bedrooms', 20, 'dvaeset')}`);
-// The parser misreads the Serbian-style "dvadeset" (20) as 10 via the
-// "deset" substring, and countBedrooms extracts 10 — HIGH is consistent
-// with extraction (both 10), even though the raw parse is off. This
-// documents that the gate follows the extractor, for better or worse.
-assert('A8: "dvadeset" → extraction=10, so HIGH fires on 10 (consistent)',
-  assessConfidence('bedrooms', 10, 'dvadeset') === 'HIGH',
-  `got ${assessConfidence('bedrooms', 10, 'dvadeset')}`);
+// The Serbian-style "dvadeset" (20) used to MISREAD as 10 via the "deset"
+// substring, and countBedrooms then extracted 10 — HIGH fired on 10, "for
+// better or worse" (documenting a misparse). The truncated-tens family fix
+// (reported lead 5531598) added the correct "dvadese"→20 form, so the
+// misparse is gone: the parser reads 20, countBedrooms' bare-word fallback
+// caps at 0-10 (20 > cap → null), and the phantom 20 is NOT accepted at
+// HIGH — the same policy as its sibling "dvaeset" (A7).
+assert('A8: "dvadeset" → parser now reads 20 (misparse fixed), countBedrooms=null → NOT HIGH',
+  assessConfidence('bedrooms', 20, 'dvadeset') !== 'HIGH',
+  `got ${assessConfidence('bedrooms', 20, 'dvadeset')}`);
 // Other fields unaffected: the bedrooms branch must not leak into totalSqm
 // (a bare "tri" can never be a sqm value — extraction never fires on it,
 // and the pre-existing word branch is deliberately field-agnostic/inert).

@@ -205,43 +205,57 @@ function extractTotalSqm(u, data) {
     }
   }
 
-  // BARE NUMBER FALLBACK — FRUSTRATED-REPEAT STRIP ONLY (reported): "86 TI
-  // KAZAV" ("86, I told you") — the owner repeats the totalSqm answer with an
-  // annoyance suffix because Ana re-asked. The suffix used to break the
-  // whole-message bare-number check below, so totalSqm was NOT collected on
-  // the first attempt and Ana asked "Дали точната вредност е 86?" (same
-  // re-ask loop as the totalFloors "7 TI KAZAV" bug). Strip the suffix first
-  // ("86 TI KAZAV" → "86", "OSUMDESET TI REKOV" → "OSUMDESET") and only then
-  // accept a bare number. Trailing punctuation after the marker is dropped
-  // too ("86, TI KAZAV!" → "86"). This is deliberately STRICTER than the
-  // totalFloors fallback: a plain bare number without an annoyed marker must
-  // still NOT guess (Ana must never invent data) — the workflow asks the
-  // totalSqm question properly in DATA_COLLECTION.
+  // BARE DIRECT-ANSWER FALLBACK (reported, lead 5531598): the owner answered
+  // the totalSqm question with a number in WORDS — "SEDUMDESE I PET" (75) —
+  // with no "m2"/"kvadrati" keyword and no annoyed-repeat marker. The old
+  // STRIP-GATED fallback only fired when the marker was present ("86 TI
+  // KAZAV" → 86), so a PLAIN direct answer was never collected → totalSqm
+  // SKIPPED after the 2-attempt cap (reported "SQM NOT RECOGNIZED"). Now any
+  // whole-message bare number phrase (digits or words, after stripping an
+  // optional annoyed marker + trailing punctuation) is accepted as the direct
+  // answer to the just-asked sqm question — the same direct-answer class as
+  // the floor/totalFloors bare fallbacks. Safety is unchanged elsewhere:
+  //   - Global discovery (STEP 2) skips extractTotalSqm on bare numbers via
+  //     NUMBER_SNIFFING_EXTRACTORS + isBareNumber, so a bare "86" typed while
+  //     NO sqm question is current still never guesses.
+  //   - STEP 1 only runs this extractor when preferredField === 'totalSqm'
+  //     (totalSqm is standalone — not in any FIELD_GROUP), so the fallback
+  //     fires exactly when the owner is answering the sqm question.
+  //   - The PURE NUMBER PHRASE GUARD below still rejects any text containing
+  //     a non-number word (evra, mesecno, kvadrata, sobi...) — the
+  //     history-scan rent-420 bleed stays dead (SQH2 pins it).
+  //   - HISTORY-SCAN caveat: scanHistoryForField calls the extractor DIRECTLY
+  //     on the joined owner text (no STEP 1/STEP 2 guards). A joined history
+  //     that is PURELY numeric (every owner message a bare number phrase) can
+  //     now crown totalSqm — accepted, because extractTotalFloors already
+  //     behaves identically (its bare fallback is not gated at all), and in
+  //     practice a price answer like "350" leaves "da"/"evra"-shaped tokens
+  //     in the joined text that the pure-phrase guard rejects ("350 da" ✗).
+  //   - "86 TI KAZAV" still strips to "86" and collects on the FIRST attempt
+  //     (no needless "Дали точната вредност е 86?" re-ask).
   const uRepeatStrippedSqm = u.replace(ANNOYED_REPEAT_RE, ' ').replace(/[.,:;!?\-]+$/, '').trim();
-  if (uRepeatStrippedSqm !== u.trim()) {
-    const bareSqmDigit = uRepeatStrippedSqm.match(/^(\d{1,4})$/);
-    if (bareSqmDigit) {
-      const n = parseInt(bareSqmDigit[1], 10);
-      if (n >= 10 && n <= 999) return { totalSqm: n };
-    }
-    // PURE NUMBER PHRASE GUARD (reported, lead 3571074): the annoyed-repeat
-    // fallback must only accept a message whose ENTIRE content is a bare
-    // number phrase ("86 TI KAZAV" → "86", "OSUMDESET I SEST TI REKOV" →
-    // "OSUMDESET I SEST"). On the history-scan path ALL owner messages are
-    // joined into one text, and parseNumberWords is a GREEDY scanner — it
-    // found the RENT ("cetrsto dvaeset" in "... ti kazav cetrsto dvaeset
-    // evra mesecno ...") and crowned totalSqm=420, so the sqm question was
-    // NEVER asked (reported). The guard rejects any text containing a
-    // non-number word (evra, mesecno, kvadrata, sobi...), keeping the legit
-    // bare repeats working. Conservative tradeoff (reviewer-acknowledged):
-    // a "DA 86 TI KAZAV" prefix (stripped → "DA 86") is deliberately NOT
-    // accepted — "da" is not a number token — the confirmatory "Дали
-    // точната вредност е 86?" re-ask covers that shape safely.
-    const bareSqmWord = uRepeatStrippedSqm.trim();
-    if (isBareNumberPhrase(bareSqmWord)) {
-      const w = parseNumberWords(bareSqmWord);
-      if (w !== null && w >= 10 && w <= 999) return { totalSqm: w };
-    }
+  const bareSqmDigit = uRepeatStrippedSqm.match(/^(\d{1,4})$/);
+  if (bareSqmDigit) {
+    const n = parseInt(bareSqmDigit[1], 10);
+    if (n >= 10 && n <= 999) return { totalSqm: n };
+  }
+  // PURE NUMBER PHRASE GUARD (reported, lead 3571074): the bare direct-answer
+  // fallback must only accept a message whose ENTIRE content is a bare number
+  // phrase ("SEDUMDESE I PET" → 75, "86 TI KAZAV" → "86", "OSUMDESET I SEST
+  // TI REKOV" → "OSUMDESET I SEST"). On the history-scan path ALL owner
+  // messages are joined into one text, and parseNumberWords is a GREEDY
+  // scanner — it found the RENT ("cetrsto dvaeset" in "... ti kazav cetrsto
+  // dvaeset evra mesecno ...") and crowned totalSqm=420, so the sqm question
+  // was NEVER asked (reported). The guard rejects any text containing a
+  // non-number word (evra, mesecno, kvadrata, sobi...), keeping the legit
+  // bare answers working. Conservative tradeoff (reviewer-acknowledged): a
+  // "DA 86" prefix is deliberately NOT accepted — "da" is not a number token
+  // — the confirmatory "Дали точната вредност е 86?" re-ask covers that
+  // shape safely.
+  const bareSqmWord = uRepeatStrippedSqm.trim();
+  if (isBareNumberPhrase(bareSqmWord)) {
+    const w = parseNumberWords(bareSqmWord);
+    if (w !== null && w >= 10 && w <= 999) return { totalSqm: w };
   }
   return null;
 }

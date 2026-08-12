@@ -16,8 +16,12 @@
 // Fixes under test:
 //   1. ANNOYED_REPEAT_RE now strips BOTH word orders ("350 TI KAZAV" and
 //      "TI KAZAV 350") with punctuation tolerance ("350, TI KAZAV!").
-//   2. extractTotalSqm gets a STRIP-GATED bare-number fallback ("86 TI
-//      KAZAV" → 86; a plain bare "86" still does NOT guess).
+//   2. extractTotalSqm gets a BARE DIRECT-ANSWER fallback ("86 TI KAZAV" →
+//      86 AND a plain bare "86" answering the totalSqm question → 86 —
+//      reported lead 5531598: "SEDUMDESE I PET" (75) was skipped because the
+//      old STRIP-GATED fallback needed an annoyed marker). Global discovery
+//      still never guesses (STEP 2 NUMBER_SNIFFING guard) and the
+//      pure-number-phrase guard still blocks the history-scan rent-420 bleed.
 //   3. assessConfidence: totalSqm bare digits 10-999 are HIGH (direct sqm
 //      answers), and PRICE repeats (cleanPrice/monthlyRent) are HIGH ONLY
 //      when the strip fires — a bare "350" stays MEDIUM (RT3d4 preserved).
@@ -53,10 +57,24 @@ assert('A2: "осумдесет и шест ти реков" → totalSqm=86', r
 result = runGlobalExtraction('86, TI KAZAV!', {}, 'totalSqm');
 assert('A3: "86, TI KAZAV!" (punctuation) → totalSqm=86', result.totalSqm === 86, `got ${JSON.stringify(result.totalSqm)}`);
 
-// Plain bare number must NOT guess (strip did not fire)
+// Plain bare number IS the direct answer to the just-asked totalSqm
+// question — collected now (reported lead 5531598). The old strict gate
+// ("no guess without annoyed marker") caused "SEDUMDESE I PET" → skipped.
 result = runGlobalExtraction('86', {}, 'totalSqm');
-assert('A4: plain bare "86" → NO totalSqm (no guess without annoyed marker)',
+assert('A4: plain bare "86" with preferredField=totalSqm → totalSqm=86 (direct answer)',
+  result.totalSqm === 86, `got ${JSON.stringify(result.totalSqm)}`);
+// GLOBAL DISCOVERY still never guesses — no preferredField → bare number
+// hits the STEP 2 NUMBER_SNIFFING guard, so extractTotalSqm is skipped.
+result = runGlobalExtraction('86', {});
+assert('A4b: plain bare "86" WITHOUT preferredField → NO totalSqm (global no-guess preserved)',
   result.totalSqm === undefined, `got ${JSON.stringify(result.totalSqm)}`);
+// The reported lead 5531598 phrasing — 75 in WORDS, no m2 keyword, no marker
+result = runGlobalExtraction('SEDUMDESE I PET', {}, 'totalSqm');
+assert('A4c: "SEDUMDESE I PET" → totalSqm=75 (word direct answer, truncated tens)',
+  result.totalSqm === 75, `got ${JSON.stringify(result.totalSqm)}`);
+result = runGlobalExtraction('седумдесе и пет', {}, 'totalSqm');
+assert('A4d: Cyrillic "седумдесе и пет" → totalSqm=75',
+  result.totalSqm === 75, `got ${JSON.stringify(result.totalSqm)}`);
 
 // Out-of-range digit must not fire
 result = runGlobalExtraction('3 TI KAZAV', {}, 'totalSqm');

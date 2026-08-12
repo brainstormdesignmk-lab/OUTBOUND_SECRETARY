@@ -59,7 +59,16 @@ export function parseMacedonianNumber(text) {
     'vtor': 2, 'tret': 3, 'cetvrt': 4, 'petti': 5,
     'sesti': 6, 'sedmi': 7, 'osmi': 8, 'devetti': 9,
     'seeset': 60, 'шеесет': 60,
-    'peeset': 50, 'пеесет': 50
+    'peeset': 50, 'пеесет': 50,
+    // FINAL-T-DROPPED TENS (reported, lead 5531598): "SEDUMDESE" (70) — the
+    // owner keeps the d but drops the final t/т ("sedumdese"), unlike the
+    // d-dropping "sedumese" above. The longest-first sort makes each full
+    // form ("sedumdeset") win over its truncated prefix ("sedumdese").
+    'sedumdese': 70, 'седумдесе': 70, 'osumdese': 80, 'осумдесе': 80,
+    'osemdese': 80, 'осемдесе': 80, 'triese': 30, 'триесе': 30,
+    'tridese': 30, 'тридесе': 30, 'cetiriese': 40, 'четириесе': 40,
+    'cetiridese': 40, 'четиридесе': 40, 'pedese': 50, 'педесе': 50,
+    'dvadese': 20, 'двадесе': 20, 'devedese': 90, 'деведесе': 90
   };
 
   const sorted = Object.entries(words).sort((a, b) => b[0].length - a[0].length);
@@ -273,6 +282,12 @@ export function parseNumberWords(text) {
       // over "seese". Mirrors the irregularTens additions above.
       'seese','шесе','peese','пеесе','dvaese','дваесе','oseese','осеесе',
       'sedumese','седумесе','deveese','девеесе',
+      // Final-t-dropped forms (reported, lead 5531598) — "trista sedumdese i
+      // pet" (300+70+5 = 375) must merge like its d-dropping siblings.
+      'sedumdese','седумдесе','osumdese','осумдесе','osemdese','осемдесе',
+      'triese','триесе','tridese','тридесе','cetiriese','четириесе',
+      'cetiridese','четиридесе','pedese','педесе','dvadese','двадесе',
+      'devedese','деведесе',
       'deset','десет','eeset','еесет','eset','есет']
       .sort((a, b) => b.length - a.length);
     const tensDirectMap = {
@@ -286,7 +301,12 @@ export function parseNumberWords(text) {
       'stopeeset': 150, 'стопеесет': 150, 'stodvaeset': 120, 'стодваесет': 120,
       'seese': 60, 'шесе': 60, 'peese': 50, 'пеесе': 50,
       'dvaese': 20, 'дваесе': 20, 'oseese': 80, 'осеесе': 80,
-      'sedumese': 70, 'седумесе': 70, 'deveese': 90, 'девеесе': 90
+      'sedumese': 70, 'седумесе': 70, 'deveese': 90, 'девеесе': 90,
+      'sedumdese': 70, 'седумдесе': 70, 'osumdese': 80, 'осумдесе': 80,
+      'osemdese': 80, 'осемдесе': 80, 'triese': 30, 'триесе': 30,
+      'tridese': 30, 'тридесе': 30, 'cetiriese': 40, 'четириесе': 40,
+      'cetiridese': 40, 'четиридесе': 40, 'pedese': 50, 'педесе': 50,
+      'dvadese': 20, 'двадесе': 20, 'devedese': 90, 'деведесе': 90
     };
     for (const { prefix, hVal } of mergedHT) {
       const pMatch = u.match(prefix);
@@ -362,7 +382,20 @@ export function parseNumberWords(text) {
       // Full forms above are checked first in this map's iteration order.
       'seese': 60, 'шесе': 60, 'peese': 50, 'пеесе': 50,
       'dvaese': 20, 'дваесе': 20, 'oseese': 80, 'осеесе': 80,
-      'sedumese': 70, 'седумесе': 70, 'deveese': 90, 'девеесе': 90
+      'sedumese': 70, 'седумесе': 70, 'deveese': 90, 'девеесе': 90,
+      // FINAL-T-DROPPED FORMS (reported, lead 5531598): "SEDUMDESE I PET" =
+      // "sedumdeset i pet" (75) — the owner drops the final t/т of the
+      // -deset tens while KEEPING the d ("sedumdese", "osumdese"), unlike
+      // the d-dropping forms above ("sedumese"). Both families exist in
+      // the wild, so the full truncated-tens spectrum is needed. Insertion
+      // order puts the FULL forms first, so these never steal a match from
+      // "sedumdeset" etc.; the boundary-guarded truncatedTens pass below
+      // re-verifies them for standalone use.
+      'sedumdese': 70, 'седумдесе': 70, 'osumdese': 80, 'осумдесе': 80,
+      'osemdese': 80, 'осемдесе': 80, 'triese': 30, 'триесе': 30,
+      'tridese': 30, 'тридесе': 30, 'cetiriese': 40, 'четириесе': 40,
+      'cetiridese': 40, 'четиридесе': 40, 'pedese': 50, 'педесе': 50,
+      'dvadese': 20, 'двадесе': 20, 'devedese': 90, 'деведесе': 90
     };
     for (const [word, val] of Object.entries(irregularTens)) {
       const idx = u.indexOf(word);
@@ -386,7 +419,16 @@ export function parseNumberWords(text) {
       const truncatedTens = {
         'seese': 60, 'шесе': 60, 'peese': 50, 'пеесе': 50,
         'dvaese': 20, 'дваесе': 20, 'oseese': 80, 'осеесе': 80,
-        'sedumese': 70, 'седумесе': 70, 'deveese': 90, 'девеесе': 90
+        'sedumese': 70, 'седумесе': 70, 'deveese': 90, 'девеесе': 90,
+        // FINAL-T-DROPPED FORMS (reported, lead 5531598): "SEDUMDESE" = 70
+        // ("sedumdeset" minus the final t). The boundary guard below already
+        // rejects "sedumdese" inside "sedumdeset" (letter after the match), so
+        // the full form keeps its own match and these only fire standalone.
+        'sedumdese': 70, 'седумдесе': 70, 'osumdese': 80, 'осумдесе': 80,
+        'osemdese': 80, 'осемдесе': 80, 'triese': 30, 'триесе': 30,
+        'tridese': 30, 'тридесе': 30, 'cetiriese': 40, 'четириесе': 40,
+        'cetiridese': 40, 'четиридесе': 40, 'pedese': 50, 'педесе': 50,
+        'dvadese': 20, 'двадесе': 20, 'devedese': 90, 'деведесе': 90
       };
       for (const [word, val] of Object.entries(truncatedTens)) {
         const idx = u.indexOf(word);
@@ -457,6 +499,12 @@ export function parseNumberWords(text) {
         'triest','триест','trieset','триесет','pedeset','педесет','osumdeset','осумдесет',
         'sedumdeset','седумдесет','deveeset','девеесет','devedeset','деведесет',
         'osemdeset','осемдесет','stopeeset','стопеесет','stodvaeset','стодваесет',
+        'seese','шесе','peese','пеесе','dvaese','дваесе','oseese','осеесе',
+        'sedumese','седумесе','deveese','девеесе',
+        'sedumdese','седумдесе','osumdese','осумдесе','osemdese','осемдесе',
+        'triese','триесе','tridese','тридесе','cetiriese','четириесе',
+        'cetiridese','четиридесе','pedese','педесе','dvadese','двадесе',
+        'devedese','деведесе',
         'deset','десет','eeset','еесет','eset','есет'];
       const tensDirectMap = {
         'seeset': 60, 'шеесет': 60, 'eeset': 60, 'еесет': 60,
@@ -466,7 +514,15 @@ export function parseNumberWords(text) {
         'sedumdeset': 70, 'седумдесет': 70, 'deveeset': 90, 'девеесет': 90,
         'devedeset': 90, 'деведесет': 90, 'osemdeset': 80, 'осемдесет': 80,
         'deset': 10, 'десет': 10,
-        'stopeeset': 150, 'стопеесет': 150, 'stodvaeset': 120, 'стодваесет': 120
+        'stopeeset': 150, 'стопеесет': 150, 'stodvaeset': 120, 'стодваесет': 120,
+        'seese': 60, 'шесе': 60, 'peese': 50, 'пеесе': 50,
+        'dvaese': 20, 'дваесе': 20, 'oseese': 80, 'осеесе': 80,
+        'sedumese': 70, 'седумесе': 70, 'deveese': 90, 'девеесе': 90,
+        'sedumdese': 70, 'седумдесе': 70, 'osumdese': 80, 'осумдесе': 80,
+        'osemdese': 80, 'осемдесе': 80, 'triese': 30, 'триесе': 30,
+        'tridese': 30, 'тридесе': 30, 'cetiriese': 40, 'четириесе': 40,
+        'cetiridese': 40, 'четиридесе': 40, 'pedese': 50, 'педесе': 50,
+        'dvadese': 20, 'двадесе': 20, 'devedese': 90, 'деведесе': 90
       };
       for (const tw of tensWords.sort((a,b) => b.length - a.length)) {
         if (remaining.startsWith(tw)) {
@@ -1248,7 +1304,16 @@ export function extractTerraceNumber(text) {
   // "sreden" — reviewer finding). nedel/недел (week) and mesec/месец
   // (month) stems are unambiguous. A boundary-guarded singular also catches
   // "za eden den" (1 day) while leaving "denes" (today) alone.
-  const hasOtherContext = /iljadi|илјади|evra|евра|eur|evro|евро|kvadrati|квадрати|kvadrata|квадрата|m2|м2|kv|кв|sqm|kat|кат|sprat|спрат|sprata|спрата|kata|ката|katnica|катница|spalni|спални|parking|паркинг|garaza|гаража|lift|лифт|klima|клима|godina|година|izgraden|граден|renoviran|реновиран|zgrad|зград|dena|дена|denovi|денови|(?:^|[^a-zа-я])(?:den|ден)(?:$|[^a-zа-я])|nedel|недел|mesec|месец|\d{1,2}\s*[- ]?(?:ti|ти|ta|та)(?:te|те)?|осумдесет|osumdeset|осамдесет|osamdeset|девеесет|deveeset|деведесет|devedeset|седумдесет|sedumdeset|шеесет|seeset|педесет|pedeset/i.test(text);
+  // TRUNCATED TENS FORMS (reported, lead 5531598): the guard listed the
+  // FULL tens forms ("sedumdeset", "seeset") but NOT the Viber-truncated
+  // family ("sedumdese" = 70, "seese" = 60, "osumdese" = 80, "triese" =
+  // 30, ...). A bare sqm answer in truncated form ("SEDUMDESE I PET" = 75)
+  // fell through to the ≤3-word bare fallback and stored a phantom
+  // terraceSqm=70 while totalSqm stayed unset. The whole truncated family
+  // (d-dropping AND final-t-dropping) is a number-word answer to the sqm /
+  // floor / price question, never a terrace size — add every form to the
+  // guard. Full forms remain listed for the merged/other contexts.
+  const hasOtherContext = /iljadi|илјади|evra|евра|eur|evro|евро|kvadrati|квадрати|kvadrata|квадрата|m2|м2|kv|кв|sqm|kat|кат|sprat|спрат|sprata|спрата|kata|ката|katnica|катница|spalni|спални|parking|паркинг|garaza|гаража|lift|лифт|klima|клима|godina|година|izgraden|граден|renoviran|реновиран|zgrad|зград|dena|дена|denovi|денови|(?:^|[^a-zа-я])(?:den|ден)(?:$|[^a-zа-я])|nedel|недел|mesec|месец|\d{1,2}\s*[- ]?(?:ti|ти|ta|та)(?:te|те)?|осумдесет|osumdeset|осамдесет|osamdeset|девеесет|deveeset|деведесет|devedeset|седумдесет|sedumdeset|шеесет|seeset|педесет|pedeset|seese|шесе|peese|пеесе|dvaese|дваесе|oseese|осеесе|sedumese|седумесе|deveese|девеесе|sedumdese|седумдесе|osumdese|осумдесе|osemdese|осемдесе|triese|триесе|tridese|тридесе|cetiriese|четириесе|cetiridese|четиридесе|pedese|педесе|dvadese|двадесе|devedese|деведесе/i.test(text);
   if (wordCount <= 3 && !hasOtherContext) {
     const wordNum = parseMacedonianNumber(text);
     if (wordNum !== null && wordNum >= 1 && wordNum <= 100) return wordNum;

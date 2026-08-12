@@ -67,6 +67,42 @@ console.log(`\n📦 GROUP: parseMacedonianNumber`);
 
 // B3: "seeset" = 60 (now fixed with irregular tens)
 assertEqual(parseMacedonianNumber("seeset"), 60, "B3: 'seeset' → 60 (fixed!)");
+  // FINAL-T-DROPPED TENS FAMILY (reported, lead 5531598): "SEDUMDESE" =
+  // "sedumdeset" minus the final t (the owner keeps the d — unlike the
+  // d-dropping "sedumese"). The full spectrum must parse in both scripts.
+  assertEqual(parseMacedonianNumber("sedumdese"), 70, "B3t: 'sedumdese' → 70 (final-t dropped, d kept)");
+  assertEqual(parseMacedonianNumber("седумдесе"), 70, "B3t: 'седумдесе' → 70 (Cyrillic)");
+  assertEqual(parseMacedonianNumber("osumdese"), 80, "B3t: 'osumdese' → 80");
+  assertEqual(parseMacedonianNumber("осумдесе"), 80, "B3t: 'осумдесе' → 80 (Cyrillic)");
+  assertEqual(parseMacedonianNumber("osemdese"), 80, "B3t: 'osemdese' → 80 (osem- variant)");
+  assertEqual(parseMacedonianNumber("triese"), 30, "B3t: 'triese' → 30");
+  assertEqual(parseMacedonianNumber("триесе"), 30, "B3t: 'триесе' → 30 (Cyrillic)");
+  assertEqual(parseMacedonianNumber("tridese"), 30, "B3t: 'tridese' → 30 (-de- variant)");
+  assertEqual(parseMacedonianNumber("cetiriese"), 40, "B3t: 'cetiriese' → 40");
+  assertEqual(parseMacedonianNumber("четириесе"), 40, "B3t: 'четириесе' → 40 (Cyrillic)");
+  assertEqual(parseMacedonianNumber("cetiridese"), 40, "B3t: 'cetiridese' → 40 (-de- variant)");
+  assertEqual(parseMacedonianNumber("pedese"), 50, "B3t: 'pedese' → 50");
+  assertEqual(parseMacedonianNumber("педесе"), 50, "B3t: 'педесе' → 50 (Cyrillic)");
+  assertEqual(parseMacedonianNumber("dvadese"), 20, "B3t: 'dvadese' → 20");
+  assertEqual(parseMacedonianNumber("двадесе"), 20, "B3t: 'двадесе' → 20 (Cyrillic)");
+  assertEqual(parseMacedonianNumber("devedese"), 90, "B3t: 'devedese' → 90");
+  assertEqual(parseMacedonianNumber("деведесе"), 90, "B3t: 'деведесе' → 90 (Cyrillic)");
+  // parseNumberWords compound: "SEDUMDESE I PET" = 70+5 = 75 (the reported
+  // lead 5531598 message that was skipped — SQM NOT RECOGNIZED).
+  assertEqual(parseNumberWords("SEDUMDESE I PET"), 75, "B3t: 'SEDUMDESE I PET' → 75 (the reported sqm answer)");
+  assertEqual(parseNumberWords("седумдесе и пет"), 75, "B3t: 'седумдесе и пет' → 75 (Cyrillic)");
+  // Controls — full forms and unrelated teens stay intact
+  assertEqual(parseMacedonianNumber("sedumdeset"), 70, "B3t: full 'sedumdeset' → 70 (unchanged)");
+  assertEqual(parseNumberWords("trinaese"), 13, "B3t: 'trinaese' → 13 (teen, no 30 phantom)");
+  // TERRACE-PHANTOM GUARD (reported, lead 5531598): the same sqm answer that
+  // now parses must NEVER be read as a terrace size — extractTerraceNumber's
+  // Phase-3 other-field guard covers the full truncated-tens family, so a
+  // bare sqm answer returns null for terrace.
+  assertEqual(extractTerraceNumber("SEDUMDESE I PET"), null, "B3t: 'SEDUMDESE I PET' → NO terrace (sqm answer, not a terrace size)");
+  assertEqual(extractTerraceNumber("osumdese i tri"), null, "B3t: 'osumdese i tri' → NO terrace");
+  assertEqual(extractTerraceNumber("seese"), null, "B3t: bare 'seese' → NO terrace (truncated tens guard)");
+  assertEqual(extractTerraceNumber("pet"), 5, "B3t: bare 'pet' → 5 (genuine terrace answer unaffected)");
+  assertEqual(extractTerraceNumber("ima terasa 5m2"), 5, "B3t: 'ima terasa 5m2' → 5 (terasa context unaffected)");
 
 // B6/B10: substring issue — "dvanaeset" should be 12, not 2
 assertEqual(parseMacedonianNumber("dvanaeset"), 12, "B6/B10: 'dvanaeset' → 12 (⚠ current: 2 — substring match bug!)");

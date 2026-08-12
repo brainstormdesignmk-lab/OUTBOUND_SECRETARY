@@ -200,6 +200,38 @@ assert("N8e2: 'trinaese kvadrati' → totalSqm=13 (truncated teen parses, NOT 60
 result = runGlobalExtraction("seeset kvadrati", {});
 assert("N8f: 'seeset kvadrati' → totalSqm=60 (full form unaffected)", result.totalSqm === 60, `got ${result.totalSqm}`);
 
+// FINAL-T-DROPPED TENS FAMILY (reported, lead 5531598): "SEDUMDESE I PET" =
+// "sedumdeset i pet" (75) — the owner drops the final t/т of the -deset
+// tens while KEEPING the d ("sedumdese", "osumdese"), unlike the
+// d-dropping forms above ("sedumese"). parseNumberWords was missing these
+// and the greedy scanner fell back to the unit substring (sedum→7). The
+// whole spectrum now parses in both scripts and extracts through the
+// direct-answer fallback.
+result = runGlobalExtraction("SEDUMDESE I PET", {}, 'totalSqm');
+assert("N19: 'SEDUMDESE I PET' → totalSqm=75 (direct word answer)", result.totalSqm === 75, `got ${JSON.stringify(result.totalSqm)}`);
+result = runGlobalExtraction("osumdese i tri kvadrati", {});
+assert("N19b: 'osumdese i tri kvadrati' → totalSqm=83 (osumdese=80 + tri=3)", result.totalSqm === 83, `got ${JSON.stringify(result.totalSqm)}`);
+result = runGlobalExtraction("triese i pet kvadrati", {});
+assert("N19c: 'triese i pet kvadrati' → totalSqm=35 (triese=30 + pet=5)", result.totalSqm === 35, `got ${JSON.stringify(result.totalSqm)}`);
+result = runGlobalExtraction("cetiriese kvadrati", {});
+assert("N19d: 'cetiriese kvadrati' → totalSqm=40", result.totalSqm === 40, `got ${JSON.stringify(result.totalSqm)}`);
+result = runGlobalExtraction("pedese kvadrati", {});
+assert("N19e: 'pedese kvadrati' → totalSqm=50", result.totalSqm === 50, `got ${JSON.stringify(result.totalSqm)}`);
+result = runGlobalExtraction("dvadese kvadrati", {});
+assert("N19f: 'dvadese kvadrati' → totalSqm=20 (dvadese keeps the d)", result.totalSqm === 20, `got ${JSON.stringify(result.totalSqm)}`);
+result = runGlobalExtraction("devedese kvadrati", {});
+assert("N19g: 'devedese kvadrati' → totalSqm=90", result.totalSqm === 90, `got ${JSON.stringify(result.totalSqm)}`);
+result = runGlobalExtraction("седумдесе и пет квадрати", {});
+assert("N19h: Cyrillic 'седумдесе и пет квадрати' → totalSqm=75", result.totalSqm === 75, `got ${JSON.stringify(result.totalSqm)}`);
+// Controls — full forms and unrelated words stay unaffected
+result = runGlobalExtraction("sedumdeset kvadrati", {});
+assert("N19i: full 'sedumdeset kvadrati' → totalSqm=70 (full form wins)", result.totalSqm === 70, `got ${JSON.stringify(result.totalSqm)}`);
+result = runGlobalExtraction("trinaese kvadrati", {});
+assert("N19j: 'trinaese kvadrati' → totalSqm=13 (teen unchanged, no 30 phantom)", result.totalSqm === 13, `got ${JSON.stringify(result.totalSqm)}`);
+// Global discovery bare "75" (no preferredField) must still NOT guess
+result = runGlobalExtraction("SEDUMDESE I PET", {});
+assert("N19k: bare 'SEDUMDESE I PET' WITHOUT preferredField → NO totalSqm (no-guess preserved)", result.totalSqm === undefined, `got ${JSON.stringify(result.totalSqm)}`);
+
 // ========================================
 // TEST GROUP: Field-targeted extraction (no unrestricted global)
 // ========================================
@@ -1532,6 +1564,32 @@ assert("SQH3: assessConfidence(totalSqm, 420, rent repeat) NOT HIGH", sqhConf !=
 // KEEP: legit bare repeats still extract (pure number phrases)
 result = runGlobalExtraction("86 TI KAZAV", {}, 'totalSqm');
 assert("SQH4: '86 TI KAZAV' → totalSqm=86 (legit bare repeat preserved)", result.totalSqm === 86, `got ${JSON.stringify(result.totalSqm)}`);
+// HISTORY-SCAN PURE-DIGIT DOCUMENTATION (accepted tradeoff, matches
+// extractTotalFloors' identical bare fallback): a joined history that is
+// PURELY numeric can crown totalSqm. A realistic price answer is NOT purely
+// numeric ("350 da", "350 evra mesecno" both rejected below) — the shape
+// only fires when EVERY owner message is a bare number phrase.
+const sqhPure = scanHistoryForField('totalSqm', [{ role: 'owner', text: '350' }], {});
+assert("SQH4a: history scan of purely-numeric joined '350' → totalSqm=350 (documented, totalFloors-consistent)",
+  sqhPure !== null && sqhPure.totalSqm === 350, `got ${JSON.stringify(sqhPure)}`);
+// The REALISTIC price-answer shapes must stay rejected (pure-phrase guard):
+// "350 da" (confirmation) and "350 evra mesecno" (full price) both contain
+// non-number tokens → isBareNumberPhrase rejects → null.
+const sqhDa = scanHistoryForField('totalSqm', [{ role: 'owner', text: '350' }, { role: 'owner', text: 'da' }], {});
+assert("SQH4b: history scan of '350 da' → null (da is not a number token)", sqhDa === null, `got ${JSON.stringify(sqhDa)}`);
+const sqhPrice = scanHistoryForField('totalSqm', [{ role: 'owner', text: '350 evra mesecno' }], {});
+assert("SQH4c: history scan of '350 evra mesecno' → null (price phrase guard)", sqhPrice === null, `got ${JSON.stringify(sqhPrice)}`);
+// TERRACE-PHANTOM GUARD (reported, lead 5531598): the same sqm answer that
+// now parses must NEVER also phantom as a terrace size — the Phase-3
+// other-field guard in extractTerraceNumber covers the whole truncated-tens
+// family (full AND truncated forms), so a bare sqm answer returns null for
+// terrace while genuine terrace answers ("pet", "ima terasa 5m2") still work.
+{
+  const r = runGlobalExtraction('SEDUMDESE I PET', {}, 'totalSqm');
+  assert("SQH4d: 'SEDUMDESE I PET' → totalSqm=75 and NO hasTerrace/terraceSqm",
+    r.totalSqm === 75 && r.hasTerrace === undefined && r.terraceSqm === undefined,
+    `got ${JSON.stringify(r)}`);
+}
 result = runGlobalExtraction("OSUMDESET TI REKOV", {}, 'totalSqm');
 assert("SQH5: 'OSUMDESET TI REKOV' → totalSqm=80", result.totalSqm === 80, `got ${JSON.stringify(result.totalSqm)}`);
 result = runGlobalExtraction("OSUMDESET I SEST TI KAZAV", {}, 'totalSqm');
