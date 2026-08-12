@@ -771,7 +771,7 @@ export function runComplexStatefulHandlers({ u, userInput, session, nextField, h
       session.collectedData.heatingFollowUp = false;
       session.pendingFollowUp = null;
       console.log(`[HEATING: inverter]`);
-    } else if (/struja|струја|electric|термо|термосистем|termo|radijatori|радијатори|kalorifer|калорифер/i.test(u)) {
+    } else if (/struja|струја|electric|термо|термосистем|termo|radijatori|радијатори|kalorifer|калорифер|(?:^|[^a-zа-я])(?:panelki|панелки|panelka|панелка|panelni\s+radijatori|панелни\s+радијатори)(?:$|[^a-zа-я])/i.test(u)) {
       session.collectedData.heating = "electric";
       session.collectedData.heatingType = "electric";
       session.collectedData.heatingFollowUp = false;

@@ -1218,6 +1218,21 @@ result = runGlobalExtraction("GO STAVIV OGLASOT ZA PRODAZBA", {});
 assert("RH8b: 'GO STAVIV OGLASOT' (I posted the ad) → heating stays null", result.heating === undefined, `got ${JSON.stringify(result.heating)}`);
 result = runGlobalExtraction("go staviv da se prodava", {});
 assert("RH8c: 'go staviv da se prodava' → heating stays null", result.heating === undefined, `got ${JSON.stringify(result.heating)}`);
+// ── 2d. Electric PANEL HEATERS (reported, lead 5536052): the owner answered
+// the heating question TWICE with "PANELKI" and the field was SKIPPED (max 2
+// attempts → null) because only struja/електрично matched the electric
+// branch. "panelki"/"панелки" (electric panel radiators) + the "panelni
+// radijatori" phrase now map to electric; "paneli" (solar panels) never do.
+result = runGlobalExtraction("PANELKI", {});
+assert("RH10a: 'PANELKI' → heating=electric, type=electric", result.heating === 'electric' && result.heatingType === 'electric', `got ${JSON.stringify(result)}`);
+result = runGlobalExtraction("panelka", {});
+assert("RH10b: 'panelka' (sg) → heating=electric", result.heating === 'electric', `got ${JSON.stringify(result.heating)}`);
+result = runGlobalExtraction("имам панелки", {});
+assert("RH10c: 'имам панелки' → heating=electric (Cyrillic)", result.heating === 'electric', `got ${JSON.stringify(result)}`);
+result = runGlobalExtraction("PANELNI RADIJATORI", {});
+assert("RH10d: 'PANELNI RADIJATORI' → heating=electric", result.heating === 'electric', `got ${JSON.stringify(result)}`);
+result = runGlobalExtraction("SO SOLARNI PANELI", {});
+assert("RH10e: 'SOLARNI PANELI' (solar panels) → heating stays null (word-boundary)", result.heating === undefined, `got ${JSON.stringify(result.heating)}`);
 // Date answers to the availableFrom question must NEVER leak into a price:
 result = runGlobalExtraction("OD 7.15.2026", { transactionType: 'rent' });
 assert("RH9: 'OD 7.15.2026' → no phantom monthlyRent", result.monthlyRent === undefined, `got ${JSON.stringify(result)}`);

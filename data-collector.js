@@ -747,8 +747,14 @@ function extractHeating(u, data) {
     return { heating: "private", heatingType: "private" };
   }
 
-  // Electric: struja, electricno
-  if (/struja|струја|електрично|electricno/i.test(u)) {
+  // Electric: struja, electricno, and electric PANEL HEATERS — "panelki" /
+  // "панелки" (electric panel radiators — reported, lead 5536052): the
+  // owner answered the heating question TWICE with "PANELKI" and the field
+  // was SKIPPED (max 2 attempts → null) because only struja was recognized.
+  // Word-bounded (Cyrillic-aware) so "paneli" (solar panels — соларни
+  // панели) can never match; the "panelni radijatori"/"панелни радијатори"
+  // phrase (electric panel radiators) is included.
+  if (/struja|струја|електрично|electricno|(?:^|[^a-zа-я])(?:panelki|панелки|panelka|панелка|panelni\s+radijatori|панелни\s+радијатори)(?:$|[^a-zа-я])/i.test(u)) {
     return { heating: "electric", heatingType: "electric" };
   }
 

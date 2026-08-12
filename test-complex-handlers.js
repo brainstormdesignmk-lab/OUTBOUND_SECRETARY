@@ -110,7 +110,7 @@ function handleHeating(u, data, nextField) {
       data.heating = "electric";
       data.heatingType = "inverter";
       data.heatingFollowUp = false;
-    } else if (/struja|струја|electric|термо|термосистем|termo|radijatori|радијатори|kalorifer|калорифер/i.test(u)) {
+    } else if (/struja|струја|electric|термо|термосистем|termo|radijatori|радијатори|kalorifer|калорифер|(?:^|[^a-zа-я])(?:panelki|панелки|panelka|панелка|panelni\s+radijatori|панелни\s+радијатори)(?:$|[^a-zа-я])/i.test(u)) {
       data.heating = "electric";
       data.heatingType = "electric";
       data.heatingFollowUp = false;
@@ -770,6 +770,31 @@ console.log(`━━━━━━━━━━━━━━━━━━━━━━�
   const d = freshData();
   handleHeating("kalorifer", d, 'heating');
   assert("H26: 'kalorifer' → heating=electric, type=electric", d.heating === "electric" && d.heatingType === "electric", `got heating=${d.heating}`);
+})();
+
+// H27: Electric panel heaters — "panelki" (reported): the owner answered the
+// heating question twice with "PANELKI" and the field was skipped (max 2
+// attempts → null) because only struja was recognized. The "panelki"/
+// "панелки" family + "panelni radijatori" phrase now map to electric.
+(() => {
+  const d = freshData();
+  handleHeating("PANELKI", d, 'heating');
+  assert("H27: 'PANELKI' → heating=electric, type=electric", d.heating === "electric" && d.heatingType === "electric", `got heating=${d.heating}`);
+})();
+(() => {
+  const d = freshData();
+  handleHeating("имам панелки", d, 'heating');
+  assert("H27b: 'имам панелки' → heating=electric (Cyrillic)", d.heating === "electric" && d.heatingType === "electric", `got heating=${d.heating}`);
+})();
+(() => {
+  const d = freshData();
+  handleHeating("PANELNI RADIJATORI", d, 'heating');
+  assert("H27c: 'PANELNI RADIJATORI' → heating=electric", d.heating === "electric" && d.heatingType === "electric", `got heating=${d.heating}`);
+})();
+(() => {
+  const d = freshData();
+  handleHeating("SO SOLARNI PANELI", d, 'heating');
+  assert("H27d: 'SOLARNI PANELI' (solar panels) → heating stays null (no false match)", d.heating === undefined, `got heating=${d.heating}`);
 })();
 
 // H27: Parno follow-up — "sopstveno parno" answer (compound phrase)
