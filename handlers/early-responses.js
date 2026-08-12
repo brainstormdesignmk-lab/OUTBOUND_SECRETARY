@@ -50,10 +50,36 @@ import { extractTenantPreferences, TENANT_PREFER_RE, TENANT_EXCLUDE_RE } from '.
 // !cooperationAccepted. AVAILABILITY_NEGATIVE_RE keeps out messages that
 // merely contain an availability phrase but are really about something else
 // (terrace, klima, parking, broj, sorabotka...).
+//
+// FUTURE-AVAILABILITY FAMILY (reported, lead pz186272900): "SLOBODEN KE
+// BIDE OD SEPTEMVRI" (it WILL be free from September) is a positive
+// availability answer, but the old pattern only knew "sloboden e" (present)
+// and the REVERSED order "ke bide sloboden" (which matched only by accident
+// via "e sloboden" inside "bide sloboden") — the reported word order
+// "sloboden ke bide" and all other genders (slobodna/slobodno/slobodni)
+// missed, so the availability acknowledgment never fired and the LLM gave a
+// generic reply. The appended family covers BOTH word orders and ALL
+// genders, Latin + Cyrillic. It is duplicated verbatim in
+// RENT_TEMP_UNAVAIL_RE and buildAvailabilityResponse — keep in sync.
 // ========================================
-export const AVAILABILITY_POSITIVE_RE = /uste go imam|уште го имам|dostapen e|достапен е|sloboden e|слободен е|seuste e dostapen|сè уште е достапен|go imam|го имам|uste e|уште е|dostapen|достапен|da imam|да имам|uste go imam da|уште го имам да|da uste go imam|да уште го имам|seuste go imam|сè уште го имам|go imam uste|го имам уште|uste e sloboden|уште е слободен|e sloboden|е слободен|dostapno e|достапно е|seuste e dostapno|сè уште е достапно|ima uste|има уште|uste ima|уште има|go ima uste|го има уште|uste go ima|уште го има|go ima|го има|uste go imam|уште го имам|seuste e|сè уште е|seuste go imam|сè уште го имам|dostapna e|достапна е|slobodna e|слободна е|seuste e dostapna|сè уште е достапна|uste e dostapna|уште е достапна|dostapni se|достапни се|seuste se dostapni|сè уште се достапни|uste se dostapni|уште се достапни|go imam uste|го имам уште|uste go imam|уште го имам|go imam seuste|го имам сè уште|seuste go imam|сè уште го имам|go imam|го имам|uste go imam|уште го имам|seuste go imam|сè уште го имам|go imam|го имам|uste go imam|уште го имам|seuste e|сè уште е|dostapen|достапен|dostapna|достапна|ne sum go prodal|не сум го продал|ne sum go prodadol|не сум го продадол|uste ne sum go prodal|уште не сум го продал|uste ne sum go prodadol|уште не сум го продадол|uste se prodava|уште се продава|se prodava uste|се продава уште|ne e prodaden|не е продаден|uste ne e prodaden|уште не е продаден|ne sum go izdal|не сум го издал|ne sum go iznajmil|не сум го изнајмил|uste se izdava|уште се издава|se izdava uste|се издава уште|ne e izdaden|не е издаден|uste ne e izdaden|уште не е издаден|ne e izdadena|не е издадена|uste ne e izdadena|уште не е издадена|ne e iznajmen|не е изнајмен|uste ne e iznajmen|уште не е изнајмен|ne e iznajmena|не е изнајмена|uste ne e iznajmena|уште не е изнајмена/i;
+export const AVAILABILITY_POSITIVE_RE = /uste go imam|уште го имам|dostapen e|достапен е|sloboden e|слободен е|seuste e dostapen|сè уште е достапен|go imam|го имам|uste e|уште е|dostapen|достапен|da imam|да имам|uste go imam da|уште го имам да|da uste go imam|да уште го имам|seuste go imam|сè уште го имам|go imam uste|го имам уште|uste e sloboden|уште е слободен|e sloboden|е слободен|dostapno e|достапно е|seuste e dostapno|сè уште е достапно|ima uste|има уште|uste ima|уште има|go ima uste|го има уште|uste go ima|уште го има|go ima|го има|uste go imam|уште го имам|seuste e|сè уште е|seuste go imam|сè уште го имам|dostapna e|достапна е|slobodna e|слободна е|seuste e dostapna|сè уште е достапна|uste e dostapna|уште е достапна|dostapni se|достапни се|seuste se dostapni|сè уште се достапни|uste se dostapni|уште се достапни|go imam uste|го имам уште|uste go imam|уште го имам|go imam seuste|го имам сè уште|seuste go imam|сè уште го имам|go imam|го имам|uste go imam|уште го имам|seuste go imam|сè уште го имам|go imam|го имам|uste go imam|уште го имам|seuste e|сè уште е|dostapen|достапен|dostapna|достапна|ne sum go prodal|не сум го продал|ne sum go prodadol|не сум го продадол|uste ne sum go prodal|уште не сум го продал|uste ne sum go prodadol|уште не сум го продадол|uste se prodava|уште се продава|se prodava uste|се продава уште|ne e prodaden|не е продаден|uste ne e prodaden|уште не е продаден|ne sum go izdal|не сум го издал|ne sum go iznajmil|не сум го изнајмил|uste se izdava|уште се издава|se izdava uste|се издава уште|ne e izdaden|не е издаден|uste ne e izdaden|уште не е издаден|ne e izdadena|не е издадена|uste ne e izdadena|уште не е издадена|ne e iznajmen|не е изнајмен|uste ne e iznajmen|уште не е изнајмен|ne e iznajmena|не е изнајмена|uste ne e iznajmena|уште не е изнајмена|(?:sloboden|слободен|slobodna|слободна|slobodno|слободно|slobodni|слободни|dostapen|достапен|dostapna|достапна|dostapno|достапно|dostapni|достапни)\s+(?:ke|ќе)\s+(?:bide|биде)|(?:ke|ќе)\s+(?:bide|биде)\s+(?:sloboden|слободен|slobodna|слободна|slobodno|слободно|slobodni|слободни|dostapen|достапен|dostapna|достапна|dostapno|достапно|dostapni|достапни)/i;
 
-export const AVAILABILITY_NEGATIVE_RE = /ne se prodava|не се продава|ne se izdava|не се издава|terasa|тераса|klima|клима|parking|паркинг|procent|процент|obvrski|обврски|klient|клиент|broj|број|kancelari|канцелари|sorabotka|соработка|uslovi|услови|garaza|гаража|garage|гараж|lift|лифт|m2|квадрати|kvadrati|heating|греење|parno|парно/i;
+// NEGATIVE guard also keeps out "NE E SLOBODEN" (it's NOT free) — the
+// positive pattern's "e sloboden" alternative matches it as a substring, so
+// without the guard Ana would reply "glad it's still available" to the exact
+// opposite statement (same disease class as the reported ke-bide miss).
+export const AVAILABILITY_NEGATIVE_RE = /ne se prodava|не се продава|ne se izdava|не се издава|terasa|тераса|klima|клима|parking|паркинг|procent|процент|obvrski|обврски|klient|клиент|broj|број|kancelari|канцелари|sorabotka|соработка|uslovi|услови|garaza|гаража|garage|гараж|lift|лифт|m2|квадрати|kvadrati|heating|греење|parno|парно|ne\s+e\s+sloboden|не\s+е\s+слободен|ne\s+e\s+slobodna|не\s+е\s+слободна|ne\s+e\s+slobodno|не\s+е\s+слободно|ne\s+e\s+slobodni|не\s+е\s+слободни/i;
+
+// ========================================
+// FUTURE-AVAILABILITY FAMILY — the ke-bide forms in BOTH word orders
+// ("sloboden ke bide" / "ke bide sloboden"), ALL genders, Latin + Cyrillic.
+// Shared by the future-aware acknowledgment (buildAvailabilityResponse) and
+// the DATA_COLLECTION ack prefix (data-collection.js). The two regex
+// LITERALS — AVAILABILITY_POSITIVE_RE and RENT_TEMP_UNAVAIL_RE — embed the
+// same text verbatim; test-availability-future.js asserts the literals still
+// contain this pattern so the three sites can never drift apart.
+// ========================================
+export const AVAILABILITY_FUTURE_RE = /(?:sloboden|слободен|slobodna|слободна|slobodno|слободно|slobodni|слободни|dostapen|достапен|dostapna|достапна|dostapno|достапно|dostapni|достапни)\s+(?:ke|ќе)\s+(?:bide|биде)|(?:ke|ќе)\s+(?:bide|биде)\s+(?:sloboden|слободен|slobodna|слободна|slobodno|слободно|slobodni|слободни|dostapen|достапен|dostapna|достапна|dostapno|достапно|dostapni|достапни)/i;
 
 /**
  * Shared predicate: does the text say the property is STILL available?
@@ -118,12 +144,48 @@ function hasRecentAvailabilityConfirmation(session) {
  * "без провизија за вас" is sale-only). Shared by the availability handler
  * and the bare-positive-in-availability-batch guard below — the two call
  * sites can never drift apart. Marks session.availabilityAcknowledged.
+ *
+ * FUTURE-AWARE (reported, lead pz186272900): when the owner's message says
+ * the property WILL be free later ("SLOBODEN KE BIDE OD SEPTEMVRI"), the
+ * acknowledgment uses future wording and ECHOES the volunteered date ("од
+ * септември") instead of claiming "сè уште е достапен" (still available) —
+ * the exact wording Ana used in the reported miss. The ke-bide family here
+ * mirrors AVAILABILITY_POSITIVE_RE / RENT_TEMP_UNAVAIL_RE (keep in sync).
  */
-function buildAvailabilityResponse(session, isRent) {
+function buildAvailabilityResponse(session, isRent, u) {
   const propertyLabel = session.adMemory?.propertyType === 'apartment' ? 'станот' :
                         session.adMemory?.propertyType === 'house' ? 'куќата' :
                         session.adMemory?.propertyType === 'land' ? 'плацот' :
                         session.adMemory?.propertyType === 'commercial' ? 'локалот' : 'имотот';
+  const uText = String(u || '').toLowerCase();
+  // Gender concord: house = feminine (куќата), everything else masculine
+  // (the existing templates used masculine everywhere — this fixes the
+  // "куќата ... достапен" mismatch in the future-aware variants).
+  const isHouse = session.adMemory?.propertyType === 'house';
+  const freeAdj = isHouse ? 'слободна' : 'слободен';
+  const availAdj = isHouse ? 'достапна' : 'достапен';
+
+  const futureAvailable = AVAILABILITY_FUTURE_RE.test(uText);
+  // Echo the volunteered date ("od septemvri", "od 15ti septemvri") — the
+  // reported owner volunteered "OD SEPTEMVRI" and Ana must reflect it.
+  // Immediate words ("одма", "сега") are not dates — skip the echo.
+  // Latin month names are normalized to Cyrillic so the reply reads
+  // naturally ("од септември", never the mixed-script "од septemvri").
+  const MONTH_LATIN_TO_CYRILLIC = {
+    januari: 'јануари', januar: 'јануар', fevruari: 'февруари', februar: 'фебруар',
+    mart: 'март', april: 'април', maj: 'мај', juni: 'јуни', juli: 'јули',
+    avgust: 'август', septemvri: 'септември', oktomvri: 'октомври',
+    noemvri: 'ноември', dekemvri: 'декември'
+  };
+  // NOTE: JS \b is ASCII-only — it NEVER matches around Cyrillic ("слободен"
+  // is all non-word chars), so the "od/од" must be anchored on a start or
+  // whitespace instead of a word boundary (script-agnostic). The token class
+  // includes ./ so a dotted date ("OD 7.15.2026") echoes whole, never "од 7".
+  const odTailMatch = uText.match(/(?:^|\s)(?:od|од)\s+([a-zа-я0-9./]+(?:\s+[a-zа-я0-9./]+){0,2})/i);
+  const IMMEDIATE_RE = /^(?:odma|одма|sega|сега|vednash|веднаш|brzo|брзо|moment|момент|momentno|моментно|denes|денес)$/i;
+  const odTail = odTailMatch && !IMMEDIATE_RE.test(odTailMatch[1])
+    ? ` од ${odTailMatch[1].split(/\s+/).map(t => MONTH_LATIN_TO_CYRILLIC[t.toLowerCase()] || t).join(' ')}`
+    : '';
 
   let response;
   if (isRent) {
@@ -131,18 +193,30 @@ function buildAvailabilityResponse(session, isRent) {
     // month's rent, 100% above €1000) — so the rent variants must NEVER
     // promise "без провизија за вас" / "без никакви давачки" / "без
     // обврски" (that phrasing is sale-only).
-    const rentResponses = [
-      `Драго ми е што ${propertyLabel} е сè уште достапен. Дали би сакале да го понудиме на нашите клиенти за издавање?`,
-      `Драго ми е што ${propertyLabel} е сè уште достапен. Дали би сакале да го издадеме во најкраток можен рок?`,
-      `Драго ми е што ${propertyLabel} е сè уште достапен. Дали би сакале нашата агенција да се погрижи за професионално издавање?`
-    ];
+    const rentResponses = futureAvailable
+      ? [
+          `Разбирам, ${propertyLabel} ќе биде ${freeAdj}${odTail}. Дали би сакале да го понудиме на нашите клиенти за издавање?`,
+          `Разбирам, ${propertyLabel} ќе биде ${freeAdj}${odTail}. Дали би сакале да го издадеме во најкраток можен рок?`,
+          `Разбирам, ${propertyLabel} ќе биде ${freeAdj}${odTail}. Дали би сакале нашата агенција да се погрижи за професионално издавање?`
+        ]
+      : [
+          `Драго ми е што ${propertyLabel} е сè уште ${availAdj}. Дали би сакале да го понудиме на нашите клиенти за издавање?`,
+          `Драго ми е што ${propertyLabel} е сè уште ${availAdj}. Дали би сакале да го издадеме во најкраток можен рок?`,
+          `Драго ми е што ${propertyLabel} е сè уште ${availAdj}. Дали би сакале нашата агенција да се погрижи за професионално издавање?`
+        ];
     response = rentResponses[Math.floor(Math.random() * rentResponses.length)];
   } else {
-    const saleResponses = [
-      `Драго ми е што ${propertyLabel} е сè уште достапен. Дали би сакале да го понудиме на нашите клиенти, без провизија за вас?`,
-      `Драго ми е што ${propertyLabel} е сè уште достапен. Дали би сакале да го продадеме во најкраток можен рок, без никакви давачки за вас?`,
-      `Драго ми е што ${propertyLabel} е сè уште достапен. Дали би сакале нашата агенција да се погрижи за професионална продажба, без никакви обврски од ваша страна?`
-    ];
+    const saleResponses = futureAvailable
+      ? [
+          `Разбирам, ${propertyLabel} ќе биде ${freeAdj}${odTail}. Дали би сакале да го понудиме на нашите клиенти, без провизија за вас?`,
+          `Разбирам, ${propertyLabel} ќе биде ${freeAdj}${odTail}. Дали би сакале да го продадеме во најкраток можен рок, без никакви давачки за вас?`,
+          `Разбирам, ${propertyLabel} ќе биде ${freeAdj}${odTail}. Дали би сакале нашата агенција да се погрижи за професионална продажба, без никакви обврски од ваша страна?`
+        ]
+      : [
+          `Драго ми е што ${propertyLabel} е сè уште ${availAdj}. Дали би сакале да го понудиме на нашите клиенти, без провизија за вас?`,
+          `Драго ми е што ${propertyLabel} е сè уште ${availAdj}. Дали би сакале да го продадеме во најкраток можен рок, без никакви давачки за вас?`,
+          `Драго ми е што ${propertyLabel} е сè уште ${availAdj}. Дали би сакале нашата агенција да се погрижи за професионална продажба, без никакви обврски од ваша страна?`
+        ];
     response = saleResponses[Math.floor(Math.random() * saleResponses.length)];
   }
 
@@ -284,7 +358,11 @@ export function runEarlyResponses({ u, isRent, session }) {
   // BEFORE the availability handler ("ОД 1 ЈАНУАРИ Е СЛОБОДЕН" contains
   // "е слободен", which is in AVAILABILITY_POSITIVE_RE — the handler would
   // reply "glad it's still available", the exact opposite of the truth).
-  const RENT_TEMP_UNAVAIL_RE = /ne e dostapen|не е достапен|ne e veke dostapen|не е веќе достапен|veke ne e dostapen|веќе не е достапен|ne e sloboden|не е слободен|zafaten|зафатен|zaferan|momentano|моментално|momentno|моментно|pod kirija|под кирија|ke bide sloboden|ќе биде слободен|ke bide dostapen|ќе биде достапен|izdaden e|издаден е|iznajmen e|изнајмен е|izdadena e|издадена е|iznajmena e|изнајмена е/i;
+  // FUTURE FAMILY (both orders + all genders) — mirrors the ke-bide group in
+  // AVAILABILITY_POSITIVE_RE and buildAvailabilityResponse (keep in sync): a
+  // RENT owner saying "SLOBODEN KE BIDE OD SEPTEMVRI" is temporarily
+  // unavailable (availableFrom gets captured), NOT "glad it's still available".
+  const RENT_TEMP_UNAVAIL_RE = /ne e dostapen|не е достапен|ne e veke dostapen|не е веќе достапен|veke ne e dostapen|веќе не е достапен|ne e sloboden|не е слободен|zafaten|зафатен|zaferan|momentano|моментално|momentno|моментно|pod kirija|под кирија|ke bide sloboden|ќе биде слободен|ke bide dostapen|ќе биде достапен|(?:sloboden|слободен|slobodna|слободна|slobodno|слободно|slobodni|слободни|dostapen|достапен|dostapna|достапна|dostapno|достапно|dostapni|достапни)\s+(?:ke|ќе)\s+(?:bide|биде)|(?:ke|ќе)\s+(?:bide|биде)\s+(?:slobodna|слободна|slobodno|слободно|slobodni|слободни|dostapna|достапна|dostapno|достапно|dostapni|достапни)|izdaden e|издаден е|iznajmen e|изнајмен е|izdadena e|издадена е|iznajmena e|изнајмена е/i;
   // DATE-WITH-AVAILABILITY-CONTEXT: "ОД 1 ЈАНУАРИ Е СЛОБОДЕН" (free from
   // January 1st) — a date phrase carrying a free/available word is a
   // TEMPORARY-UNAVAILABILITY statement (the property becomes free on that
@@ -384,11 +462,11 @@ export function runEarlyResponses({ u, isRent, session }) {
       BARE_AVAILABILITY_POSITIVE_RE.test(u) &&
       hasRecentAvailabilityConfirmation(session)) {
     console.log('[AVAILABILITY: bare positive + availability confirmation in the same turn — availability, NOT cooperation]');
-    return buildAvailabilityResponse(session, isRent);
+    return buildAvailabilityResponse(session, isRent, u);
   }
 
   if (!session.collectedData.cooperationAccepted && isAvailabilityConfirmation(u)) {
-    return buildAvailabilityResponse(session, isRent);
+    return buildAvailabilityResponse(session, isRent, u);
   }
 
   // ========================================

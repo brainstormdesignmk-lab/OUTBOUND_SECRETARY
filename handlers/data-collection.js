@@ -72,7 +72,7 @@ import {
 import { getRentDefaults, calculateRentCommission } from '../lib/commission.js';
 import { getNextPropertyId, createPropertyFolder, saveToCSV } from './storage.js';
 import { transition } from './state-machine.js';
-import { isAvailabilityConfirmation } from './early-responses.js';
+import { isAvailabilityConfirmation, AVAILABILITY_FUTURE_RE } from './early-responses.js';
 import { photosMessages, isPhotosWorthManagerReview } from './awaiting-photos.js';
 import {
   calculateSellingPrice,
@@ -1454,7 +1454,13 @@ export function runDataCollectionFlow({ u, userInput, session, adMemory, hasScra
         (confirmsAvailability(u) || hasRecentAvailabilityConfirmation(session))) {
       session.availabilityAcknowledged = true;
       console.log('[AVAILABILITY: acknowledged — owner confirms the property is still available]');
-      const ack = 'Одлично, значи сè уште е достапен! ';
+      // FUTURE-AWARE ACK (reported, lead pz186272900): a confirmation that the
+      // property WILL be free later ("SLOBODEN KE BIDE OD SEPTEMVRI") must not
+      // be prefixed with "сè уште е достапен" (still available) — the same
+      // disease the persuasion availability ack now fixes.
+      const ack = AVAILABILITY_FUTURE_RE.test(u)
+        ? 'Одлично, значи ќе биде слободен! '
+        : 'Одлично, значи сè уште е достапен! ';
       // Replace the generic filler lead ("Одлично.", "Супер."...), never a
       // double lead ("Одлично. ... Одлично, значи..."). Capitalize the
       // remainder so the rare "Одлично, уште последниве..." branch reads
