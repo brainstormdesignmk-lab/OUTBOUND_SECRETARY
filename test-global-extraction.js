@@ -1191,6 +1191,61 @@ assert("HG16: 'децентрално греење' → heating stays null", res
 result = runGlobalExtraction("parno centralno", {});
 assert("HG17: 'parno centralno' → heating=district (unchanged)", result.heating === 'district', `got ${JSON.stringify(result.heating)}`);
 
+// ── 2d. Substring-trap audit: klima/split (AC + inverter heating) ──
+// Same disease class as togas→gas. The old bare /klima/ matched "klimatski
+// uslovi" (climatic conditions), "klimat" (climate) and "mikroklima"
+// (microclimate) as AC; the old bare /split/ matched the CITY Split
+// ("od Split sum", "splitski stan", "во Сплит") as AC + inverter heating.
+// klima is now word-boundary guarded with the definite -ta allowed
+// ("klimata" = the AC); split needs an AC-system co-occurrence word.
+result = runGlobalExtraction("klimatski uslovi", {});
+assert("HK1: 'klimatski uslovi' → ac stays null (climate ≠ AC)", result.ac === undefined, `got ${JSON.stringify(result.ac)}`);
+result = runGlobalExtraction("odlicni klimatski uslovi", {});
+assert("HK2: 'odlicni klimatski uslovi' → ac stays null", result.ac === undefined, `got ${JSON.stringify(result.ac)}`);
+result = runGlobalExtraction("klimat", {});
+assert("HK3: 'klimat' (climate) → ac stays null", result.ac === undefined, `got ${JSON.stringify(result.ac)}`);
+result = runGlobalExtraction("mikroklima", {});
+assert("HK4: 'mikroklima' → ac stays null", result.ac === undefined, `got ${JSON.stringify(result.ac)}`);
+result = runGlobalExtraction("микроклимата", {});
+assert("HK5: 'микроклимата' → ac stays null (Cyrillic)", result.ac === undefined, `got ${JSON.stringify(result.ac)}`);
+result = runGlobalExtraction("od Split sum", {});
+assert("HK6: 'od Split sum' (city) → ac/heating stay null", result.ac === undefined && result.heating === undefined, `got ac=${JSON.stringify(result.ac)} heat=${JSON.stringify(result.heating)}`);
+result = runGlobalExtraction("splitski stan", {});
+assert("HK7: 'splitski stan' (city adjective) → ac/heating stay null", result.ac === undefined && result.heating === undefined, `got ac=${JSON.stringify(result.ac)} heat=${JSON.stringify(result.heating)}`);
+result = runGlobalExtraction("во Сплит", {});
+assert("HK8: 'во Сплит' (in Split) → ac/heating stay null", result.ac === undefined && result.heating === undefined, `got ac=${JSON.stringify(result.ac)} heat=${JSON.stringify(result.heating)}`);
+result = runGlobalExtraction("Сплит", {});
+assert("HK9: bare 'Сплит' (city) → ac/heating stay null (no bare-answer allowance)", result.ac === undefined && result.heating === undefined, `got ac=${JSON.stringify(result.ac)} heat=${JSON.stringify(result.heating)}`);
+// Legit AC forms must still extract:
+result = runGlobalExtraction("klima", {});
+assert("HK10: 'klima' → ac=true (unchanged)", result.ac === true, `got ${JSON.stringify(result.ac)}`);
+result = runGlobalExtraction("klimata e nova", {});
+assert("HK11: 'klimata e nova' → ac=true (definite form kept)", result.ac === true, `got ${JSON.stringify(result.ac)}`);
+result = runGlobalExtraction("split sistem", {});
+assert("HK12: 'split sistem' → ac=true + heating=inverter (co-occurrence)", result.ac === true && result.heating === 'inverter', `got ac=${JSON.stringify(result.ac)} heat=${JSON.stringify(result.heating)}`);
+result = runGlobalExtraction("split klima", {});
+assert("HK13: 'split klima' → ac=true (co-occurrence)", result.ac === true, `got ${JSON.stringify(result.ac)}`);
+result = runGlobalExtraction("inverter klima", {});
+assert("HK14: 'inverter klima' → ac=true + heating=inverter (unchanged)", result.ac === true && result.heating === 'inverter', `got ac=${JSON.stringify(result.ac)} heat=${JSON.stringify(result.heating)}`);
+result = runGlobalExtraction("klima nema", {});
+assert("HK15: 'klima nema' → ac=false (negation unchanged)", result.ac === false, `got ${JSON.stringify(result.ac)}`);
+result = runGlobalExtraction("inverzija", {});
+assert("HK16: 'inverzija' → ac/heating stay null (not inverter)", result.ac === undefined && result.heating === undefined, `got ac=${JSON.stringify(result.ac)} heat=${JSON.stringify(result.heating)}`);
+
+// AC QUESTION ANSWERS — reviewer-caught regression: the AC question is
+// "Дали има клима?", whose natural reply "ima split" / "da, ima split"
+// (there's a split unit) must still extract ac:true. The "ima split" form
+// is matched with "ima" STRICTLY BEFORE "split", so city sentences with the
+// verb AFTER ("Split ima ubava promenada") stay phantom-free.
+result = runGlobalExtraction("ima split", {});
+assert("HK17: 'ima split' → ac=true (AC-question answer form)", result.ac === true, `got ${JSON.stringify(result.ac)}`);
+result = runGlobalExtraction("da ima split", {});
+assert("HK18: 'da ima split' → ac=true", result.ac === true, `got ${JSON.stringify(result.ac)}`);
+result = runGlobalExtraction("ima i split", {});
+assert("HK19: 'ima i split' → ac=true (има и сплит)", result.ac === true, `got ${JSON.stringify(result.ac)}`);
+result = runGlobalExtraction("Split ima ubava promenada", {});
+assert("HK20: 'Split ima ubava promenada' → ac stays null (city, verb after)", result.ac === undefined, `got ${JSON.stringify(result.ac)}`);
+
 // ── 3. Parking: "vo cenata" = private, "slobodno parkiranje" = public ──
 result = runGlobalExtraction("PARKING MESTO VO CENATA", {});
 assert("RP1: 'parking mesto vo cenata' → parking=true, type=private", result.parking === true && result.parkingType === 'private', `got ${JSON.stringify(result.parking)}/${result.parkingType}`);

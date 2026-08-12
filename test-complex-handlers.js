@@ -106,7 +106,7 @@ function handleHeating(u, data, nextField) {
       data.heating = "central";
       data.heatingType = "private_central";
       data.heatingFollowUp = false;
-    } else if (/klima|клима|inverter|инвертер|split|сплит|invertor|инвертор|klima inverter|клима инвертер|термопумпа|toplotna|топлотна|na klima|на клима|se gream|се греам/i.test(u)) {
+    } else if ((/(?:^|[^a-zа-я])(?:klima|клима)(?:ta|та)?(?:$|[^a-zа-я])/i.test(u) || /inverter|инвертер|invertor|инвертор|klima inverter|клима инвертер|термопумпа|toplotna|топлотна|na klima|на клима|se gream|се греам/i.test(u) || (/(?:^|[^a-zа-я])(?:split|сплит)(?:$|[^a-zа-я])/i.test(u) && !/(?:^|[^a-zа-я])(?:od|од|vo|во|na|на|do|до|za|за)\s+(?:split|сплит)(?:$|[^a-zа-я])/i.test(u)))) {
       data.heating = "electric";
       data.heatingType = "inverter";
       data.heatingFollowUp = false;
@@ -815,6 +815,37 @@ console.log(`━━━━━━━━━━━━━━━━━━━━━━�
   const d = freshData();
   handleHeating("split", d, 'heating');
   assert("H32: 'split' → heating=electric, type=inverter", d.heating === "electric" && d.heatingType === "inverter", `got heating=${d.heating}, type=${d.heatingType}`);
+})();
+
+// H32b: Substring-trap audit — "klimatski uslovi" (climatic conditions),
+// "mikroklima" (microclimate), and the CITY Split ("od Split sum", "во
+// Сплит") must NOT resolve as inverter heating (same disease class as the
+// togas→gas fix). Bare "split" (H32) stays valid — the follow-up context
+// was asked.
+(() => {
+  const d = freshData();
+  handleHeating("klimatski uslovi", d, 'heating');
+  assert("H32b: 'klimatski uslovi' → heating stays unset (climate ≠ AC)", d.heating === undefined, `got heating=${d.heating}`);
+})();
+(() => {
+  const d = freshData();
+  handleHeating("mikroklima", d, 'heating');
+  assert("H32c: 'mikroklima' → heating stays unset", d.heating === undefined, `got heating=${d.heating}`);
+})();
+(() => {
+  const d = freshData();
+  handleHeating("od Split sum", d, 'heating');
+  assert("H32d: 'od Split sum' (city) → heating stays unset", d.heating === undefined, `got heating=${d.heating}`);
+})();
+(() => {
+  const d = freshData();
+  handleHeating("во Сплит", d, 'heating');
+  assert("H32e: 'во Сплит' (in Split) → heating stays unset", d.heating === undefined, `got heating=${d.heating}`);
+})();
+(() => {
+  const d = freshData();
+  handleHeating("split sistem", d, 'heating');
+  assert("H32f: 'split sistem' → heating=inverter (co-occurrence kept)", d.heating === "electric" && d.heatingType === "inverter", `got heating=${d.heating}, type=${d.heatingType}`);
 })();
 
 // H33: "svoja" (my own — colloq. for own boiler) → private_central

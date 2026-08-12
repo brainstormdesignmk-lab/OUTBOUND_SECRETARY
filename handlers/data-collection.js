@@ -722,7 +722,7 @@ export function runComplexStatefulHandlers({ u, userInput, session, nextField, h
         text: "Какво парно? Градско или сопствено?",
         type: "QUESTION"
       };
-    } else if (/klima|клима|inverter|инвертер|split|сплит|invertor|инвертор|klima inverter|клима инвертер|термопумпа|toplotna|топлотна|na klima|на клима|se gream|се греам/i.test(u) && !parnoMentioned) {
+    } else if ((/(?:^|[^a-zа-я])(?:klima|клима)(?:ta|та)?(?:$|[^a-zа-я])/i.test(u) || /inverter|инвертер|invertor|инвертор|klima inverter|клима инвертер|термопумпа|toplotna|топлотна|na klima|на клима|se gream|се греам/i.test(u) || (/(?:^|[^a-zа-я])(?:split|сплит)(?:$|[^a-zа-я])/i.test(u) && !/(?:^|[^a-zа-я])(?:od|од|vo|во|na|на|do|до|za|за)\s+(?:split|сплит)(?:$|[^a-zа-я])/i.test(u))) && !parnoMentioned) {
       session.collectedData.heating = "electric";
       session.collectedData.heatingType = "inverter";
       session.collectedData.heatingFollowUp = false;

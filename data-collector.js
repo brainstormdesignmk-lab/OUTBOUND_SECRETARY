@@ -617,6 +617,35 @@ function extractElevator(u, data) {
   return null;
 }
 
+// WORD-BOUNDARY AC KEYWORDS (audit, same substring disease as the
+// "togas"→gas phantom): bare /klima/ matched "klimatski uslovi" (climatic
+// conditions), "klimat" (climate) and "mikroklima" (microclimate) as AC;
+// bare /split/ matched the CITY Split ("od Split sum", "splitski stan").
+//   - klima: word-boundary both sides, with the DEFINITE -ta suffix allowed
+//     ("klimata" = the AC, very common) — "klimatski"/"klimat"/"mikroklima"
+//     all fail (t is a letter after "klima", leading o in "mikroklima").
+//   - split: word-boundary both sides kills "splitski" (s follows), but the
+//     BARE CITY "Split" is also a standalone word — so it needs BOTH a
+//     co-occurring AC word (sistem/klima/ured/inverter) OR a whole-message
+//     bare answer, AND a city-preposition rejection ("od Split", "во
+//     Сплит").
+const AC_KLIMA_RE = /(?:^|[^a-zа-я])(?:klima|клима)(?:ta|та)?(?:$|[^a-zа-я])/i;
+const AC_SPLIT_CITY_PREP_RE = /(?:^|[^a-zа-я])(?:od|од|vo|во|na|на|do|до|za|за)\s+(?:split|сплит)(?:$|[^a-zа-я])/i;
+function isSplitAC(u) {
+  if (!/(?:^|[^a-zа-я])(?:split|сплит)(?:$|[^a-zа-я])/i.test(u)) return false;
+  if (AC_SPLIT_CITY_PREP_RE.test(u)) return false;
+  // Split needs an AC-system word to co-occur ("split sistem", "split
+  // klima", "split ured", "split inverter"), OR the answer form "ima
+  // split"/"da, ima split" (there's a split unit — the natural reply to the
+  // AC question "Дали има клима?"). The "ima split" form is matched with
+  // "ima" STRICTLY BEFORE "split", so a sentence about the CITY with the
+  // verb after ("Split ima ubava promenada" — Split has a nice promenade)
+  // can never phantom. NO bare-answer allowance: a whole-message "Сплит" /
+  // "Split" is the CITY (owner naming where the property is), and the
+  // bare-answer path is only exercised context-gated in the follow-up
+  // handler (H32/B16) where the heating question was just asked.
+  return /sistem|систем|klima|клима|ured|уред|inverter|инвертер|kompresor|компресор|(?:ima|има)(?:\s+(?:i|и))?\s+(?:split|сплит)/i.test(u);
+}
 function extractAC(u, data) {
   if (data.ac !== undefined && data.ac !== null) return null;
   // NEGATION CHECKED FIRST (reported lead 5540516): the positive keyword
@@ -626,8 +655,10 @@ function extractAC(u, data) {
   // ("nema klima" and "klima nema"), the definite form ("klimata nema"),
   // and the "ne treba" family ("AC not needed" ⇒ no AC).
   if (/nema\s+klima|нема\s+клима|klima\s+nema|клима\s+нема|klimata\s+nema|климата\s+нема|bez\s+klima|без\s+клима|klima\s+ne\s+treba|клима\s+не\s+треба|klimata\s+ne\s+treba|климата\s+не\s+треба|ne\s+treba\s+klima|не\s+треба\s+клима|nema\s+potreba\s+od\s+klima|нема\s+потреба\s+од\s+клима|klima\s+nema\s+potreba|клима\s+нема\s+потреба/i.test(u)) return { ac: false };
-  // Require AC-specific context — cooling/cooling-related words only
-  if (/klima|клима|inverter|инвертер|split|сплит|клима уред|klima ured/i.test(u)) return { ac: true };
+  // Require AC-specific context — cooling/cooling-related words only.
+  // klimata/klima ured/inverter klima all pass AC_KLIMA_RE; "klimatski
+  // uslovi" (climate conditions) and "mikroklima" (microclimate) never do.
+  if (AC_KLIMA_RE.test(u) || /inverter|инвертер|klima ured|клима уред/i.test(u) || isSplitAC(u)) return { ac: true };
   return null;
 }
 
@@ -708,7 +739,9 @@ function extractHeating(u, data) {
   // Inverter as heating: ONLY if no higher-priority heating keyword matched.
   // Inverter AC is primarily a cooling device; only extract as heating when
   // the message has no parno/centralno/struja/drva/etc. keywords.
-  if (/inverter|инвертер|split|сплит/i.test(u) &&
+  // "split" uses the shared isSplitAC guard (city Split must never phantom —
+  // audit; same disease class as the "togas"→gas fix).
+  if ((/inverter|инвертер/i.test(u) || isSplitAC(u)) &&
       !/parno|парно|struja|струја|drva|дрва|pelet|пелет|nafta|нафта|gas|гас|toplovod|топловод|centralno|централно|gradsko|градско|sopstveno|сопствено/i.test(u)) {
     return { heating: "inverter", heatingType: "inverter" };
   }
