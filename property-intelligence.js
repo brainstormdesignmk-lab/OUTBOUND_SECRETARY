@@ -271,7 +271,14 @@ export function extractTenantPreferences(u) {
     if (!isExcluded && catClause !== null) {
       const afterIdx = catIdx + ((catClause.match(cat.re) || [''])[0] || '').length;
       const afterCat = catClause.slice(afterIdx);
-      if (/(?:^|[\s,;:])nikako(?:$|[\s,;:!?.])|(?:^|[\s,;:])никако(?:$|[\s,;:!?.])/i.test(afterCat)) {
+      // BARE TRAILING "ne" (reported, lead 3571074 quickfire batch): "TURCI
+      // NE", "MILENICI NE" — the category PRECEDES a bare "ne" (no verb),
+      // so the before-slice is empty and every check above misses it (it
+      // would even fall through to PREFERRED). Must be CLAUSE-FINAL (only
+      // trailing punctuation allowed after) so "semejstva ne sakam deca"
+      // (families — I don't want children) can never flip semejstva: that
+      // "ne" belongs to the NEXT category's verb and is not clause-final.
+      if (/(?:^|[\s,;:])nikako(?:$|[\s,;:!?.])|(?:^|[\s,;:])никако(?:$|[\s,;:!?.])|(?:^|[\s,;:])(?:ne|не)(?:[\s,;:!?.]*$)/i.test(afterCat)) {
         isExcluded = true;
       }
     }

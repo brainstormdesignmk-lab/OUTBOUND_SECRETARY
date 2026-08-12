@@ -9,7 +9,7 @@
 //   4. History scan + close flow + field question flow (with re-ask phrasings)
 // ========================================
 import { getNextMissingField, getQuestion, TENANT_PREF_QUESTIONS, AVAILABLE_FROM_QUESTIONS, PETS_ALLOWED_QUESTIONS } from '../workflow.js';
-import { runGlobalExtraction, assessConfidence, confidenceToNumeric, scanHistoryForField, isExplicitPriceCorrection } from '../data-collector.js';
+import { runGlobalExtraction, assessConfidence, confidenceToNumeric, scanHistoryForField, isExplicitPriceCorrection, isTenantMerge } from '../data-collector.js';
 
 // ========================================
 // ROTATING QUESTION VARIANTS BY FIELD — the single source of truth for
@@ -388,12 +388,16 @@ export function runGlobalExtractionPass({ u, userInput, session, nextField }) {
     // Don't overwrite values already set by confirmed high-confidence
     // extraction — EXCEPT explicit mid-collection PRICE corrections
     // ("ne, 300 e"): the owner's new number REPLACES the stored
-    // backfilled/extracted price instead of being silently kept (reported).
+    // backfilled/extracted price instead of being silently kept (reported);
+    // and TENANT MERGES ("turci ne" after "sakam stranci" — quickfire
+    // batch): the follow-up EXTENDS the stored tenantPreferences instead of
+    // being dropped (reported, lead 3571074).
     const isPriceKey = key === 'cleanPrice' || key === 'monthlyRent';
     const existingVal = session.collectedData[key];
     const isCorrection = isPriceKey && typeof existingVal === 'number' && typeof value === 'number' &&
                          Math.abs(existingVal - value) >= 1 && isExplicitPriceCorrection(u);
-    if (existingVal === undefined || existingVal === null || isCorrection) {
+    const isTenantMergeNow = key === 'tenantPreferences' && isTenantMerge(u);
+    if (existingVal === undefined || existingVal === null || isCorrection || isTenantMergeNow) {
       session.collectedData[key] = value;
       // A corrected price is the owner's explicit statement → store at HIGH;
       // fresh fills keep the assessed score (0.95 HIGH / 0.60 volunteered).

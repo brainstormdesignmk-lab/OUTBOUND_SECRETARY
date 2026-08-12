@@ -53,10 +53,26 @@ function extractCleanPrice(u, data) {
 // ========================================
 function extractTenantPrefs(u, data) {
   if (data.transactionType !== 'rent') return null;
-  if (data.tenantPreferences !== undefined && data.tenantPreferences !== null) return null;
   const tp = extractTenantPreferences(u);
   if (tp === null) return null;
-  const out = { tenantPreferences: tp };
+  const existing = data.tenantPreferences;
+  const out = {};
+  if (existing !== undefined && existing !== null) {
+    // MERGE (reported, lead 3571074 quickfire batch): the owner answers the
+    // tenant question in MULTIPLE messages ("sakam stranci" then "turci
+    // ne"). The first message sets tenantPreferences, so the never-overwrite
+    // contract would silently DROP the follow-up exclusion. Merge the new
+    // categories into the existing object instead (dedup, append the exact
+    // statements to notes so the broker comment keeps every wording).
+    out.tenantPreferences = {
+      preferred: [...new Set([...(existing.preferred || []), ...tp.preferred])],
+      excluded: [...new Set([...(existing.excluded || []), ...tp.excluded])],
+      notes: [existing.notes, tp.notes].filter(Boolean).join(' | ')
+    };
+    console.log(`[TENANT MERGE: excluded += ${JSON.stringify(tp.excluded)}, preferred += ${JSON.stringify(tp.preferred)}]`);
+  } else {
+    out.tenantPreferences = tp;
+  }
   // PETS SYNERGY (reported): a tenant answer like "NE SAKAM MILENICI I
   // SAMOHRANI MAJKI" states the pets policy too. STEP 1 early-returns on
   // the bare tenant answer (no property keywords → STEP 2 skipped), so the
@@ -80,14 +96,14 @@ function extractTenantPrefs(u, data) {
 //   POSITIVE: "da, milenici se dozvoleni", "dozvoleni se", "moze so
 //             milenici", "nema problem so milenici", "prihakat", "sakam so
 //             milenici", "slobodno so milenici", "papagal moze" (small
-//             caged pets are never the problem — parrots/fish are fine)...
-//   NEGATIVE: "ne, bez milenici", "ne sakam milenici", "ne dozvoluvam
-//             milenici", "zabraneto", "nema milenici", "samo bez
-//             kucinja", "nikako milenici" (никако = absolutely not),
-//             "kuce, mace ne" (cats/dogs are the usual pet problem — a
-//             trailing "ne" after the pet list is a ban), "nikako osven
-//             papagal i ribi" (nothing except parrot and fish → cats/dogs
-//             NOT allowed)...
+//             caged pets are never the problem — parrots/fish are fine)...  // NEGATIVE: "ne, bez milenici", "ne sakam milenici", "ne dozvoluvam
+  //             milenici", "zabraneto", "nema milenici", "samo bez
+  //             kucinja", "nikako milenici" (никако = absolutely not),
+  //             "kuce, mace ne" (cats/dogs are the usual pet problem — a
+  //             trailing "ne" after the pet list is a ban), "milenici ne"
+  //             (the GENERIC pets word with a trailing "ne" — reported,
+  //             lead 3571074 batch), "nikako osven papagal i ribi" (nothing
+  //             except parrot and fish → cats/dogs NOT allowed)...
 // Bare "da"/"ne" answers are handled by the BARE_YES_NO_FIELDS mapping in
 // runGlobalExtraction (preferredField path only). REQUIRES pet vocabulary —
 // a bare "ne" in another context can never become petsAllowed=false. The
@@ -104,7 +120,7 @@ function extractPetsAllowed(u, data) {
   // matches ANY "milenici" mention, so "ne sakam milenici" would otherwise
   // collect petsAllowed=true. Covers both word orders, the definite forms
   // ("milenicite ne se dozvoleni"), and the "samo bez" restriction family.
-  if (/(?:ne|не)\s+(?:sakam|сакам|dozvoluvam|дозволувам|primam|примам)\s+(?:milenici|миленици|kucinja|кучиња|kuche|куче|kuce|куце|mace|маче|maca|маца|macka|мачка)|(?:ne|не)\s+se\s+(?:dozvoleni|дозволени)\s+(?:milenici|миленици|kucinja|кучиња)|(?:milenici|миленици|kucinja|кучиња)\s+(?:ne|не)\s+se\s+(?:dozvoleni|дозволени)|bez\s+(?:milenici|миленици|kucinja|кучиња|kuche|куче|kuce|куце|mace|маче|maca|маца|macka|мачка|zivotni|животни|zivotno|животно)|nema\s+(?:milenici|миленици|kucinja|кучиња|zivotni|животни)|samo\s+bez\s+(?:milenici|миленици|kucinja|кучиња)|zabraneto|забрането|zabraneni|забранети|ne\s+moze\s+(?:milenici|миленици)|не\s+може\s+(?:миленици|миленици)|nikako\s+(?:milenici|миленици|kucinja|кучиња|kuche|куче|kuce|куце|mace|маче|maca|маца|macka|мачка|zivotni|животни|pets)|(?:milenici|миленици|kucinja|кучиња|zivotni|животни)\s+nikako|(?:kuche|куче|kuce|куце|mace|маче|maca|маца|macka|мачка|kucinja|кучиња)(?:[\s,;]+(?:kuche|куче|kuce|куце|mace|маче|maca|маца|macka|мачка|kucinja|кучиња))*[\s,;]+(?:ne|не)\s*$|(?:nikako|никако)\s+(?:osven|освен)\s+(?:milenici|миленици|kucinja|кучиња|kuche|куче|kuce|куце|mace|маче|maca|маца|macka|мачка|zivotni|животни|papagal|папагал|ribi|риби|ptici|птици|pets)/i.test(u)) return { petsAllowed: false };
+  if (/(?:ne|не)\s+(?:sakam|сакам|dozvoluvam|дозволувам|primam|примам)\s+(?:milenici|миленици|kucinja|кучиња|kuche|куче|kuce|куце|mace|маче|maca|маца|macka|мачка)|(?:ne|не)\s+se\s+(?:dozvoleni|дозволени)\s+(?:milenici|миленици|kucinja|кучиња)|(?:milenici|миленици|kucinja|кучиња)\s+(?:ne|не)\s+se\s+(?:dozvoleni|дозволени)|bez\s+(?:milenici|миленици|kucinja|кучиња|kuche|куче|kuce|куце|mace|маче|maca|маца|macka|мачка|zivotni|животни|zivotno|животно)|nema\s+(?:milenici|миленици|kucinja|кучиња|zivotni|животни)|samo\s+bez\s+(?:milenici|миленици|kucinja|кучиња)|zabraneto|забрането|zabraneni|забранети|ne\s+moze\s+(?:milenici|миленици)|не\s+може\s+(?:миленици|миленици)|nikako\s+(?:milenici|миленици|kucinja|кучиња|kuche|куче|kuce|куце|mace|маче|maca|маца|macka|мачка|zivotni|животни|pets)|(?:milenici|миленици|kucinja|кучиња|zivotni|животни)\s+nikako|(?:milenici|миленици|kucinja|кучиња|kuche|куче|kuce|куце|mace|маче|maca|маца|macka|мачка|zivotni|животни|zivotno|животно|pets)(?:[\s,;]+(?:milenici|миленици|kucinja|кучиња|kuche|куче|kuce|куце|mace|маче|maca|маца|macka|мачка|zivotni|животни|zivotno|животно|pets))*[\s,;]+(?:ne|не)\s*$|(?:nikako|никако)\s+(?:osven|освен)\s+(?:milenici|миленици|kucinja|кучиња|kuche|куче|kuce|куце|mace|маче|maca|маца|macka|мачка|zivotni|животни|papagal|папагал|ribi|риби|ptici|птици|pets)/i.test(u)) return { petsAllowed: false };
   // POSITIVE: pet vocabulary with an allow verb/adjective. Both word orders:
   // pets-first ("milenici se dozvoleni") and allow-word-first ("dozvoleni se
   // kucinja", "moze so milenici"). The separator between the allow word and
@@ -1718,6 +1734,22 @@ const BARE_NO_FIELD_RE = {
 //      parking price) is NOT a rent correction, so bare evra/iljadi alone
 //      never opens the gate.
 // ========================================
+// ========================================
+// TENANT-MERGE GATE (reported, lead 3571074 quickfire batch):
+// tenantPreferences is the ONE object field owners legitimately EXTEND across
+// separate messages ("sakam stranci" then "turci ne"). When it is already
+// set, a message that still carries tenant-category vocabulary re-extracts
+// and MERGES (extractTenantPrefs returns the merged object) instead of being
+// skipped by the never-overwrite contract. extractTenantPreferences(u) !==
+// null is the gate: any message with real tenant vocabulary, and only those
+// (an unrelated message like "klientot se javi" carries no category → never
+// opens the gate). Exported so the handler's toStore loop — the FINAL
+// storage gate — admits the merge too.
+// ========================================
+export function isTenantMerge(u) {
+  return extractTenantPreferences(u) !== null;
+}
+
 export function isExplicitPriceCorrection(u) {
   if (/(?:promeni|промени|izmeni|измени|smeni|смени|koregir|корегир|koregiraj|корегирај|ispravi|исправи|popravi|поправи|korekcij|корекци)/i.test(u)) return true;
   // Leading negation WITH a digit — "ne, 300 e" / "не 300" / "ne, 100 iljadi".
@@ -1777,11 +1809,15 @@ function runGlobalExtraction(u, currentData, preferredField) {
         if (!rule) continue;
         // Skip if field already has a value — EXCEPT explicit price
         // corrections ("ne, 300 e") which legitimately re-extract to
-        // replace the stored backfilled/extracted price (reported).
+        // replace the stored backfilled/extracted price (reported), and
+        // tenant-merge messages ("turci ne" after "sakam stranci") which
+        // legitimately EXTEND the stored tenantPreferences (reported).
         const dataKey = field;
         const isPriceField = dataKey === 'cleanPrice' || dataKey === 'monthlyRent';
+        const isTenantField = dataKey === 'tenantPreferences';
         if (currentData[dataKey] !== undefined && currentData[dataKey] !== null &&
-            !(isPriceField && isExplicitPriceCorrection(u))) continue;
+            !(isPriceField && isExplicitPriceCorrection(u)) &&
+            !(isTenantField && isTenantMerge(u))) continue;
         const result = rule(u, currentData, preferredField);
         if (result) {
           for (const [key, value] of Object.entries(result)) {
@@ -1794,6 +1830,9 @@ function runGlobalExtraction(u, currentData, preferredField) {
                        Math.abs(existing - value) >= 1 && isExplicitPriceCorrection(u)) {
               updates[key] = value;
               console.log(`[EXTRACTION: ${key} CORRECTED ${existing} → ${value} (explicit price correction)]`);
+            } else if (key === 'tenantPreferences' && isTenantMerge(u)) {
+              updates[key] = value;
+              console.log(`[TENANT MERGE: ${key} ← ${JSON.stringify(value)}]`);
             }
           }
           if (field === preferredField) foundPreferred = true;
@@ -2023,6 +2062,15 @@ function runGlobalExtraction(u, currentData, preferredField) {
           updates[key] = value;
           priceExtracted = true;
           console.log(`[PRICE CORRECTION: ${key} ${existing} → ${value} (explicit correction in "${u}")]`);
+        } else if (key === 'tenantPreferences' && isTenantMerge(u)) {
+          // TENANT MERGE (reported, lead 3571074): the owner EXTENDS the
+          // tenant profile in a follow-up message ("turci ne" after
+          // "sakam stranci" — quickfire batch). STEP 2's global pass runs
+          // extractTenantPrefs which returns the MERGED object; the
+          // never-overwrite contract admits it here only when the message
+          // genuinely carries tenant vocabulary.
+          updates[key] = value;
+          console.log(`[TENANT MERGE: ${key} ← ${JSON.stringify(value)}]`);
         }
       }
     }

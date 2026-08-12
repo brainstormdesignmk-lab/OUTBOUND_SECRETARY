@@ -25,6 +25,7 @@ import {
 } from './property-intelligence.js';
 import { extractPrice, extractPricePerSqm } from './property-extractor.js';
 import { runGlobalExtraction, assessConfidence } from './data-collector.js';
+import { runGlobalExtractionPass } from './handlers/data-collection.js';
 import { generateResponse } from './service.js';
 import { getNextMissingField } from './workflow.js';
 
@@ -297,6 +298,36 @@ assert('label turks → турци', tenantCategoryLabel('turks') === 'турц�
 assert('label albanians → албанци', tenantCategoryLabel('albanians') === 'албанци', '');
 assert('label muslims → муслимани', tenantCategoryLabel('muslims') === 'муслимани', '');
 assert('label macedonians → македонци', tenantCategoryLabel('macedonians') === 'македонци', '');
+
+// TRAILING BARE "ne" (reported, lead 3571074 quickfire batch): "TURCI NE",
+// "MILENICI NE" — the category PRECEDES a bare "ne" (no verb). The
+// before-slice is empty so the old code missed it (and would even have
+// pushed the category to PREFERRED).
+const tpNe1 = extractTenantPreferences('turci ne');
+assert('TP-NE1 "turci ne" → excluded=[turks]',
+  JSON.stringify(tpNe1?.excluded) === JSON.stringify(['turks']),
+  `got ${JSON.stringify(tpNe1)}`);
+const tpNe2 = extractTenantPreferences('milenici ne');
+assert('TP-NE2 "milenici ne" → excluded=[pets]',
+  JSON.stringify(tpNe2?.excluded) === JSON.stringify(['pets']),
+  `got ${JSON.stringify(tpNe2)}`);
+const tpNe3 = extractTenantPreferences('ТУРЦИ НЕ');
+assert('TP-NE3 Cyrillic "ТУРЦИ НЕ" → excluded=[turks]',
+  JSON.stringify(tpNe3?.excluded) === JSON.stringify(['turks']),
+  `got ${JSON.stringify(tpNe3)}`);
+const tpNe4 = extractTenantPreferences('albanci ne, semejstva se ok');
+assert('TP-NE4 "albanci ne, semejstva se ok" → albanci excluded (ama-less comma clause final ne)',
+  JSON.stringify(tpNe4?.excluded) === JSON.stringify(['albanians']) &&
+  JSON.stringify(tpNe4?.preferred) === JSON.stringify(['families']),
+  `got ${JSON.stringify(tpNe4)}`);
+// GUARD: "semejstva ne sakam deca" — the "ne" after semejstva is NOT
+// clause-final (it belongs to the NEXT category's verb "ne sakam deca"), so
+// semejstva must NOT flip to excluded; deca stays excluded as before.
+const tpNe5 = extractTenantPreferences('semejstva ne sakam deca');
+assert('TP-NE5 "semejstva ne sakam deca" → semejstva NOT excluded, deca excluded',
+  !(tpNe5?.excluded || []).includes('families') &&
+  JSON.stringify(tpNe5?.excluded) === JSON.stringify(['children']),
+  `got ${JSON.stringify(tpNe5)}`);
 
 // E2E through generateResponse: the tenant answer must be CAPTURED, not
 // swallowed by the agency handler (which matches the bare word "vraboteni"
@@ -615,7 +646,9 @@ for (const [input, label] of [
   ['kuce , mace ne', 'reported comma-spaced'],
   ['NIKAKO OSVEN PAPAGAL I RIBI', 'nothing except parrot+fish (reported)'],
   ['KUCE NE', 'single pet + trailing ne'],
-  ['MACA NE', 'cat + trailing ne']
+  ['MACA NE', 'cat + trailing ne'],
+  ['MILENICI NE', 'generic pets + trailing ne (reported batch)'],
+  ['milenici ne', 'lowercase generic pets + trailing ne']
 ]) {
   const r = runGlobalExtraction(input, { transactionType: 'rent' }, 'petsAllowed');
   assert(`PETS: "${input}" (${label}) → petsAllowed=false`, r.petsAllowed === false, `got ${JSON.stringify(r)}`);
@@ -653,6 +686,80 @@ const wfPets = getNextMissingField({
   tenantPreferences: { preferred: [], excluded: [], notes: '' }
 });
 assert('PETS: next missing field after tenantPreferences is petsAllowed', wfPets === 'petsAllowed', `next=${wfPets}`);
+
+// ============================================================
+// TENANT QUICKFIRE BATCH (reported, lead 3571074): the owner fires THREE
+// messages in one grace window — "sakam stranci", "turci ne", "milenici
+// ne". The engine processes each sequentially; the first sets
+// tenantPreferences, so the follow-up exclusion and the pets denial must
+// MERGE into it (and into petsAllowed), never be dropped by the
+// never-overwrite contract.
+// ============================================================
+{
+  let data = { transactionType: 'rent' };
+  // msg1 — the tenant-type answer (Ana asked "Каков тип на станари...?")
+  const r1 = runGlobalExtraction('sakam stranci', data, 'tenantPreferences');
+  Object.assign(data, r1);
+  assert('TENANT-BATCH: msg1 "sakam stranci" → preferred=[foreigners]',
+    JSON.stringify(data.tenantPreferences?.preferred) === JSON.stringify(['foreigners']),
+    `got ${JSON.stringify(data.tenantPreferences)}`);
+  // msg2 — the follow-up exclusion (Ana is now asking the pets question)
+  const r2 = runGlobalExtraction('turci ne', data, 'petsAllowed');
+  Object.assign(data, r2);
+  assert('TENANT-BATCH: msg2 "turci ne" → excluded=[turks] (merged, not dropped)',
+    JSON.stringify(data.tenantPreferences?.excluded) === JSON.stringify(['turks']),
+    `got ${JSON.stringify(data.tenantPreferences)}`);
+  assert('TENANT-BATCH: msg2 keeps preferred=[foreigners]',
+    JSON.stringify(data.tenantPreferences?.preferred) === JSON.stringify(['foreigners']),
+    `got ${JSON.stringify(data.tenantPreferences)}`);
+  assert('TENANT-BATCH: merged tenantPreferences scores HIGH (stored at 0.95)',
+    assessConfidence('tenantPreferences', data.tenantPreferences, 'turci ne') === 'HIGH',
+    `got ${assessConfidence('tenantPreferences', data.tenantPreferences, 'turci ne')}`);
+  // msg3 — the pets denial
+  const r3 = runGlobalExtraction('milenici ne', data, 'petsAllowed');
+  Object.assign(data, r3);
+  assert('TENANT-BATCH: msg3 "milenici ne" → petsAllowed=false',
+    data.petsAllowed === false,
+    `got ${JSON.stringify(data.petsAllowed)}`);
+  // notes preserve BOTH exact statements for the broker comment
+  const notes = data.tenantPreferences?.notes || '';
+  assert('TENANT-BATCH: notes keep both statements',
+    /sakam stranci/.test(notes) && /turci ne/.test(notes),
+    `got ${notes}`);
+  // The merged object is de-duplicated (turks not doubled by a repeat)
+  const r4 = runGlobalExtraction('turci ne', data, 'petsAllowed');
+  Object.assign(data, r4);
+  assert('TENANT-BATCH: repeat "turci ne" dedupes (still one turks)',
+    (data.tenantPreferences?.excluded || []).filter(x => x === 'turks').length === 1,
+    `got ${JSON.stringify(data.tenantPreferences)}`);
+}
+
+// HANDLER-LEVEL: runGlobalExtractionPass is what the engine batch actually
+// invokes per message — its toStore loop is the FINAL storage gate and must
+// admit the tenant merge (the 4th admission site).
+{
+  const session = {
+    pendingFollowUp: null,
+    collectedData: {
+      transactionType: 'rent',
+      tenantPreferences: { preferred: ['foreigners'], excluded: [], notes: 'Сопственикот изјави: sakam stranci' }
+    }
+  };
+  const r = runGlobalExtractionPass({
+    u: 'turci ne', userInput: 'turci ne', session, nextField: 'petsAllowed'
+  });
+  assert('TENANT-BATCH-HANDLER: toStore loop stores the merge',
+    JSON.stringify(session.collectedData.tenantPreferences?.excluded) === JSON.stringify(['turks']) &&
+    JSON.stringify(session.collectedData.tenantPreferences?.preferred) === JSON.stringify(['foreigners']),
+    `got ${JSON.stringify(session.collectedData.tenantPreferences)}`);
+  // And the pets denial arrives as its own message through the same gate
+  const s2 = { ...session, collectedData: { ...session.collectedData } };
+  s2.collectedData.tenantPreferences = { ...session.collectedData.tenantPreferences };
+  runGlobalExtractionPass({ u: 'milenici ne', userInput: 'milenici ne', session: s2, nextField: 'petsAllowed' });
+  assert('TENANT-BATCH-HANDLER: "milenici ne" stores petsAllowed=false',
+    s2.collectedData.petsAllowed === false,
+    `got ${JSON.stringify(s2.collectedData.petsAllowed)}`);
+}
 
 // E2E: tenant-type answer → pets question asked (rotating variants) → DA
 // answer stored → flow advances to totalSqm.
