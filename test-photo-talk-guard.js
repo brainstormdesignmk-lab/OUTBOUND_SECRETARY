@@ -775,6 +775,152 @@ function createSession({ nextField }) {
   assert('NP14: "МОЖЕ ДА МЕ ЗАПИШЕТЕ ГОРАН" (no како) → name=Горан', resp === null && session.collectedData.ownerName === 'Горан', `got name=${JSON.stringify(session.collectedData.ownerName)}`);
 }
 
+// ========================================
+// 18. ADDRESS-LIKE ANSWER AT THE NAME PROMPT (reported, lead 5531598): the
+//     owner answers "Како да ве запишам?" with the property ADDRESS
+//     ("JOVAN BIGORSKI 65"). Previously the generic store accepted it, so
+//     the ADDRESS was stored as ownerName ("Jovan Bigorski 65") and the
+//     name question was effectively skipped — getNextMissingField saw
+//     ownerName filled and jumped straight to the address question. The
+//     answer must now be routed to the ADDRESS field and the name re-asked.
+// ========================================
+{
+  // The exact reported message.
+  const session = createSession({ nextField: 'ownerName' });
+  const resp = runComplexStatefulHandlers({
+    u: 'JOVAN BIGORSKI 65',
+    userInput: 'JOVAN BIGORSKI 65',
+    session,
+    nextField: 'ownerName',
+    hasScraperPhotos: false
+  });
+  assert('PT18: address answer at name prompt → QUESTION (re-ask)', resp && resp.type === 'QUESTION' && resp.nextField === 'ownerName', `got ${JSON.stringify(resp)}`);
+  assert('PT18: ownerName NOT stored (never the address)', session.collectedData.ownerName === undefined, `got ${JSON.stringify(session.collectedData.ownerName)}`);
+  assert('PT18: address stored instead', session.collectedData.address === 'JOVAN BIGORSKI 65', `got ${JSON.stringify(session.collectedData.address)}`);
+}
+{
+  // Cyrillic street address at the name prompt.
+  const session = createSession({ nextField: 'ownerName' });
+  const resp = runComplexStatefulHandlers({
+    u: 'УЛ. ПАРТИЗАНСКА 12 СКОПЈЕ',
+    userInput: 'УЛ. ПАРТИЗАНСКА 12 СКОПЈЕ',
+    session,
+    nextField: 'ownerName',
+    hasScraperPhotos: false
+  });
+  assert('PT18b: Cyrillic address → stored as ADDRESS, name re-asked', resp && resp.type === 'QUESTION' && resp.nextField === 'ownerName' && session.collectedData.address === 'УЛ. ПАРТИЗАНСКА 12 СКОПЈЕ' && session.collectedData.ownerName === undefined, `got resp=${JSON.stringify(resp)} addr=${JSON.stringify(session.collectedData.address)}`);
+}
+{
+  // Address-label composition: "АДРЕСА: УЛ. 12" at the name prompt.
+  const session = createSession({ nextField: 'ownerName' });
+  const resp = runComplexStatefulHandlers({
+    u: 'adresa: ul. 12',
+    userInput: 'АДРЕСА: УЛ. 12',
+    session,
+    nextField: 'ownerName',
+    hasScraperPhotos: false
+  });
+  assert('PT18c: labeled address at name prompt → ADDRESS stored, name re-asked', resp && resp.type === 'QUESTION' && resp.nextField === 'ownerName' && session.collectedData.address === 'УЛ. 12' && session.collectedData.ownerName === undefined, `got resp=${JSON.stringify(resp)} addr=${JSON.stringify(session.collectedData.address)}`);
+}
+{
+  // House number already collected — still re-ask the name, never store junk.
+  const session = createSession({ nextField: 'ownerName' });
+  session.collectedData.address = 'JOVAN BIGORSKI 65';
+  const resp = runComplexStatefulHandlers({
+    u: 'JOVAN BIGORSKI 65',
+    userInput: 'JOVAN BIGORSKI 65',
+    session,
+    nextField: 'ownerName',
+    hasScraperPhotos: false
+  });
+  assert('PT18d: address already collected → name re-asked, address untouched', resp && resp.type === 'QUESTION' && resp.nextField === 'ownerName' && session.collectedData.address === 'JOVAN BIGORSKI 65' && session.collectedData.ownerName === undefined, `got resp=${JSON.stringify(resp)}`);
+}
+{
+  // LETTER-SUFFIXED house number ("65А" — very common in Macedonia) must
+  // route to address too, not fall through to the generic name store
+  // (reviewer finding: the plain token regex required a non-letter AFTER
+  // the digits, so "65А" failed to match and was still stored as a name).
+  const session = createSession({ nextField: 'ownerName' });
+  const resp = runComplexStatefulHandlers({
+    u: 'JOVAN BIGORSKI 65A',
+    userInput: 'JOVAN BIGORSKI 65А',
+    session,
+    nextField: 'ownerName',
+    hasScraperPhotos: false
+  });
+  assert('PT18e: letter-suffixed house number → ADDRESS stored, name re-asked', resp && resp.type === 'QUESTION' && resp.nextField === 'ownerName' && session.collectedData.address === 'JOVAN BIGORSKI 65А' && session.collectedData.ownerName === undefined, `got resp=${JSON.stringify(resp)} addr=${JSON.stringify(session.collectedData.address)}`);
+}
+{
+  // ATTEMPT COUNTING: an address answer at the name prompt counts as an
+  // attempt (the owner DID answer, with the wrong field) so the max-2
+  // skip can advance the flow instead of pinning on the re-ask forever.
+  const session = createSession({ nextField: 'ownerName' });
+  const resp = runComplexStatefulHandlers({
+    u: 'JOVAN BIGORSKI 65',
+    userInput: 'JOVAN BIGORSKI 65',
+    session,
+    nextField: 'ownerName',
+    hasScraperPhotos: false
+  });
+  assert('PT18f: address routing increments the name attempt counter (seed 1 → 2)', resp && resp.type === 'QUESTION' && session.questionAttempts.ownerName === 2, `got attempts=${JSON.stringify(session.questionAttempts)}`);
+}
+{
+  // Photo-talk + address in ONE message at the name prompt: address stored
+  // AND the delivery promise acked (VIBER_PENDING) — mirrors the generic
+  // name store / address branch (reviewer finding).
+  const session = createSession({ nextField: 'ownerName' });
+  for (const k of ['photosPermission', 'photosSource', 'photosStatus', 'photos', 'photosPending']) delete session.collectedData[k];
+  const resp = runComplexStatefulHandlers({
+    u: 'UL. PARTIZANSKA 12, IMAM SLIKI KE VI PRATAM',
+    userInput: 'UL. PARTIZANSKA 12, IMAM SLIKI KE VI PRATAM',
+    session,
+    nextField: 'ownerName',
+    hasScraperPhotos: false
+  });
+  assert('PT18g: address+photo-talk → address stored AND photos=VIBER_PENDING', resp && resp.type === 'QUESTION' && resp.nextField === 'ownerName' && session.collectedData.address === 'UL. PARTIZANSKA 12' && session.collectedData.photosStatus === 'VIBER_PENDING' && session.collectedData.ownerName === undefined, `got addr=${JSON.stringify(session.collectedData.address)} photos=${JSON.stringify(session.collectedData.photosStatus)}`);
+}
+
+// ========================================
+// 19. NO FALSE POSITIVES — plain names, names+phones, and photo-talk with
+//     digits must NOT be routed to the address field.
+// ========================================
+{
+  const session = createSession({ nextField: 'ownerName' });
+  const resp = runComplexStatefulHandlers({
+    u: 'GORAN ATANASOV',
+    userInput: 'GORAN ATANASOV',
+    session,
+    nextField: 'ownerName',
+    hasScraperPhotos: false
+  });
+  assert('PT19: plain name still stored as name (no digit → no routing)', resp === null && session.collectedData.ownerName === 'Goran Atanasov' && session.collectedData.address === undefined, `got name=${JSON.stringify(session.collectedData.ownerName)}`);
+}
+{
+  // 9 digits = a phone, never a house number — the tail-strip path still
+  // extracts the name and drops the phone (mirror of PT11).
+  const session = createSession({ nextField: 'ownerName' });
+  const resp = runComplexStatefulHandlers({
+    u: 'GORAN 070123456',
+    userInput: 'GORAN 070123456',
+    session,
+    nextField: 'ownerName',
+    hasScraperPhotos: false
+  });
+  assert('PT19b: "GORAN 070123456" → name=Goran (phone, not house number)', resp === null && session.collectedData.ownerName === 'Goran' && session.collectedData.address === undefined, `got name=${JSON.stringify(session.collectedData.ownerName)}`);
+}
+{
+  // Digit glued into a word is not a house-number token (letter boundary).
+  const session = createSession({ nextField: 'ownerName' });
+  const resp = runComplexStatefulHandlers({
+    u: 'GORANOV',
+    userInput: 'GORANOV',
+    session,
+    nextField: 'ownerName',
+    hasScraperPhotos: false
+  });
+  assert('PT19c: name-like word without digits → stored as name', resp === null && session.collectedData.ownerName === 'Goranov', `got name=${JSON.stringify(session.collectedData.ownerName)}`);
+}
+
 console.log(`\n==================================================`);
 console.log(harness.failed > 0 ? `   ❌ Failed: ${harness.failed}` : `   ✅ All ${harness.passed} photo-talk-guard tests passed`);
 console.log(`   📋 Total: ${harness.passed + harness.failed}`);

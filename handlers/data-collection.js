@@ -540,6 +540,32 @@ function mentionsPhotoTalk(u) {
   return /(?:^|[^a-zа-я])(?:sliki|слики|slikite|сликите|fotografii|фотографии|fotografite|фотографиите|ispratam|испратам|pratam|пратам|prakj|праќам|pushtam|пуштам|zemi|земи|viber|вајбер|vajber|viberot|вајберот)(?:$|[^a-zа-я])/i.test(u);
 }
 
+// ========================================
+// ADDRESS CLEANER — shared by the address branch and the ownerName
+// address-route branch below. Label strip ("АДРЕСА: УЛ. 12"), sentence
+// split, photo-talk tail strip, trailing-separator trim. Extracted
+// verbatim from the address branch so both call sites stay in sync.
+// ========================================
+function cleanAddressText(raw) {
+  let cleaned = raw.trim();
+  // EXPLICIT ADDRESS MARKER — "АДРЕСА: УЛ. 12", "adresata e ul. 12" —
+  // the owner labels the address inside a multi-part message.
+  const addrLabel = cleaned.match(/(?:^|[^a-zа-я])(?:адресата|adresata|адреса|adresa)\s*(?:е|e)?\s*:?\s*([^\n,;]+)/i);
+  if (addrLabel) cleaned = addrLabel[1].trim();
+  // PHOTO-TALK TAIL STRIP — same markers as ownerName: a photo-delivery
+  // tail after the address ("UL. PARTIZANSKA 12, IMAM SLIKI KE VI
+  // PRATAM NA VIBER") must never be stored as part of the address.
+  cleaned = cleaned
+    // NOTE: no period in the split — street abbreviations "ул."/"UL."
+    // (Ulica) are ubiquitous in addresses and a period-split would cut
+    // "UL. PARTIZANSKA 12" to just "UL". Only ! ? … end a sentence here.
+    .split(/[!?…]+/)[0]
+    .replace(/\s+(?:imam|имам|sliki|слики|slikite|сликите|fotografii|фотографии|fotografite|фотографиите|ispratam|испратам|pratam|пратам|prakj|праќам|pushtam|пуштам|ke\s+vi\s+ispratam|ќе\s+ви\s+испратам|ke\s+vi\s+pratam|ќе\s+ви\s+пратам|ke\s+gi\s+ispratam|ќе\s+ги\s+испратам|ke\s+gi\s+pratam|ќе\s+ги\s+пратам|ke\s+ispratam|ќе\s+испратам|ke\s+pratam|ќе\s+пратам|na\s+ovoj\s+broj|на\s+овој\s+број|na\s+viber|на\s+вајбер|viber|вајбер|viberot|вајберот|zemi|земи)(?![a-zа-я]).*$/i, '')
+    .replace(/[,;:.\s]+$/, '')
+    .trim();
+  return cleaned;
+}
+
 /**
  * COMPLEX STATEFUL HANDLERS (Data Collection only).
  * These have early returns (follow-up questions) or complex state machine
@@ -1059,6 +1085,49 @@ export function runComplexStatefulHandlers({ u, userInput, session, nextField, h
         nextField: 'ownerName'
       };
     }
+    // ADDRESS-LIKE ANSWER AT THE NAME PROMPT (reported): the owner answers
+    // "Како да ве запишам?" with the property ADDRESS ("JOVAN BIGORSKI 65",
+    // "УЛ. ПАРТИЗАНСКА 12") — a standalone house-number token marks the
+    // answer as an address, NEVER a name. Previously the generic store below
+    // accepted it, so the address was stored as ownerName ("Jovan Bigorski
+    // 65") and the name question was effectively SKIPPED: getNextMissingField
+    // saw ownerName filled and jumped straight to the address question — the
+    // owner never got a chance to give their real name (reported "NAME NOT
+    // COLLECTED — never asked, never stored"). Route the answer to the
+    // ADDRESS field instead (if not yet collected) and re-ask the name.
+    // Word-bounded 1-4 digit token = house number (one optional trailing
+    // LETTER allowed — the common "65А" letter-suffixed house number must
+    // route too; the before-boundary still rejects digit-glued words like
+    // "GORAN4"/"GORAN123"). Messages with 7+ digits are a phone
+    // ("GORAN 070 123 456" → the tail-strip below extracts the name and
+    // drops the phone) — never routed as an address.
+    const digitCount = (userInput.replace(/\D/g, '') || '').length;
+    const hasHouseNumberToken = digitCount < 7 && /(?:^|[^a-zа-я\d])\d{1,4}[a-zа-я]?(?:$|[^a-zа-я\d])/.test(userInput);
+    if (hasHouseNumberToken) {
+      const addrCleaned = cleanAddressText(userInput);
+      if (addrCleaned.length > 0) {
+        if (session.collectedData.address === undefined || session.collectedData.address === null) {
+          // Photo-talk in the same message ("УЛ. ПАРТИЗАНСКА 12, IMAM SLIKI
+          // KE VI PRATAM") must ack the delivery promise — mirrors the
+          // generic name store and the address branch below.
+          if (mentionsPhotoTalk(userInput)) ensurePhotoDeliveryPending(session);
+          session.collectedData.address = addrCleaned;
+          delete session.collectedData.addressSkipped;
+          console.log(`[OWNER NAME: address-like answer — stored as ADDRESS "${addrCleaned}", name re-asked]`);
+        }
+        // The owner DID answer (with the wrong field) — count the attempt so
+        // the max-2-attempts skip can advance the flow if they keep giving
+        // addresses (a permanent re-ask pin would loop forever, unlike the
+        // photo-talk re-ask where the owner gave NO answer at all).
+        session.questionAttempts = session.questionAttempts || {};
+        session.questionAttempts.ownerName = (session.questionAttempts.ownerName || 0) + 1;
+        return {
+          text: 'Разбирам, тоа е адресата. Само да потврдам, како да ве запишам?',
+          type: "QUESTION",
+          nextField: 'ownerName'
+        };
+      }
+    }
     if (userInput.trim().length > 0) {
       let cleaned = userInput.trim();
       // Strip known Macedonian conversational prefixes (Latin and Cyrillic)
@@ -1117,22 +1186,7 @@ export function runComplexStatefulHandlers({ u, userInput, session, nextField, h
       };
     }
     if (userInput.trim().length > 0) {
-      let cleaned = userInput.trim();
-      // EXPLICIT ADDRESS MARKER — "АДРЕСА: УЛ. 12", "adresata e ul. 12" —
-      // the owner labels the address inside a multi-part message.
-      const addrLabel = cleaned.match(/(?:^|[^a-zа-я])(?:адресата|adresata|адреса|adresa)\s*(?:е|e)?\s*:?\s*([^\n,;]+)/i);
-      if (addrLabel) cleaned = addrLabel[1].trim();
-      // PHOTO-TALK TAIL STRIP — same markers as ownerName: a photo-delivery
-      // tail after the address ("UL. PARTIZANSKA 12, IMAM SLIKI KE VI
-      // PRATAM NA VIBER") must never be stored as part of the address.
-      cleaned = cleaned
-        // NOTE: no period in the split — street abbreviations "ул."/"UL."
-        // (Ulica) are ubiquitous in addresses and a period-split would cut
-        // "UL. PARTIZANSKA 12" to just "UL". Only ! ? … end a sentence here.
-        .split(/[!?…]+/)[0]
-        .replace(/\s+(?:imam|имам|sliki|слики|slikite|сликите|fotografii|фотографии|fotografite|фотографиите|ispratam|испратам|pratam|пратам|prakj|праќам|pushtam|пуштам|ke\s+vi\s+ispratam|ќе\s+ви\s+испратам|ke\s+vi\s+pratam|ќе\s+ви\s+пратам|ke\s+gi\s+ispratam|ќе\s+ги\s+испратам|ke\s+gi\s+pratam|ќе\s+ги\s+пратам|ke\s+ispratam|ќе\s+испратам|ke\s+pratam|ќе\s+пратам|na\s+ovoj\s+broj|на\s+овој\s+број|na\s+viber|на\s+вајбер|viber|вајбер|viberot|вајберот|zemi|земи)(?![a-zа-я]).*$/i, '')
-        .replace(/[,;:.\s]+$/, '')
-        .trim();
+      const cleaned = cleanAddressText(userInput);
       if (cleaned.length > 0) {
         if (mentionsPhotoTalk(userInput)) ensurePhotoDeliveryPending(session);
         session.collectedData.address = cleaned;
