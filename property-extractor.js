@@ -901,7 +901,7 @@ export function extractPrice(text) {
   // (sqm, floor, terrace, etc.) WITHOUT any price indicators.
   // Prevents false positives like "100 m2, 3 kat" → cleanPrice=100.
   const uClean = text.toLowerCase();
-  const hasPriceKeywords = /iljadi|илјади|evra|евра|eur|evro|евро|cena|цена|plate|плате|plakja|плаќа|kirija|кирија/i.test(uClean);
+  const hasPriceKeywords = /iljadi|илјади|evra|евра|evri|еври|eur|evro|евро|cena|цена|plate|плате|plakja|плаќа|kirija|кирија/i.test(uClean);
   // NON-PRICE CONTEXT WORDS (sqm/floor/room/terrace/year/...): a message
   // describing those fields must never be read as a price — "100 m2, 3 kat"
   // is not 100€. Hoisted OUT of the !hasPriceKeywords block (reviewer
@@ -945,6 +945,58 @@ export function extractPrice(text) {
   // context words, so "… dvesta kvadrati" (sqm answer) and "… tret sprat"
   // (floor answer) never phantom as prices even when a price keyword
   // appears elsewhere in the sentence.
+  //
+  // CURRENCY-BOUND WORD PRICE (reported, lead 3571074): "cetrsto dvaeset
+  // evra + davacki , parking poc" (420€ + fees, POC parking) — the owner
+  // answered the rent question with a clear word price and VOLUNTEERED
+  // extra details in the same message. The global hasNonPriceContext guard
+  // used to block ANY word-price when a non-price word ("parking") appeared
+  // anywhere, so the first ask collected nothing and Ana re-asked ("Само да
+  // потврдам, колкава е месечната кирија?") → owner annoyed ("ti kazav
+  // cetrsto dvaeset evra mesecno"). A number-word phrase DIRECTLY followed
+  // by a currency word (evra/евра/evro/евро/eur/evri/еври — the dialectal
+  // plural) is an unambiguous price: extract it BEFORE the non-price-context
+  // guard. The guard still protects genuinely ambiguous numbers ("dvesta
+  // kvadrati", "tret sprat") — those carry no currency word. A non-price
+  // word within 2 tokens BEFORE the phrase rejects it ("terasa e cetrsto
+  // evra" = the terrace is 400€, a terrace price — the noun binds the
+  // number, not a rent). The noun list includes the definite-article forms
+  // (terasata/терасата, klimata/климата, garazata/гаражата, spalnite/спалните,
+  // parkingot/паркингот — the most common in real speech) so "terasata e
+  // cetrsto evra" is also rejected; rarer inflections (terasite, klimata
+  // variants) are a known limitation of exact-token matching, consistent with
+  // the codebase's exact-word style.
+  const currencyBoundWordPrice = (() => {
+    const tokens = uClean.split(/[\s,;:]+/).filter(Boolean);
+    let i = 0;
+    while (i < tokens.length) {
+      if (parseNumberWords(tokens[i]) === null) { i++; continue; }
+      // Extend the run over number words + the "i"/"и" connector
+      let j = i;
+      while (j < tokens.length && (parseNumberWords(tokens[j]) !== null || /^[iи]$/i.test(tokens[j]))) j++;
+      // Currency within the next 2 tokens?
+      const after = tokens.slice(j, j + 2);
+      const currencyAdjacent = after.some(t => /^(?:evra|евра|evro|евро|eur|evri|еври)$/i.test(t));
+      if (currencyAdjacent) {
+        // Non-price noun immediately BEFORE the phrase ("terasa e cetrsto
+        // evra") rejects the currency-bound reading. Definite-article forms
+        // (terasata/терасата, klimata/климата, garazata/гаражата,
+        // spalnite/спалните, parkingot/паркингот) are listed explicitly —
+        // "терасата е четирсто евра" (THE terrace is 400€) must reject the
+        // same as the bare noun.
+        const before = tokens.slice(Math.max(0, i - 2), i);
+        const nounAdjacent = before.some(t => /^(?:m2|м2|kvadrati|квадрати|kvadrata|квадрата|kv|кв|sqm|kat|кат|sprat|спрат|katnica|катница|lift|лифт|klima|клима|klimata|климата|garaza|гаража|garazata|гаражата|terasa|тераса|terasata|терасата|terasite|терасите|spalni|спални|spalnite|спалните|parking|паркинг|parkingot|паркингот|garage|гараж|potkrovje|поткровје|zgrada|зграда|zgradata|зградата|godina|година|godinata|годината|izgraden|изграден|graden|граден|renoviran|реновиран|renovira|реновира|obnoven|обновен|osvezen|освежен)$/i.test(t));
+        if (!nounAdjacent) {
+          const pv = parseNumberWords(tokens.slice(i, j).join(' '));
+          if (pv !== null && pv >= 10) return pv;
+        }
+      }
+      i = j; // never re-start inside the same run
+    }
+    return null;
+  })();
+  if (currencyBoundWordPrice !== null) return currencyBoundWordPrice;
+
   const hasDigits = /\d/.test(uClean);
   const bareWordPrice = parseNumberWords(uClean);
   if (bareWordPrice !== null && !hasDigits && !hasNonPriceContext) {

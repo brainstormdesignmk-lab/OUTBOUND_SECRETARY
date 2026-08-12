@@ -1083,7 +1083,7 @@ const FIELD_CONFIDENCE_KEYWORDS = {
   // extractMonthlyRent only fires when transactionType==='rent' — the sale
   // price keeps its own currency keywords on cleanPrice. A bare "350" (no
   // currency word) still scores MEDIUM → confirmation re-ask (unchanged).
-  'monthlyRent': /kirija|кирија|mesecno|месечно|izdavam|издавам|izdava|издава|iznajmuvam|изнајмувам|iznajmuva|изнајмува|pod kirija|под кирија|evra|евра|evro|евро|eur|reziski|режиски/i,
+  'monthlyRent': /kirija|кирија|mesecno|месечно|izdavam|издавам|izdava|издава|iznajmuvam|изнајмувам|iznajmuva|изнајмува|pod kirija|под кирија|evra|евра|evri|еври|evro|евро|eur|reziski|режиски/i,
   // AVAILABLE-FROM DATE — month names, day markers, immediate words, and the
   // RELATIVE-DATE vocabulary are unambiguous date answers to "Од кога ќе биде
   // слободен?". RELATIVE FORMS (reported): "ZA DVA DENA" (in 2 days), "za dve

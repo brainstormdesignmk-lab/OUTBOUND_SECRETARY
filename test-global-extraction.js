@@ -534,6 +534,48 @@ assert("RT3g3: 'go izdavam za dvesta evra' → 200 (real word rent with keyword)
 result = runGlobalExtraction("dvesta spalni", { transactionType: 'rent' }, 'monthlyRent');
 assert("RT3g4: 'dvesta spalni' NOT extracted as rent (room count)", result.monthlyRent === undefined, `got ${JSON.stringify(result.monthlyRent)}`);
 
+// Test 33h: CURRENCY-BOUND WORD PRICE (reported, lead 3571074): the owner
+// answered "Колкава е месечната кирија?" with "cetrsto dvaeset evra +
+// davacki , parking poc" (420€ + fees, POC parking) — a clear word price with
+// VOLUNTEERED extras. The global hasNonPriceContext guard ("parking" is a
+// non-price word) used to block the bare word-price path entirely, so the
+// FIRST ask collected nothing → confirmatory re-ask ("Само да потврдам,
+// колкава е месечната кирија?") → owner annoyed ("ti kazav cetrsto dvaeset
+// evra mesecno"). A number-word phrase DIRECTLY followed by a currency word
+// is an unambiguous price and extracts BEFORE the guard.
+result = runGlobalExtraction("cetrsto dvaeset evra + davacki , parking poc", { transactionType: 'rent' }, 'monthlyRent');
+assert("RT3h: 'cetrsto dvaeset evra + davacki , parking poc' → monthlyRent=420 (currency-bound word price)", result.monthlyRent === 420, `got ${JSON.stringify(result.monthlyRent)}`);
+assert("RT3h: cleanPrice NOT extracted for rent", result.cleanPrice === undefined, `got ${JSON.stringify(result.cleanPrice)}`);
+assert("RT3h: monthlyRent confidence HIGH (evra currency marker → no re-ask)",
+  assessConfidence('monthlyRent', 420, 'cetrsto dvaeset evra + davacki , parking poc') === 'HIGH',
+  `got ${assessConfidence('monthlyRent', 420, 'cetrsto dvaeset evra + davacki , parking poc')}`);
+// Cyrillic twin — "четирсто дваесет евра + давачки , паркинг"
+result = runGlobalExtraction("четирсто дваесет евра + давачки , паркинг", { transactionType: 'rent' }, 'monthlyRent');
+assert("RT3h2: Cyrillic 'четирсто дваесет евра + давачки , паркинг' → monthlyRent=420", result.monthlyRent === 420, `got ${JSON.stringify(result.monthlyRent)}`);
+assert("RT3h2: Cyrillic monthlyRent confidence HIGH",
+  assessConfidence('monthlyRent', 420, 'четирсто дваесет евра + давачки , паркинг') === 'HIGH',
+  `got ${assessConfidence('monthlyRent', 420, 'четирсто дваесет евра + давачки , паркинг')}`);
+// The volunteer extras still extract normally (parking keyword → true)
+assert("RT3h3: parking=true volunteered in the same message", result.parking === true, `got ${JSON.stringify(result.parking)}`);
+// GUARD: a non-price noun immediately BEFORE the word phrase binds the number
+// to that noun — "terasa e cetrsto evra" (the terrace is 400€) is a TERRACE
+// price, never a rent; the currency-bound reading must reject it. The
+// definite-article forms ("terasata e cetrsto evra" = THE terrace is 400€)
+// are listed in the noun guard too, so they reject identically.
+result = runGlobalExtraction("terasa e cetrsto evra", { transactionType: 'rent' }, 'monthlyRent');
+assert("RT3h4: 'terasa e cetrsto evra' NOT extracted as rent (terrace price, noun-bound)", result.monthlyRent === undefined, `got ${JSON.stringify(result.monthlyRent)}`);
+result = runGlobalExtraction("terasata e cetrsto evra", { transactionType: 'rent' }, 'monthlyRent');
+assert("RT3h4b: 'terasata e cetrsto evra' NOT extracted (definite-article terrace form)", result.monthlyRent === undefined, `got ${JSON.stringify(result.monthlyRent)}`);
+// CONTRAST CONTROL (reviewer finding): the RENT noun ("kirijata") is NOT a
+// non-price noun — "kirijata e cetrsto evra" (the rent IS 400€) is a genuine
+// direct rent answer and MUST extract 400. If someone later adds kirija to
+// the noun guard, this test pins the regression.
+result = runGlobalExtraction("kirijata e cetrsto evra", { transactionType: 'rent' }, 'monthlyRent');
+assert("RT3h5: 'kirijata e cetrsto evra' → monthlyRent=400 (rent noun NOT blocked)", result.monthlyRent === 400, `got ${JSON.stringify(result.monthlyRent)}`);
+// Dialectal currency plural "evri"/"еври" unlocks the same currency-bound path
+result = runGlobalExtraction("cetrsto evri + parking", { transactionType: 'rent' }, 'monthlyRent');
+assert("RT3h6: 'cetrsto evri + parking' → monthlyRent=400 (dialectal evri currency)", result.monthlyRent === 400, `got ${JSON.stringify(result.monthlyRent)}`);
+
 // Test 33e: UTILITIES-FIRST GUARD — "reziski se 50 evra, kirijata 350"
 // (utilities are 50€, the rent is 350). extractPrice grabs the FIRST number,
 // and "evra" now scores the result HIGH — without a strip, monthlyRent=50
