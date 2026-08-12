@@ -225,7 +225,7 @@ export function runEarlyResponses({ u, isRent, session }) {
   // ========================================
   if (!session.collectedData.cooperationAccepted) {
     const REFUSAL_GUARD_RE =
-      /ne\s*sakam|не\s*сакам|ne\s+sum\s+zainteresiran|не\s+сум\s+заинтересиран|ne\s+mi\s+treba|не\s+ми\s+треба|nemam\s+potreba|немам\s+потреба|bez\s+agencija|без\s+агенциј|nema\s+sorabotka|нема\s+соработка|ne\s+planira\s+da\s+sorabotuv|не\s+планира\s+да\s+соработув|ne\s+interesira|не\s+интересира|nema\s+da\s+sorabotuv|нема\s+да\s+соработув|ne\s*sum\s*(?:[,.!?]+\s*)?(?:fala|фала|blagodaram|благодарам)?\s*[.!?]?$/i;
+      /ne\s*sakam|не\s*сакам|ne\s+sum\s+zainteresiran|не\s+сум\s+заинтересиран|ne\s+mi\s+treba|не\s+ми\s+треба|nemam\s+potreba|немам\s+потреба|bez\s+agencija|без\s+агенциј|nema\s+sorabotka|нема\s+соработка|ne\s+planira\s+da\s+sorabotuv|не\s+планира\s+да\s+соработув|ne\s+interesira|не\s+интересира|nema\s+da\s+sorabotuv|нема\s+да\s+соработув|ne\s*sum\s*(?:[,.!?]+\s*)?(?:fala|фала|blagodaram|благодарам)?\s*[.!?]?$|ne\s+bi\s+sorabotuval|не\s+би\s+соработувал|ne\s+bi\s+sorabotuvala|не\s+би\s+соработувала|ne\s+bi\s+sorabotuvali|не\s+би\s+соработувале|nemam\s+vreme|немам\s+време|probam\s+sam|пробам\s+сам|ke\s+(?:ve|te)\s*(?:kontaktiram|izvestam)|ќе\s+(?:ве|те)\s*(?:контактирам|известам)|ke\s+bideme\s+vo\s+kontakt|ќе\s+бидеме\s+во\s+контакт|ke\s+se\s+javam|ќе\s+се\s+јавам/i;
     const COOP_AGENCY_CTX_RE = /sorabotk|соработк|agenci|агенци|zakup|закуп|izdavanje|издавање|prodazba|продажба|imot|имот/i;
     // COMMISSION-SPECIFIC REFUSAL EXCLUSION (reviewer finding): "ne sakam
     // provizija" / "ne sakam %" refuse a SPECIFIC TERM, not cooperation —

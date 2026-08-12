@@ -269,13 +269,18 @@ const tests = [
   ['реков дека sakam', {intent:'ACCEPTED', minConf:0.85}],  // mixed Cyrillic/Latin
   ['тоа го реков', {intent:'ACCEPTED', minConf:0.85}],
   // Negation/refusal guards must NOT accept these
-  ['jas rekov deka nemam vreme', {intent:'INTERESTED', minConf:0.50}],
+  // NOTE (reported lead 5540516): "nemam vreme" is now a SOFT-REFUSAL
+  // (REJECTED 0.8) — counting it escalates the ladder to the polite
+  // goodbye instead of letting Ana pitch forever. "nemam iskustvo" (no
+  // experience) and "немам тераса" (no terrace — a data answer) stay
+  // INTERESTED.
+  ['jas rekov deka nemam vreme', {intent:'REJECTED', minConf:0.8}],
   ['jas rekov deka nemam iskustvo', {intent:'INTERESTED', minConf:0.50}],
   ['тоа го реков дека немам тераса', {intent:'INTERESTED', minConf:0.50}],
   ['jas rekov deka sakam da se javam', {intent:'INTERESTED', minConf:0.50}],  // delay signal
   ['реков дека не сакам', {intent:'REJECTED', minConf:0.85}],
   ['не ти реков дека сакам соработка', {intent:'REJECTED', minConf:0.85}],
-  ['jas kazav deka nemam vreme', {intent:'INTERESTED', minConf:0.50}],
+  ['jas kazav deka nemam vreme', {intent:'REJECTED', minConf:0.8}],
 ];
 
 const harness = createHarness();

@@ -12,8 +12,8 @@
 //   - classifier.js: bare "NE SUM" (short answer) → REJECTED 0.85.
 //   - handlers/early-responses.js: REFUSAL GUARD (persuasion-only, after the
 //     cooperation-rollback check) routes clear refusals to the rejection
-//     classifier — the rebuttal ladder (1 → rebuttal, 2 → give up,
-//     3 → CLOSED) finally runs.
+//     classifier — the rebuttal ladder (1 → rebuttal, 2 → polite goodbye +
+//     CLOSED, 3+ → just cut) finally runs.
 // Controls verified: commission QUESTIONS, commission-specific refusals
 // ("ne sakam da platam provizija"), hesitation ("ne sum siguren"), and the
 // still-available family ("uste ne sum go prodal") are untouched.
@@ -78,12 +78,12 @@ console.log('========================================\n');
     `rejCount=${s.rejectionCount} reply=${(r1.text || '').slice(0, 60)}`);
 
   const r2 = await generateResponse(s, 'NE SAKAM SORABOTKA');
-  assert('B2: rejection 2 → give-up (no pitch, no question)',
-    s.rejectionCount === 2 && !/пробаме|провизија|соработк/.test(r2.text || ''),
-    `rejCount=${s.rejectionCount} reply=${(r2.text || '').slice(0, 60)}`);
+  assert('B2: rejection 2 → polite goodbye + CLOSED (no pitch, no question)',
+    r2.type === 'CLOSED' && !/пробаме|провизија|соработк/.test(r2.text || ''),
+    `rejCount=${s.rejectionCount} type=${r2.type} reply=${(r2.text || '').slice(0, 60)}`);
 
   const r3 = await generateResponse(s, 'OSTAVI ME');
-  assert('B3: rejection 3 → polite goodbye + CLOSED',
+  assert('B3: rejection 3 → just cut (CLOSED)',
     r3.type === 'CLOSED', `got ${r3.type} — ${(r3.text || '').slice(0, 60)}`);
   assert('B3: cooperation stays false (never entered data collection)',
     s.collectedData.cooperationAccepted !== true, 'was accepted!');

@@ -313,6 +313,70 @@ export function classifyIntent(userInput, conversation) {
   }
 
   // ==========================================
+  // SOFT-REFUSAL FAMILY (reported, lead 5540516): the owner's polite
+  // brush-offs were classified INTERESTED — "Mislam deka ne bi sorabotuval
+  // so agencija" (0.7), "sakam da probam sam prvo" (0.7), "nemam vreme sega,
+  // ke bideme vo kontakt" (0.5), "ako ne go prodadam ke ve kontaktiram"
+  // (0.6), "fala vi" — so rejectionCount never incremented (INTERESTED>0.5
+  // even RESET it) and Ana kept pitching through message after message.
+  // All of these ARE refusals of the cooperation question: count them so the
+  // ladder escalates (1 → rebuttal, 2 → polite goodbye + CLOSED, 3+ → cut).
+  // All fire BEFORE the ACCEPTED catch-alls ("ke probam" 0.85 etc).
+  // ==========================================
+
+  // "NE BI SORABOTUVAL(A)" — "I wouldn't work with [an agency]" — a firm
+  // conditional no ("Mislam deka ne bi sorabotuval so agencija").
+  if (/(?:ne|не)\s*bi\s*(?:sorabotuval|соработувал|sorabotuvala|соработувала|sorabotuvali|соработувале)/i.test(u)) {
+    return { intent: "REJECTED", confidence: 0.85, reason: "ne bi sorabotuval (conditional no)" };
+  }
+
+  // "DA PROBAM SAM" / "PROBAM SAM PRVO" — "I'll try [selling it] myself
+  // first". The self-service rule above covers "sam KE probam" and
+  // "ke probam sam"; this covers the "sakam da probam sam prvo" shape (no
+  // ke, sam AFTER the verb). Word boundary keeps 1pl "probame" (we'll try
+  // together) clean.
+  if (/probam\s+(?:sam|сам)(?:\s|$)/i.test(u) || /(?:sam|сам)\s*(?:da|да)\s+probam(?:\s|$)/i.test(u)) {
+    return { intent: "REJECTED", confidence: 0.85, reason: "self-service (probam sam)" };
+  }
+
+  // "NEMAM VREME" — "I have no time [now]" — the most common polite
+  // brush-off ("nemam vreme sega, ke bideme vo kontakt"). ESCAPE (reviewer
+  // finding): a strong acceptance marker in the same message wins —
+  // "nemam vreme da odgovoram na se, ama da probame" (no time to answer
+  // everything, but let's try) is a commitment, not a refusal. REJECTED
+  // rules run before ACCEPTED, so without the escape the acceptance would
+  // never get a chance. The escape also honors the cooperation-commitment
+  // verbs ("nemam vreme za sostanoci ama sakam da sorabotuvame" = I want
+  // to work together) — but NOT bare "nemam vreme da sorabotuvam sega"
+  // (no time to cooperate NOW is still a refusal).
+  if (/(?:nemam|немам|nema|нема)\s+(?:vreme|време)/i.test(u) &&
+      !/(?:ajde|ајде|da\s+(?:probame|пробаме)|moze\s+da|може\s+да|se\s+soglasuvam|се\s+согласувам|prifakjam|прифаќам|(?:sakam|сакам|ke|ќе)\s*(?:da|да)?\s*(?:sorabotuvam|соработувам|sorabotuvame|соработуваме)|sorabotuvame|соработуваме)/i.test(u)) {
+    return { intent: "REJECTED", confidence: 0.8, reason: "nemam vreme (no time)" };
+  }
+
+  // FUTURE-CONTACT BRUSH-OFF — "ke ve kontaktiram" (I'll contact you),
+  // "ke bideme vo kontakt" (we'll be in touch), "ke se javam" (I'll call
+  // back) — the owner DEFERS instead of committing. Same family as the delay
+  // signal the prior-agreement acknowledgment deliberately excludes.
+  if (/(?:ke|ќе)\s*(?:se|се)\s*(?:javam|јавам)/i.test(u) ||
+      /(?:ke|ќе)\s*(?:bideme|бидеме)\s*(?:vo|во)\s*(?:kontakt|контакт)/i.test(u) ||
+      /(?:ke|ќе)\s*(?:ve|ве|te|те)\s*(?:kontaktiram|контактирам|izvestam|известам)/i.test(u)) {
+    return { intent: "REJECTED", confidence: 0.8, reason: "future contact (brush-off)" };
+  }
+
+  // STANDALONE THANKS — "fala vi" / "blagodaram" alone: in the persuasion
+  // context a whole-message thank-you is a polite no ("thanks, I'm done").
+  // WHOLE-MESSAGE only, so "fala, dogovoreno" (thanks, agreed) and "fala za
+  // informaciite, ke razmislam" are never swallowed — those stay engagement.
+  // Two-word forms FIRST (longest-match), both scripts for the tail:
+  // "благодарам ви" (all Cyrillic) must match — the paired tail keeps the
+  // script of the head (reviewer finding: an earlier draft paired Cyrillic
+  // "благодарам" with Latin "vi", missing the all-Cyrillic form).
+  if (/^(?:fala\s*vi|фала\s*ви|fala\s*ti|фала\s*ти|vi\s*blagodaram|ви\s*благодарам|blagodaram\s*vi|благодарам\s*ви|blagodaram\s*ti|благодарам\s*ти|fala|фала|blagodaram|благодарам)(?:[.!]?)$/i.test(u)) {
+    return { intent: "REJECTED", confidence: 0.75, reason: "standalone thanks (polite no)" };
+  }
+
+  // ==========================================
   // NEGATED COOPERATION STATEMENT — rollback phrases
   // "ne sum rekol deka sakam sorabotka" (I didn't say I want to cooperate),
   // "ne ti rekov deka sakam sorabotka", "ne kazav deka sakam sorabotka",

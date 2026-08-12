@@ -194,6 +194,24 @@ const LEXICON = [
   { id: 'H12', category: 'heavy_insult', severity: 2, confidence: 0.9, stems: ['jebem ti'], reason: 'jebem ti' },
   { id: 'H13', category: 'heavy_insult', severity: 2, confidence: 0.9, stems: ['materina', 'materinu'], reason: 'materina' },
   { id: 'H14', category: 'heavy_insult', severity: 2, confidence: 0.9, stems: ['koja si ti'], reason: 'koja si ti (deliberately NOT "koj si ti" — "кој си ти?" is a normal question)' },
+  // PRODUCTION MISS (reported, lead 5540516): "kucko razebana" (fucking
+  // bitch) was strike-3 material but the lexicon had ZERO entry for it — Ana
+  // answered with a selling follow-up instead of terminating. kucko/kucka
+  // cover kucko/kuchka/kučko/kučka/кучко/кучка via the normalizer; boundary
+  // keeps "kuce" (puppy — innocent pets talk) clean. Definite forms
+  // (kuckata/kuckite/kuckoto — куцката etc) are separate stems because the
+  // boundary guard rejects them when embedded (reviewer finding: an insult
+  // like "kuckata razebana" would otherwise slip through).
+  { id: 'H15', category: 'heavy_insult', severity: 2, confidence: 0.95, stems: ['kucko', 'kucka', 'kucki', 'kuckata', 'kuckite', 'kuckoto', 'kuckov', 'kuckova'], boundary: true, reason: 'kucko/kucka (bitch/dog — kuchko, kučko, кучко all normalize here)' },
+  // razeban/razebana/razebani/razebano = past participle of ебам (fucked) —
+  // the S0k ebam family only covers present-tense forms, and the participle
+  // "razebana" does NOT contain any of them ("razebana" has "eba", not
+  // "ebam"). No boundary needed — no innocent Macedonian word contains this
+  // root.
+  { id: 'H16', category: 'heavy_insult', severity: 2, confidence: 0.95, stems: ['razeban', 'razebana', 'razebani', 'razebano'], reason: 'razebana (razeban/разебана — ebam past participle)' },
+  // jebi se/go/te (fuck off / fuck you) — vulgar imperative; the mild
+  // "odjebi" (M2) is a different word that normalizes separately.
+  { id: 'H17', category: 'heavy_insult', severity: 2, confidence: 0.9, stems: ['jebi se', 'jebi go', 'jebi te'], reason: 'jebi se (fuck off/you — vulgar imperative)' },
 
   // ---------- MILD (severity 1) ----------
   { id: 'M1', category: 'mild', severity: 1, confidence: 0.8, stems: ['mlci', 'mlcis', 'utkni', 'zatkni'], reason: 'shut up (mlci/utkni/zatkni)' },

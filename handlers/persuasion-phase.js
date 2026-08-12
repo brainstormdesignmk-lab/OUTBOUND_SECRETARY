@@ -8,8 +8,8 @@
 //      - classifies the owner's intent
 //      - handles short positive confirmations (immediate acceptance)
 //      - enforces the COOPERATION ACCEPTANCE GATE (confidence >= 0.85)
-//      - handles REJECTED escalation (1 → persuasion, 2 → persuasion,
-//        3 → CLOSED) and low-confidence INTERESTED → CLOSED
+//      - handles REJECTED escalation (1 → rebuttal, 2 → polite goodbye +
+//        CLOSED, 3+ → cut) and low-confidence INTERESTED → CLOSED
 //      Returns { phase, classification } or { response } for early returns.
 //   2. runPersuasion() — the native-Macedonian LLM persuasion call with
 //      exponential-backoff retry and post-processing.
@@ -183,29 +183,15 @@ export function detectPhase({ u, conv, session, isRent }) {
             }
           };
         } else if (session.rejectionCount === 2) {
-          // SECOND REJECTION → GIVE UP (reported, lead 5502969). The old
-          // behavior sent a THIRD persuasion pitch, making Ana repeat the
-          // same sentence like a bot. On the second firm rejection she must
-          // STOP pitching: acknowledge the owner's decision, no sales
-          // sentence, no cooperation question. The polite goodbye + CLOSED
-          // comes on the THIRD rejection (next branch). Variants are
-          // randomized so consecutive leads don't read the same sentence.
-          const giveUpVariants = [
-            "Разбирам, ја почитувам вашата одлука.",
-            "Во ред, нема да ве притискам. Ви благодарам на разговорот.",
-            "Разбирам целосно. Ви посакувам успех во вашите планови."
-          ];
-          mirrorPhase(session, 'PERSUASION');
-          return {
-            response: {
-              text: giveUpVariants[Math.floor(Math.random() * giveUpVariants.length)],
-              type: "NORMAL"
-            }
-          };
-        } else {
-          // THIRD REJECTION → POLITE GOODBYE + CLOSED (reported, lead
-          // 5502969). All variants are rent/sale-neutral (no "без надокнада"
-          // sale-only claims).
+          // SECOND REJECTION → POLITE GOODBYE + CLOSED (user-approved
+          // cadence, reported lead 5540516): the old ladder only CLOSED on
+          // the THIRD rejection — the second got a bare acknowledgment and
+          // a third firm "no" still heard a goodbye. Now the second firm
+          // refusal ends the conversation with a polite goodbye (the next
+          // branch is the "just cut" fallback for anything that arrives
+          // after closing). All variants are rent/sale-neutral (no
+          // "без надокнада" sale-only claims). Variants rotate so
+          // consecutive leads don't read the same sentence.
           const goodbyeVariants = [
             "Ве разбирам, можете да пробате сами, но ако не успеете, ние сме тука да ви помогнеме. Ви посакуваме успех и доколку се предомислите, слободно контактирајте нѐ.",
             "Во ред, ја почитувам вашата одлука. Ако сепак одлучите да соработувате, ние сме на располагање. Ви благодариме и ви посакуваме се најдобро.",
@@ -216,6 +202,24 @@ export function detectPhase({ u, conv, session, isRent }) {
           return {
             response: {
               text: goodbyeVariants[Math.floor(Math.random() * goodbyeVariants.length)],
+              type: "CLOSED"
+            }
+          };
+        } else {
+          // THIRD+ REJECTION → JUST CUT (reported, lead 5540516): the owner
+          // has said no three times — no sales sentence, no question, no
+          // explanation. A single short closing line is all they get; the
+          // conversation is over. (Strike-3 insults terminate even harder —
+          // the TERMINATE response is never sent to the owner at all.)
+          const cutVariants = [
+            "Разговорот е завршен.",
+            "Ви посакувам пријатен ден.",
+            "Разговорот е завршен. Пријатен ден."
+          ];
+          mirrorPhase(session, 'PERSUASION');
+          return {
+            response: {
+              text: cutVariants[Math.floor(Math.random() * cutVariants.length)],
               type: "CLOSED"
             }
           };
