@@ -128,6 +128,53 @@ assert("N8: 'seese i osum kvadrata so terasa golema' → totalSqm=68 (seese=60 +
 assert("N8: bedrooms NOT extracted from the sqm phrase", result.bedrooms === undefined, `got ${JSON.stringify(result.bedrooms)}`);
 assert("N8: hasTerrace NOT extracted (no terrace SIZE given)", result.hasTerrace === undefined, `got ${JSON.stringify(result.hasTerrace)}`);
 assert("N8: terraceSqm NOT extracted", result.terraceSqm === undefined, `got ${JSON.stringify(result.terraceSqm)}`);
+
+// Test: THE reported message — "IMA 65 KVADRATA BKUPNO , 5 SE TERASA"
+// (65 m² total, 5 of which is terrace; "BKUPNO" = Viber typo for VKUPNO).
+// The copula-bound "5 SE TERASA" is the terrace size — the total-sqm
+// extractor correctly took 65, but extractTerrace's old PRIORITY 3 window
+// (.{0,20}? across "BKUPNO , 5 SE") crowned 65 as the terrace too. The fix
+// delegates the copula-bound rule to extractTerraceNumber FIRST.
+result = runGlobalExtraction("IMA 65 KVADRATA BKUPNO , 5 SE TERASA", {});
+assert("N9: 'IMA 65 KVADRATA BKUPNO , 5 SE TERASA' → totalSqm=65", result.totalSqm === 65, `got ${result.totalSqm}`);
+assert("N9: terraceSqm=5 (copula-bound number wins, NOT the 65 total)", result.terraceSqm === 5, `got ${JSON.stringify(result.terraceSqm)}`);
+assert("N9: hasTerrace=true", result.hasTerrace === true, `got ${JSON.stringify(result.hasTerrace)}`);
+// Same copula shape without the BKUPNO typo and with Cyrillic — the 63 m²
+// total with 2 m² terrace family (mirrors test-terrace-of-which.js, now
+// pinned on the GLOBAL extraction path too, since the two extractors drifted)
+result = runGlobalExtraction("63 kvadrata, 2 se terasa", {});
+assert("N10: '63 kvadrata, 2 se terasa' → totalSqm=63, terraceSqm=2", result.totalSqm === 63 && result.terraceSqm === 2, `got total=${result.totalSqm} ter=${result.terraceSqm}`);
+result = runGlobalExtraction("VKUPNO IMA SEESET I TRI KVADRATA OD KOI 2 SE TERASA", {});
+assert("N11: 'VKUPNO IMA SEESET I TRI KVADRATA OD KOI 2 SE TERASA' → totalSqm=63, terraceSqm=2", result.totalSqm === 63 && result.terraceSqm === 2, `got total=${result.totalSqm} ter=${result.terraceSqm}`);
+// Guards from the shared extractor must stay (global path): plural COUNT is
+// not a size, and a bare "terasa golema" without a number stays unset.
+result = runGlobalExtraction("ima 2 terasi", {});
+assert("N12: 'ima 2 terasi' → terraceSqm NOT extracted (plural count, not size)", result.terraceSqm === undefined, `got ${JSON.stringify(result.terraceSqm)}`);
+result = runGlobalExtraction("ima terasa golema", {});
+assert("N13: 'ima terasa golema' → terraceSqm NOT extracted (no size given)", result.terraceSqm === undefined, `got ${JSON.stringify(result.terraceSqm)}`);
+result = runGlobalExtraction("terasa od 3 m2", {});
+assert("N14: 'terasa od 3 m2' → terraceSqm=3 (own unit, unchanged)", result.terraceSqm === 3, `got ${JSON.stringify(result.terraceSqm)}`);
+result = runGlobalExtraction("68 kvadrati i terasa 4", {});
+assert("N15: '68 kvadrati i terasa 4' → totalSqm=68, terraceSqm=4 (bare after terasa)", result.totalSqm === 68 && result.terraceSqm === 4, `got total=${result.totalSqm} ter=${result.terraceSqm}`);
+// Delegation-order guard (battery-caught): with the shared extractor delegated
+// FIRST, "65m2 so terasa od 3 m2" resolved to 65 — extractTerraceNumber's
+// proximity scan treats the equidistant "65m2" (own unit, distance 2) and
+// "3 m2" (adjacent unit, distance 2) as ties and kept the first. The strong
+// "number right after terasa" signal must win: delegation runs AFTER it.
+result = runGlobalExtraction("65m2 so terasa od 3 m2", {});
+assert("N16: '65m2 so terasa od 3 m2' → terraceSqm=3 (number after terasa wins)", result.totalSqm === 65 && result.terraceSqm === 3, `got total=${result.totalSqm} ter=${result.terraceSqm}`);
+// Digit-total phantom (reviewer-caught): "65 kvadrata so terasa" (65 m² with
+// a terrace, NO size given) must NOT crown the total as the terrace — the old
+// .{0,20}? window did exactly that. The shared extractor rejects it (total-sqm
+// phrase guard) and no copula binds the number to the terrace.
+result = runGlobalExtraction("65 kvadrata so terasa", {});
+assert("N17: '65 kvadrata so terasa' → terraceSqm NOT extracted (no size given)", result.totalSqm === 65 && result.terraceSqm === undefined, `got total=${result.totalSqm} ter=${result.terraceSqm}`);
+// Plural copula (extraction-suite guard, now pinned on the global path):
+// "5 KVADRATI SE TERASI" — 5 m² ARE the terrace. The shared extractor
+// DELIBERATELY returns null (its singular-only copula rule + plural bare-count
+// guard), so the copula-bound "N unit se terasi" rule in extractTerrace owns it.
+result = runGlobalExtraction("vkupno ima deveesetitri kvadrata a 5 kvadrati se terasi ima 2", {});
+assert("N18: '5 kvadrati se terasi' → totalSqm=93, terraceSqm=5 (plural copula)", result.totalSqm === 93 && result.terraceSqm === 5, `got total=${result.totalSqm} ter=${result.terraceSqm}`);
 // Truncated-tens family — "seese i osum" alone, and its Cyrillic/full cousins
 result = runGlobalExtraction("seese i osum kvadrati", {});
 assert("N8b: 'seese i osum kvadrati' → totalSqm=68", result.totalSqm === 68, `got ${result.totalSqm}`);

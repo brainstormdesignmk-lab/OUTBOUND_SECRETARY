@@ -58,6 +58,18 @@ for (const [msg, expected] of TERRA) {
   assert(`"${msg}" → ${expected} (not the total-sqm number)`, got === expected, `got ${got}`);
 }
 
+// THE reported global-path variant (lead 75871): "IMA 65 KVADRATA BKUPNO ,
+// 5 SE TERASA" — "BKUPNO" is a Viber typo of VKUPNO. extractTerraceNumber
+// must resolve the copula-bound "5 SE TERASA" → 5, NOT the 65 total. The
+// data-collector.js global extractor (extractTerrace) delegates to this
+// function first, so pinning it here guards the reported failure.
+assert('A2: "IMA 65 KVADRATA BKUPNO , 5 SE TERASA" → 5 (typo + copula bound)',
+  extractTerraceNumber('IMA 65 KVADRATA BKUPNO , 5 SE TERASA') === 5,
+  `got ${extractTerraceNumber('IMA 65 KVADRATA BKUPNO , 5 SE TERASA')}`);
+assert('A2: "65 kvadrata , 5 se terasa" → 5',
+  extractTerraceNumber('65 kvadrata , 5 se terasa') === 5,
+  `got ${extractTerraceNumber('65 kvadrata , 5 se terasa')}`);
+
 // Guard: the fix must NOT change legit terrace answers
 assert('A2: "ima terasa 5m2" still → 5', extractTerraceNumber('ima terasa 5m2') === 5, `got ${extractTerraceNumber('ima terasa 5m2')}`);
 assert('A2: "terasa 5 m2" still → 5', extractTerraceNumber('terasa 5 m2') === 5, `got ${extractTerraceNumber('terasa 5 m2')}`);

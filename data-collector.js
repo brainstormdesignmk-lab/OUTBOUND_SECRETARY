@@ -15,6 +15,7 @@ import {
   countBedrooms,
   extractPrice,
   extractPricePerSqm,
+  extractTerraceNumber,
   parseYearBuilt,
   parseOrientation,
   parseAvailableFromDate
@@ -1429,15 +1430,39 @@ function extractTerrace(u, data) {
     if (num >= 1 && num <= 500) return { hasTerrace: true, terraceSqm: num };
   }
 
-  // PRIORITY 3: Number BEFORE terrace: "3 m2 terasa"
-  // Uses (?:terasa|тераса) to scope alternation. Note: this can falsely match
-  // "68 kvadrati ... terasa" where 68 is the totalSqm, not the terrace size.
-  // Priority 1 (terraceBare) and Priority 2 (terraceMatch) handle the common
-  // cases where the terrace number is AFTER "terasa", so this fallback only
-  // fires for the "3 m2 terasa" word order.
-  const terraceBefore = u.match(/(\d{1,4})\s*(kvadrata|kvadrati|m2|м2|kv|кв|sqm).{0,20}?(?:terasa|тераса|teras|терас)/i);
-  if (terraceBefore) {
-    const num = parseInt(terraceBefore[1]);
+  // PRIORITY 3: COPULA-BOUND / SHARED-EXTRACTOR DELEGATION — the reported
+  // lead "IMA 65 KVADRATA BKUPNO , 5 SE TERASA" (65 m² total, 5 of which is
+  // terrace) stored terraceSqm=65 because the OLD PRIORITY 3 window below
+  // matched "65 KVADRATA BKUPNO , 5 SE" all the way to "terasa". The two
+  // terrace extractors had DRIFTED: extractTerraceNumber
+  // (property-extractor.js) already owned the "X se terasa" / "OD KOI X SE
+  // TERASA" copula rule (its regression suite passes), while this global
+  // extractor never received it — and the old bare-window fallback re-crowned
+  // the total-sqm number ("65 kvadrata so terasa" → 65, reviewer-caught).
+  //   - Delegation runs AFTER priorities 1-2 (the strong "number right after
+  //     terasa" signals) so "65m2 so terasa od 3 m2" still resolves to 3,
+  //     not the equidistant 65 total (battery-caught regression of a naive
+  //     delegate-first placement).
+  //   - The old "3 m2 terasa" word-order fallback is REMOVED (the delegated
+  //     extractor covers it via its distance-≤2 unitAdjacent scan), and the
+  //     window's .{0,20}? was precisely the total-crowning vector.
+  const delegatedNum = extractTerraceNumber(u);
+  if (delegatedNum !== null && delegatedNum >= 1 && delegatedNum <= 500) {
+    return { hasTerrace: true, terraceSqm: delegatedNum };
+  }
+
+  // PRIORITY 4: PLURAL-COPULA "N unit se terasi" — "5 KVADRATI SE TERASI"
+  // (5 m² are the terrace) → 5. extractTerraceNumber DELIBERATELY returns
+  // null here (its singular-only copula rule + the "glued to total-sqm word"
+  // exclusion + the plural bare-count guard all reject this shape), but the
+  // number is genuinely the terrace SIZE when the copula "se" binds the sqm
+  // phrase to the terrace word. The copula is the SAFE disambiguator the old
+  // .{0,20}? window lacked: "65 KVADRATA SO TERASA" (65 m² with a terrace,
+  // NO size given) has no "se" → stays null; "5 KVADRATI SE TERASI" binds →
+  // size. Singular copula forms are already covered by the delegation above.
+  const pluralCopulaMatch = u.match(/(\d{1,4})\s*(?:kvadrata|kvadrati|m2|м2|kv|кв|sqm)\s+(?:se|се)\s+(?:terasa|тераса|terasi|тераси|terrace)/i);
+  if (pluralCopulaMatch) {
+    const num = parseInt(pluralCopulaMatch[1]);
     if (num >= 1 && num <= 500) return { hasTerrace: true, terraceSqm: num };
   }
 
