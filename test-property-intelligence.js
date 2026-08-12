@@ -533,6 +533,14 @@ assert('EPS "2500 е м2" → 2500', extractPricePerSqm('2500 е м2') === 2500,
 assert('EPS "74 m2" → null (a sqm answer)', extractPricePerSqm('74 m2') === null, `got ${extractPricePerSqm('74 m2')}`);
 assert('EPS "350 evra" → null (total price)', extractPricePerSqm('350 evra') === null, `got ${extractPricePerSqm('350 evra')}`);
 assert('EPS "3 m2" → null (terrace)', extractPricePerSqm('terasa od 3 m2') === null, `got ${extractPricePerSqm('terasa od 3 m2')}`);
+// REPORTED (lead 75889 Плац): "4000 m2" answering the totalSqm question on
+// a 4000 m² plot was crowned as pricePerSqm=4000 — a bare "N m2" has no
+// currency/copula marker and is a square-meter answer, never a €/m² quote.
+assert('EPS "4000 m2" → null (REPORTED — a sqm answer, not €/m²)', extractPricePerSqm('4000 m2') === null, `got ${extractPricePerSqm('4000 m2')}`);
+assert('EPS "3000 m2" → null (REPORTED family — land sqm)', extractPricePerSqm('3000 m2') === null, `got ${extractPricePerSqm('3000 m2')}`);
+// Per-m² phrasings WITHOUT a currency word still read as price (the
+// preposition "za"/"на" itself marks the per-square intent).
+assert('EPS "2000 za m2" → 2000 (preposition-only per-m²)', extractPricePerSqm('2000 za m2') === 2000, `got ${extractPricePerSqm('2000 za m2')}`);
 
 // Global extraction: per-sqm phrase → pricePerSqm ONLY (never cleanPrice)
 const saleData = { transactionType: 'sale' };

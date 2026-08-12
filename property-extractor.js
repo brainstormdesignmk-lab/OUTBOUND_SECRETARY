@@ -1829,9 +1829,18 @@ export function formatAvailableFromDate(value) {
 export function extractPricePerSqm(text) {
   if (!text) return null;
   const u = text.toLowerCase();
-  // Pattern 1: "2000 e za m2" / "2000 evra za m2" / "2500 е на м2"
-  //   number + optional currency + optional preposition + m2-unit
-  const m1 = u.match(/(\d{3,6})\s*(?:evra|евра|evro|евро|eur|е|e)?\s*(?:za|на|na|по|po)?\s*(?:m2|м2|kvadrat|квадрат|kvadrata|квадрата|кв|kv)\b/i);
+  // Pattern 1: "2000 e za m2" / "2000 evra za m2" / "2500 е на м2" /
+  // "2000 za m2"
+  //   number + marker + m2-unit, where marker = currency/copula word
+  //   (evra/евра/evro/евро/eur/е/e/€) and/or preposition (za/на/na/по/po).
+  // A per-m² READING REQUIRES at least one marker between the number and
+  // the unit — a BARE "4000 m2" (reported, lead 75889: the owner answered
+  // "Колкава е вкупната квадратура?" on a 4000 m² plot) is a square-meter
+  // answer, never a €/m² quote. The old regex made BOTH markers optional,
+  // so ANY 3+ digit "N m2" matched as pricePerSqm (the "74 m2" test case
+  // only escaped via the 100-digit minimum). The digit range (100–20000)
+  // still applies.
+  const m1 = u.match(/(\d{3,6})\s*(?:(?:evra|евра|evro|евро|eur|€|е|e)\s*(?:za|на|na|по|po)?|(?:za|на|na|по|po))\s*(?:m2|м2|kvadrat|квадрат|kvadrata|квадрата|кв|kv)\b/i);
   if (m1) {
     const n = parseInt(m1[1], 10);
     if (n >= 100 && n <= 20000) return n;

@@ -1427,6 +1427,40 @@ const sqhTotFloors = scanHistoryForField('totalFloors', sqhMsgs, {});
 assert("SQH12: history scan of totalFloors → null", sqhTotFloors === null, `got ${JSON.stringify(sqhTotFloors)}`);
 
 // ========================================
+// PRICE-PER-SQM PHANTOM GUARD (reported, lead 75889 Плац): a whole-message
+// "N m2" answering the totalSqm question on a 4000 m² plot must extract
+// totalSqm ONLY — the same number must NEVER phantom as pricePerSqm. The
+// bare form is rejected by extractPricePerSqm's marker requirement; the
+// copula form ("4000 е м2" = it IS 4000 m²) is suppressed by the
+// preferredField=totalSqm context guard in extractPricePerSqmField.
+// ========================================
+{
+  const r = runGlobalExtraction('4000 m2', { transactionType: 'sale' }, 'totalSqm');
+  assert('PPSQ1: "4000 m2" answering totalSqm → totalSqm=4000', r.totalSqm === 4000, `got ${JSON.stringify(r)}`);
+  assert('PPSQ1: ... → NO pricePerSqm', r.pricePerSqm === undefined, `got ${JSON.stringify(r)}`);
+}
+{
+  // The copula "е" is ambiguous ("it IS 4000 m²" vs "4000 per m²") — the
+  // guard's job is only to make sure the sqm answer never becomes a PRICE.
+  // (extractTotalSqm itself does not parse the copula form — pre-existing
+  // limitation, unchanged.)
+  const r = runGlobalExtraction('4000 е м2', { transactionType: 'sale' }, 'totalSqm');
+  assert('PPSQ2: "4000 е м2" answering totalSqm → NO pricePerSqm (context guard)', r.pricePerSqm === undefined, `got ${JSON.stringify(r)}`);
+  const r2 = runGlobalExtraction('4000 е кв', { transactionType: 'sale' }, 'totalSqm');
+  assert('PPSQ2b: "4000 е кв" answering totalSqm → NO pricePerSqm (unit-list guard)', r2.pricePerSqm === undefined, `got ${JSON.stringify(r2)}`);
+}
+{
+  // Price-context control: a per-m² quote answering the PRICE question still extracts
+  const r = runGlobalExtraction('2000 e za m2', { transactionType: 'sale' }, 'cleanPrice');
+  assert('PPSQ3: "2000 e za m2" answering price → pricePerSqm=2000', r.pricePerSqm === 2000, `got ${JSON.stringify(r)}`);
+}
+{
+  // Discovery-mode control: bare "4000 m2" → totalSqm only, no phantom price
+  const r = runGlobalExtraction('4000 m2', { transactionType: 'sale' });
+  assert('PPSQ4: discovery "4000 m2" → totalSqm=4000, no pricePerSqm', r.totalSqm === 4000 && r.pricePerSqm === undefined, `got ${JSON.stringify(r)}`);
+}
+
+// ========================================
 // TEST SUMMARY
 // ========================================
 console.log(`\n=======================================================`);

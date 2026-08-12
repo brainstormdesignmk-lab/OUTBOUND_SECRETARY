@@ -113,12 +113,21 @@ function extractPetsAllowed(u, data) {
   return null;
 }
 
-function extractPricePerSqmField(u, data) {
+function extractPricePerSqmField(u, data, preferredField) {
   // SALE-ONLY (the per-m² price is a SALE concept; rent asks monthly rent).
   // Skip if transactionType is rent — a rent message "2000 e za m2" would
   // be the owner describing the listing, not a monthly rent.
   if (data.transactionType === 'rent') return null;
   if (data.pricePerSqm !== undefined && data.pricePerSqm !== null) return null;
+  // DIRECT-SQM-ANSWER GUARD (reported, lead 75889): when the owner is
+  // answering the totalSqm question with a whole-message square-meter shape
+  // ("4000 m2", "4000 е м2" — "it IS 4000 m²" on a plot), that number is
+  // the AREA, never a €/m² quote. The bare "N m2" form is already rejected
+  // by extractPricePerSqm's marker requirement, but the copula "е" form
+  // still satisfies it — so the question context must override. The unit
+  // list mirrors extractPricePerSqm's (m2/кв/квадрат/квадрати + plural)
+  // so "4000 е кв" / "4000 е квадрат" are covered too.
+  if (preferredField === 'totalSqm' && /^\d{1,6}\s*(?:е|e)?\s*(?:m2|м2|kv|кв|kvadrat|квадрат|kvadrata|квадрата|kvadrati|квадрати|sqm)\s*$/i.test(u)) return null;
   const p = extractPricePerSqm(u);
   return p !== null ? { pricePerSqm: p } : null;
 }
@@ -1647,7 +1656,7 @@ function runGlobalExtraction(u, currentData, preferredField) {
         const isPriceField = dataKey === 'cleanPrice' || dataKey === 'monthlyRent';
         if (currentData[dataKey] !== undefined && currentData[dataKey] !== null &&
             !(isPriceField && isExplicitPriceCorrection(u))) continue;
-        const result = rule(u, currentData);
+        const result = rule(u, currentData, preferredField);
         if (result) {
           for (const [key, value] of Object.entries(result)) {
             const existing = currentData[key];
@@ -1863,7 +1872,9 @@ function runGlobalExtraction(u, currentData, preferredField) {
     // Check rule's output name — for simple single-field extractors, we can
     // check if the key exists in updates. For multi-field extractors (e.g.,
     // extractParking returns { parking, parkingType }), we check the primary key.
-    const result = rule(u, currentData);
+    // (preferredField is threaded to extractPricePerSqmField so a whole-message
+    // "N m2" answer to the totalSqm question can never phantom as €/m².)
+    const result = rule(u, currentData, preferredField);
     if (result) {
       for (const [key, value] of Object.entries(result)) {
         // Don't overwrite what Step 1 already extracted
