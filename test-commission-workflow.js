@@ -30,6 +30,8 @@ import {
   isAskingAboutNoAgencyExperience,
   isAskingAboutPhone,
   isAskingAboutCommission,
+  isAskingAboutAgency,
+  isAskingHowItWorks,
   NO_AGENCY_EXPERIENCE_RESPONSES_SALE,
   NO_AGENCY_EXPERIENCE_RESPONSES_RENT,
   matchObjection
@@ -437,6 +439,100 @@ assert(`e2e sale "kade vi e kancelarijata?" → agency answer (not phone-origin)
 const moneyKeepSession = createSession('sale');
 const moneyKeepRes = await generateResponse(moneyKeepSession, 'OD KADE SE PARITE?');
 assert(`e2e sale "OD KADE SE PARITE?" → money objection (not phone-origin)`, moneyKeepRes.type === 'NORMAL' && /конечната цена|разликат/.test(moneyKeepRes.text) && !/Го добив вашиот број/.test(moneyKeepRes.text), `got "${(moneyKeepRes.text || '').substring(0, 100)}"`);
+
+// 7h. OBJECTION-MATCHER AUDIT (bare-prefix disease — same class as the
+// phone/AC fixes). The matchers must NOT fire on realistic non-objection
+// messages:
+//   - isAskingAboutCommission: cooperation REFUSALS ("NE SAKAM SORABOTKA" —
+//     reported lead 5436709, previously got the commission explanation) and
+//     building/neighborhood CONDITIONS ("kakvi se uslovite vo zgradata",
+//     "dali ima uslovi za parkiranje") are NOT commission questions;
+//   - isAskingAboutAgency: the OWNER's own experience ("imam iskustvo so
+//     prodazba") and the tenant preference ("samo za vraboteni") are NOT
+//     agency questions; a Cyrillic "фирмиран договор" (signed contract)
+//     must not match the "фирм" stem;
+//   - isAskingHowItWorks: DATA-COLLECTION device answers ("kako raboti na
+//     struja" — the heating runs on electricity, "kako funkcionira
+//     greenjeto") and property talk ("kako izgleda stanot", "kako tece
+//     vremeto") are NOT workflow questions.
+const commAuditTrapMsgs = [
+  'NE SAKAM SORABOTKA',
+  'ne sakam sorabotka so agencii',
+  'NE MI TREBA SORABOTKA',
+  'bez sorabotka',
+  'kakvi se uslovite vo zgradata',
+  'ima li dobri uslovi za zivot',
+  'uslovite se dobri',
+  'dali ima uslovi za parkiranje',
+  'kakvi se uslovite vo stanot'
+];
+for (const q of commAuditTrapMsgs) {
+  assert(`unit comm-trap "${q}" → isAskingAboutCommission false`, isAskingAboutCommission(q) === false, `got ${isAskingAboutCommission(q)}`);
+}
+const commAuditKeepMsgs = [
+  'kakvi se uslovite',
+  'kakvi se uslovi',
+  'koi se uslovite',
+  'koi vi se uslovite',
+  'vasi uslovi',
+  'shto znaci sorabotka',
+  'kakva sorabotka e toa',
+  'what are the terms',
+  'kako se naplakjate',
+  // deliberate disambiguation: "vo sorabotkata" (in/for the cooperation) is
+  // a BUSINESS-terms noun, not a building property — stays a commission
+  // question even though it uses "vo" (unlike "vo zgradata" above).
+  'kakvi se uslovite vo sorabotkata'
+];
+for (const q of commAuditKeepMsgs) {
+  assert(`unit comm-keep "${q}" → isAskingAboutCommission true`, isAskingAboutCommission(q) === true, `got ${isAskingAboutCommission(q)}`);
+}
+const agencyAuditTrapMsgs = [
+  'imam iskustvo so prodazba',
+  'imam iskustvo so agencii site se isti',
+  'samo za vraboteni',
+  'фирмиран договор',
+  'kancelariski materiali'
+];
+for (const q of agencyAuditTrapMsgs) {
+  assert(`unit agency-trap "${q}" → isAskingAboutAgency false`, isAskingAboutAgency(q) === false, `got ${isAskingAboutAgency(q)}`);
+}
+const agencyAuditKeepMsgs = [
+  'imate iskustvo?',
+  'kolku iskustvo imate?',
+  'kolku vraboteni imate?',
+  'koja firma e vasa?',
+  'kade vi e kancelarijata?',
+  'kolku vreme rabotite?'
+];
+for (const q of agencyAuditKeepMsgs) {
+  assert(`unit agency-keep "${q}" → isAskingAboutAgency true`, isAskingAboutAgency(q) === true, `got ${isAskingAboutAgency(q)}`);
+}
+const worksAuditTrapMsgs = [
+  'kako raboti na struja',
+  'kako raboti klimata',
+  'kako funkcionira greenjeto',
+  'kako izgleda stanot',
+  'kako izgleda stanot od vnatre',
+  'kako tece vremeto'
+];
+for (const q of worksAuditTrapMsgs) {
+  assert(`unit works-trap "${q}" → isAskingHowItWorks false`, isAskingHowItWorks(q) === false, `got ${isAskingHowItWorks(q)}`);
+}
+const worksAuditKeepMsgs = [
+  'kako raboti',
+  'kako raboti ova',
+  'kako raboti sorabotkata',
+  'kako funkcionira sorabotkata',
+  'kako funkcionira procesot',
+  'kako izgleda sorabotkata',
+  'kako tece sorabotkata',
+  'kako ke mi pomognete vo prodazbata'
+];
+for (const q of worksAuditKeepMsgs) {
+  assert(`unit works-keep "${q}" → isAskingHowItWorks true`, isAskingHowItWorks(q) === true, `got ${isAskingHowItWorks(q)}`);
+}
+
 
 // 7g. TIGHTENED (requested): non-phone "od kaj ti e ..." questions must NOT
 // get the from-the-ad phone answer. "OD KAJ TI E IDEJATA?" (where did you
