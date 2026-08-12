@@ -28,6 +28,7 @@ import {
   AGENCY_WORKFLOW_RESPONSES_RENT,
   OWNER_PAYS_RESPONSES_SALE,
   isAskingAboutNoAgencyExperience,
+  isAskingAboutPhone,
   isAskingAboutCommission,
   NO_AGENCY_EXPERIENCE_RESPONSES_SALE,
   NO_AGENCY_EXPERIENCE_RESPONSES_RENT,
@@ -436,6 +437,62 @@ assert(`e2e sale "kade vi e kancelarijata?" → agency answer (not phone-origin)
 const moneyKeepSession = createSession('sale');
 const moneyKeepRes = await generateResponse(moneyKeepSession, 'OD KADE SE PARITE?');
 assert(`e2e sale "OD KADE SE PARITE?" → money objection (not phone-origin)`, moneyKeepRes.type === 'NORMAL' && /конечната цена|разликат/.test(moneyKeepRes.text) && !/Го добив вашиот број/.test(moneyKeepRes.text), `got "${(moneyKeepRes.text || '').substring(0, 100)}"`);
+
+// 7g. TIGHTENED (requested): non-phone "od kaj ti e ..." questions must NOT
+// get the from-the-ad phone answer. "OD KAJ TI E IDEJATA?" (where did you
+// get the idea), "od kaj ti e cena" (the price), "od kaj ti e ova" (this)
+// used to match the bare phrase trigger "od kaj ti e" / "od kade" and
+// received "Го добив вашиот број од огласот..." — wrong. The phone-origin
+// rule now requires a phone word (brojot/brojov) OR the got/found verb
+// (dobivte/najdovte). Unit-level (these messages fall through to the LLM
+// path, which needs no key for the regex itself).
+const phoneTrapMsgs = [
+  'OD KAJ TI E IDEJATA?',
+  'od kaj ti e idejata',
+  'от кај ти е идејата',
+  'od kaj ti e cena',
+  'OD KAJ TI E SNAGATA',
+  'od kaj ti e ova',
+  'OD KAJ TI E TOA?',
+  'od kade vi e cenata',
+  'od kade ti e ova',
+  'OD KADE SE PARITE?',
+  'od koj dzeb se parite?'
+];
+for (const q of phoneTrapMsgs) {
+  assert(`unit non-phone "${q}" → isAskingAboutPhone false`, isAskingAboutPhone(q) === false, `got ${isAskingAboutPhone(q)}`);
+}
+// And the genuine phone-origin phrasings still match (unit level) — including
+// the reported lead 5531598 forms, the bare got/found verb family, and the
+// "kako me najdovte" (how did you find ME) form.
+const phoneKeepMsgs = [
+  'OD KADE VI E BROJOV?',
+  'OD KAJ TI E BROJOV?',
+  'OD KADE VI E BROJOT?',
+  'od kaj ti e brojov',
+  'OD KADE GO DOBIVTE BROJOT',
+  'kade go dobivte brojot',
+  'KADE GO NAJDOVTE',
+  'KAJ GO NAJDOVTE',
+  'kade go najdovte brojot',
+  'от каде ти е бројов',
+  'од кај ти е бројот',
+  'kako me najdovte',
+  'od kaj go najdovte',
+  'како ме најдовте',
+  'od kade go dobivte brojot?',
+  // reviewer-caught: the "know" family — "od kade go znaete mojot broj?"
+  // (how do you know my number?) is a phone-origin question whose bare
+  // indefinite "broj" + know-verb used to fall through after the tightening.
+  'od kade go znaete mojot broj',
+  'od kade go znaete brojot',
+  'ot kaj znaete deka prodavam',
+  'како ме знаете',
+  'од каде го знаете мојот број'
+];
+for (const q of phoneKeepMsgs) {
+  assert(`unit phone-origin "${q}" → isAskingAboutPhone true`, isAskingAboutPhone(q) === true, `got ${isAskingAboutPhone(q)}`);
+}
 
 // 8. Sale sanity — sale availability KEEPS the approved no-commission phrasing
 // (rotates "без провизија за вас" / "без никакви давачки" / "без никакви

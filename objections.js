@@ -317,7 +317,18 @@ function isAskingAboutPhone(text) {
   // Reported (lead 5531598): "OD KADE VI E BROJOV?" was stolen by the agency
   // matcher and "OD KAJ TI E BROJOV?" fell through to the LLM — both must
   // land on the direct "Го добив вашиот број од огласот..." answer.
-  return /od kade|од каде|od kaj|од кај|brojot|бројот|brojov|бројов|kade go dobivte|каде го добивте|kade go najdovte|каде го најдовте|kaj go dobivte|кај го добивте|kaj go najdovte|кај го најдовте|od kade vi e|од каде ви е|od kaj ti e|од кај ти е|kako go dobivte|како го добивте|kako go najdovte|како го најдовте/i.test(text);
+  //
+  // TIGHTENED (reported): the bare phrase triggers "od kade vi e" / "od kaj
+  // ti e" / "od kade" matched ANY origin question — "OD KAJ TI E IDEJATA?"
+  // (where did you get the idea), "od kaj ti e cena" (the price), "od kaj ti
+  // e ova" (this) all got the from-the-ad phone answer. An origin phrase now
+  // fires ONLY when it is bound to a phone reference (brojot/brojov — the
+  // number) OR to the got/found/know verb family (dobivte/najdovte/znaete —
+  // "kade go najdovte", "kako me najdovte", "od kade go znaete mojot broj"),
+  // neither of which can occur in a non-phone question. Note: the bare origin
+  // word (kade/kaj/kako) matches inside "od kade"/"од кај", so the od prefix
+  // needs no separate alternative.
+  return /brojot|бројот|brojov|бројов|(?:kade|каде|kaj|кај|kako|како)(?:\s+(?:go|го|me|ме))?\s+(?:dobivte|добивте|najdovte|најдовте|znaete|знаете|znajdete|знајдете)/i.test(text);
 }
 
 // ========================================

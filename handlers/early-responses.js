@@ -732,12 +732,14 @@ if (/kako bi sorabotuvale|како би соработувале|како да �
   // ========================================
   // HARDCODED: Phone Origin
   // ========================================
-  // MONEY-QUESTION GUARD: isAskingAboutPhone matches any "od kade..." message
-  // (its "od kade" prefix), but a question like "od kade se parite?" (where
-  // does the money come from) is a commission/money question — it must get the
-  // from_whose_pocket objection answer, NEVER "Го добив вашиот број од
-  // огласот...". The commission gate above already intercepts money-origin
-  // phrases (see isAskingAboutCommission); this guard is the second layer.
+  // MONEY-QUESTION GUARD: a question like "od kade se parite?" (where does
+  // the money come from) or "kade go dobivte parite" is a commission/money
+  // question — it must get the from_whose_pocket objection answer, NEVER
+  // "Го добив вашиот број од огласот...". The commission gate above already
+  // intercepts money-origin phrases (see isAskingAboutCommission); this guard
+  // is the second layer (it also catches money mentions co-occurring with the
+  // got/found verb family, which isAskingAboutPhone now legitimately
+  // requires).
   const isMoneyQuestion = /pari|пари|dzeb|џеб|provizij|провизиј|zemate|земате|naplakj|наплаќ/i.test(u);
   if (!session.collectedData.cooperationAccepted && isAskingAboutPhone(u) && !isMoneyQuestion) {
     return {
