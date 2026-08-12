@@ -44,10 +44,12 @@ import {
   geminiOutputBudget,
   GEMINI_OUTPUT_BUDGET_FLOOR,
   isRateLimit,
-  isTpdExhaustion
+  isTpdExhaustion,
+  buildKeyPool,
+  resetKeyPoolCache
 } from './llm-provider.js';
 import { createSafeFallback } from './retry-utils.js';
-import { runPersuasion } from './handlers/persuasion-phase.js';
+import { runPersuasion, tierForClassification } from './handlers/persuasion-phase.js';
 
 const harness = createHarness();
 const assert = harness.assert;
@@ -328,6 +330,167 @@ const r = await runPersuasion({
   isRent: false
 });
 assert('G1: canned NORMAL reply from offline seam', r.type === 'NORMAL' && /соработуваме/.test(r.text || ''), `got ${JSON.stringify(r)}`);
+
+// TIER ROUTING MAP (the offline seam returns before the LLM call, so the
+// classification → tier mapping is pinned directly): skeptical/soft-rejection
+// turns get the SMART tier (70b/flash), everything else the ROUTINE tier
+// (8b/flash-lite).
+assert('G5: REJECTED intent → rebuttal tier (smart model)',
+  tierForClassification({ intent: 'REJECTED', confidence: 0.6 }) === 'rebuttal',
+  `got ${tierForClassification({ intent: 'REJECTED', confidence: 0.6 })}`);
+assert('G6: INTERESTED → routine tier',
+  tierForClassification({ intent: 'INTERESTED', confidence: 0.7 }) === 'routine',
+  `got ${tierForClassification({ intent: 'INTERESTED', confidence: 0.7 })}`);
+assert('G7: gated ACCEPTED → routine tier',
+  tierForClassification({ intent: 'ACCEPTED', confidence: 0.8 }) === 'routine',
+  `got ${tierForClassification({ intent: 'ACCEPTED', confidence: 0.8 })}`);
+assert('G8: unclassified → routine tier',
+  tierForClassification(null) === 'routine' && tierForClassification(undefined) === 'routine',
+  `got ${tierForClassification(null)}`);
+
+// ============================================================
+// PART H — TIERED KEY/MODEL POOL (user-approved rotation: 8b routine +
+// 70b rebuttals, model rotation inside one key, Gemini multi-project keys)
+// ============================================================
+console.log('\n========================================');
+console.log('🧪 H: tiered key/model pool — tier routing, model rotation, multi-key, cooldown');
+console.log('========================================\n');
+
+// Config reads env at MODULE LOAD, so tier models come from the committed
+// defaults (70b rebuttal / 8b routine / flash smart / flash-lite routine).
+// Key LISTS are read at call time (keyList) — settable here.
+
+// --- H1: pool composition from env ---
+process.env.GROQ_API_KEYS = 'gsk-a,gsk-b';
+process.env.GEMINI_API_KEYS = 'AIza-1';
+const pool = buildKeyPool({ fresh: true });
+assert('H1a: 2 groq keys × 2 tiers + 1 gemini key × 2 tiers = 6 entries',
+  pool.length === 6, `got ${pool.length}: ${pool.map(e => e.provider + '/' + e.tier).join(', ')}`);
+const groqReb = pool.find(e => e.provider === 'groq' && e.tier === 'rebuttal');
+const groqRou = pool.find(e => e.provider === 'groq' && e.tier === 'routine');
+const gemReb = pool.find(e => e.provider === 'gemini' && e.tier === 'rebuttal');
+const gemRou = pool.find(e => e.provider === 'gemini' && e.tier === 'routine');
+assert('H1b: groq rebuttal tier → MODEL (70b)', groqReb.model === 'llama-3.3-70b-versatile', `got ${groqReb.model}`);
+assert('H1c: groq routine tier → MODEL_LITE (8b)', groqRou.model === 'llama-3.1-8b-instant', `got ${groqRou.model}`);
+assert('H1d: gemini rebuttal tier → GEMINI_MODEL (flash)', gemReb.model === 'gemini-2.5-flash', `got ${gemReb.model}`);
+assert('H1e: gemini routine tier → GEMINI_MODEL_LITE (flash-lite)', gemRou.model === 'gemini-2.5-flash-lite', `got ${gemRou.model}`);
+assert('H1f: both groq keys present', pool.filter(e => e.provider === 'groq').length === 4 &&
+  new Set(pool.filter(e => e.provider === 'groq').map(e => e.key)).size === 2,
+  'expected 2 distinct groq keys');
+
+// Backward compat: plural var absent → singular GROQ_API_KEY still builds the pool
+process.env.GROQ_API_KEY = 'gsk-single';
+delete process.env.GROQ_API_KEYS;
+delete process.env.GEMINI_API_KEYS;
+delete process.env.GEMINI_API_KEY;
+const poolSingle = buildKeyPool({ fresh: true });
+assert('H1g: single GROQ_API_KEY → 2 entries (both tiers, one key)',
+  poolSingle.length === 2 && poolSingle[0].key === 'gsk-single' && poolSingle[1].key === 'gsk-single',
+  `got ${poolSingle.map(e => e.key).join(',')}`);
+
+// --- H2: tier routing picks the right model FIRST ---
+resetKeyPoolCache();
+process.env.GROQ_API_KEYS = 'gsk-a';
+delete process.env.GROQ_API_KEY;
+let seen = [];
+const routeFns = {
+  groq: async (params, o) => { seen.push(o.model); return { text: 'ok ' + o.model }; },
+  gemini: async () => { seen.push('gemini'); return { text: 'g' }; }
+};
+res = await generateCompletion({ messages: [] }, { tier: 'routine', pool: { fresh: true, fns: routeFns } });
+assert('H2a: routine tier tries MODEL_LITE (8b) first', seen[0] === 'llama-3.1-8b-instant', `got ${seen[0]}`);
+assert('H2b: routine reply returned', /^ok /.test(res.text), `got ${JSON.stringify(res.text)}`);
+
+seen = [];
+res = await generateCompletion({ messages: [] }, { tier: 'rebuttal', pool: { fresh: true, fns: routeFns } });
+assert('H2c: rebuttal tier tries MODEL (70b) first', seen[0] === 'llama-3.3-70b-versatile', `got ${seen[0]}`);
+
+// --- H3: MODEL ROTATION inside one key — routine 429 → rebuttal model on
+// the SAME key serves, Gemini never touched ---
+resetKeyPoolCache();
+process.env.GROQ_API_KEYS = 'gsk-only';
+seen = [];
+const rotFns = {
+  groq: async (params, o) => {
+    seen.push(o.model);
+    if (o.model === 'llama-3.1-8b-instant') throw tpd429Error(); // routine 8b exhausted
+    return { text: 'smart saved it' };                          // rebuttal 70b has its own bucket
+  },
+  gemini: async () => { seen.push('gemini'); return { text: 'g' }; }
+};
+res = await generateCompletion({ messages: [] }, { tier: 'routine', pool: { fresh: true, fns: rotFns } });
+assert('H3a: routine 429 → same key rebuttal model serves (per-model buckets)',
+  res.text === 'smart saved it', `got ${JSON.stringify(res.text)}`);
+assert('H3b: gemini fallback NOT reached', !seen.includes('gemini'), `got ${JSON.stringify(seen)}`);
+
+// --- H4: MULTI-KEY rotation — key1 429 → key2 serves ---
+resetKeyPoolCache();
+process.env.GROQ_API_KEYS = 'gsk-a,gsk-b';
+seen = [];
+const multiFns = {
+  groq: async (params, o) => {
+    seen.push(o.key);
+    if (o.key === 'gsk-a') throw tpd429Error();
+    return { text: 'key2 wins' };
+  },
+  gemini: async () => { seen.push('gemini'); return { text: 'g' }; }
+};
+res = await generateCompletion({ messages: [] }, { tier: 'routine', pool: { fresh: true, fns: multiFns } });
+assert('H4a: key1 429 → key2 serves', res.text === 'key2 wins', `got ${JSON.stringify(res.text)}`);
+assert('H4b: key2 tried after key1',
+  seen.indexOf('gsk-a') !== -1 && seen.indexOf('gsk-a') < seen.indexOf('gsk-b'),
+  `got ${JSON.stringify(seen)}`);
+
+// --- H5: 429 COOLDOWN — an exhausted entry is PARKED; a later call with all
+// entries still parked throws the clear parked error (and the next call after
+// the cooldown window would retry — covered by H3/H4's fresh entries) ---
+resetKeyPoolCache();
+process.env.GROQ_API_KEYS = 'gsk-c';
+process.env.GEMINI_API_KEYS = 'AIza-2';
+let exhausted = 0;
+const parkFns = {
+  groq: async () => { exhausted++; throw tpd429Error(); },          // 5m19s cooldown parsed from message
+  gemini: async () => { exhausted++; const e = new Error('429 too many requests'); e.status = 429; throw e; }
+};
+let poolErr = null;
+// FIRST call builds + CACHES the pool (no fresh) and attempts every entry
+// (all fresh) — each 429 parks its entry; the LAST error surfaces.
+try {
+  await generateCompletion({ messages: [] }, { tier: 'routine', pool: { fns: parkFns } });
+} catch (e) {
+  poolErr = e;
+}
+assert('H5a: first call — every fresh entry attempted, last 429 thrown',
+  poolErr !== null && /429|too many requests|rate limit/i.test(poolErr.message), `got ${poolErr?.message}`);
+assert('H5b: entries attempted exactly once (429 = no retries, then parked)',
+  exhausted === 4, `got ${exhausted}`);
+
+// Second call within the cooldown window: the CACHED pool's entries are all
+// parked (cooldown persisted) → zero attempts, clear parked error.
+exhausted = 0;
+let poolErr2 = null;
+try {
+  await generateCompletion({ messages: [] }, { tier: 'routine', pool: { fns: parkFns } });
+} catch (e) {
+  poolErr2 = e;
+}
+assert('H5c: parked entries stay parked across calls (cooldown persisted)',
+  poolErr2 !== null && /parked/i.test(poolErr2.message) && exhausted === 0,
+  `got ${poolErr2?.message}, attempts=${exhausted}`);
+
+// --- H6: no keys at all → empty pool → clear no-providers error ---
+delete process.env.GROQ_API_KEYS;
+delete process.env.GROQ_API_KEY;
+delete process.env.GEMINI_API_KEYS;
+delete process.env.GEMINI_API_KEY;
+let noKeyErr = null;
+try {
+  await generateCompletion({ messages: [] }, { tier: 'routine', pool: { fresh: true } });
+} catch (e) {
+  noKeyErr = e;
+}
+assert('H6: empty pool throws no-providers error',
+  noKeyErr !== null && /no providers/i.test(noKeyErr.message), `got ${noKeyErr?.message}`);
 
 // ============================================================
 // SUMMARY

@@ -19,10 +19,21 @@
 //   Groq (primary) ──> Gemini 2.5 Flash (fallback) ──> service.js safe
 //   fallback + human escalation (final net, unchanged)
 //
-// Why Gemini: an INDEPENDENT quota (1,500 RPD free tier, no card, North
-// Macedonia is not in the EU/UK/CH exclusion zone). Groq model rotation
-// would NOT help — its free-tier TPD limit is applied at the organization
-// level, shared across all models and keys.
+// Why Gemini: an INDEPENDENT quota (free tier, no card, North Macedonia is
+// not in the EU/UK/CH exclusion zone). OBSERVED on this account (live 429):
+// the Gemini free tier is REQUEST-counted — "generate_content_free_tier_
+// requests, limit: 20, model: gemini-2.5-flash" — and the bucket is PER
+// PROJECT + PER MODEL, so Gemini capacity multiplies via more projects
+// (GEMINI_API_KEYS list) and more models (GEMINI_MODEL_LITE routine tier).
+//
+// TIERED MODEL SPLIT (user-approved, see the pool section below): each
+// Groq key carries BOTH model buckets — rebuttal → config.MODEL (70b),
+// routine → config.MODEL_LITE (8b). The observed 429 was scoped "for model
+// llama-3.3-70b-versatile" (per-model TPD in practice on this account),
+// so the two tiers draw from separate daily buckets on one key. HEDGE: if
+// the account enforces org-level buckets instead (Groq docs historically
+// say org-level), the split is harmless but adds no capacity — verify at
+// console.groq.com/settings/limits before relying on the multiplier.
 //
 // CIRCUIT BREAKER: rate-limit errors (429 / TPD / RPM) are NOT retried —
 // they cascade to the next provider immediately. Retrying a 429 whose
@@ -98,20 +109,27 @@ export function geminiOutputBudget(maxTokens) {
   return Math.max(Number(maxTokens) || 0, GEMINI_OUTPUT_BUDGET_FLOOR);
 }
 
-// --- Groq (primary) — lazy client, same semantics as the old code ---
-let _groqClient = null;
-function getGroqClient() {
-  if (!_groqClient) {
-    _groqClient = new Groq({ apiKey: process.env.GROQ_API_KEY });
+// --- Groq (primary) — lazy clients, one per API key (multi-key rotation) ---
+const _groqClients = new Map();
+function getGroqClient(apiKey) {
+  if (!_groqClients.has(apiKey)) {
+    _groqClients.set(apiKey, new Groq({ apiKey }));
   }
-  return _groqClient;
+  return _groqClients.get(apiKey);
 }
 
-function groqProvider({ messages, temperature, top_p, frequency_penalty, max_tokens }) {
-  return getGroqClient().chat.completions
+// overrides = { key, model } — the pool passes the entry's key/model so one
+// key can rotate across BOTH Groq model buckets (70b rebuttal + 8b routine;
+// per-model TPD quotas are independent). Without overrides (legacy chain
+// path) it falls back to the env key + config.MODEL exactly as before.
+function groqProvider(params, overrides = {}) {
+  const key = overrides.key || process.env.GROQ_API_KEY;
+  const model = overrides.model || config.MODEL;
+  const { messages, temperature, top_p, frequency_penalty, max_tokens } = params;
+  return getGroqClient(key).chat.completions
     .create({
       messages,
-      model: config.MODEL,
+      model,
       temperature,
       top_p,
       frequency_penalty,
@@ -173,11 +191,13 @@ export function parseGeminiResponse(data) {
   return { text, truncated: finishReason === 'MAX_TOKENS' };
 }
 
-function geminiProvider({ messages, temperature, top_p, max_tokens }) {
-  const key = process.env.GEMINI_API_KEY;
-  if (!key || !key.trim()) {
+function geminiProvider(params, overrides = {}) {
+  const key = (overrides.key || process.env.GEMINI_API_KEY || '').trim();
+  const model = overrides.model || config.GEMINI_MODEL;
+  if (!key) {
     return Promise.reject(new Error('GEMINI_API_KEY missing — Gemini fallback unavailable (add to ~/.ana/ana.env)'));
   }
+  const { messages, temperature, top_p, max_tokens } = params;
 
   // THINKING-MODEL OUTPUT BUDGET (proven by live probe, reported incomplete
   // replies): gemini-2.5-flash is a THINKING model — reasoning tokens count
@@ -191,7 +211,7 @@ function geminiProvider({ messages, temperature, top_p, max_tokens }) {
   // early anyway. 2048 leaves ~4x headroom for longer reasoning runs.
   const outputFloor = geminiOutputBudget(max_tokens);
   const { url, body } = buildGeminiPayload(messages, {
-    model: config.GEMINI_MODEL,
+    model,
     temperature,
     top_p,
     max_tokens: outputFloor
@@ -209,7 +229,7 @@ function geminiProvider({ messages, temperature, top_p, max_tokens }) {
         // Budget exhausted — the visible reply may be cut mid-word. The 2048
         // floor makes this rare; surface it for ops instead of silently
         // shipping an amputated sentence to an owner (reported).
-        console.warn(`[LLM gemini: MAX_TOKENS — reply possibly truncated (${text.length} chars, budget ${outputFloor})]`);
+        console.warn(`[LLM gemini(${model}): MAX_TOKENS — reply possibly truncated (${text.length} chars, budget ${outputFloor})]`);
       }
       return { text };
     })
@@ -272,35 +292,150 @@ export function buildProviderChain(orderOverride) {
 }
 
 // ========================================
+// TIERED KEY/MODEL POOL — the production path (user-approved)
+// ========================================
+// The pool multiplies free-tier capacity WITHOUT any new infrastructure:
+//   - MODEL SPLIT inside one key: each Groq key carries BOTH model buckets
+//     (rebuttal → config.MODEL = 70b, routine → config.MODEL_LITE = 8b).
+//     Groq quotas are PER-MODEL (the observed 429 was "for model
+//     llama-3.3-70b-versatile ... TPD: Limit 100000"), so exhausting one
+//     model never touches the other — one key ≈ 600K TPD ≈ 250 calls/day.
+//   - KEY LIST: GROQ_API_KEYS / GEMINI_API_KEYS accept comma-separated
+//     keys. Groq quota is ORG-level (each listed key must be a SEPARATE
+//     account to gain anything); Gemini quota is PER-PROJECT, so each
+//     listed Gemini key genuinely adds its own ~20 RPD bucket.
+//   - GEMINI MODEL SPLIT: the same tier logic — smart → GEMINI_MODEL
+//     (2.5-flash), routine → GEMINI_MODEL_LITE (2.5-flash-lite, its own
+//     per-model bucket).
+//   - 429 COOLDOWN: a rate-limited entry is PARKED (cooldown from
+//     Retry-After / "try again in 5m19s" / 60s fallback) and the call
+//     cascades to the next entry — no futile retries (circuit breaker).
+//   - ROTATION: the first-tried key rotates per call within each
+//     (provider, tier) group, so N projects drain evenly instead of
+//     one bucket absorbing all traffic then blocking for its window.
+// ========================================
+function keyList(pluralVar, singularVar) {
+  const raw = process.env[pluralVar] || process.env[singularVar] || '';
+  return String(raw).split(/[\s,]+/).map(s => s.trim()).filter(Boolean);
+}
+
+/**
+ * Build the tiered pool entries. Cached once per process (cooldowns must
+ * survive across calls); pass { fresh: true } to rebuild (tests).
+ */
+export function buildKeyPool(opts = {}) {
+  if (!opts.fresh && _poolCache) return _poolCache;
+  const order = String(config.LLM_PROVIDERS || 'groq,gemini')
+    .split(',')
+    .map(s => s.trim().toLowerCase())
+    .filter(Boolean);
+  const pool = [];
+  if (order.includes('groq')) {
+    keyList('GROQ_API_KEYS', 'GROQ_API_KEY').forEach((key, i) => {
+      pool.push({ provider: 'groq', key, model: config.MODEL, tier: 'rebuttal', keyIndex: i, cooldownUntil: 0 });
+      pool.push({ provider: 'groq', key, model: config.MODEL_LITE, tier: 'routine', keyIndex: i, cooldownUntil: 0 });
+    });
+  }
+  if (order.includes('gemini')) {
+    keyList('GEMINI_API_KEYS', 'GEMINI_API_KEY').forEach((key, i) => {
+      pool.push({ provider: 'gemini', key, model: config.GEMINI_MODEL, tier: 'rebuttal', keyIndex: i, cooldownUntil: 0 });
+      pool.push({ provider: 'gemini', key, model: config.GEMINI_MODEL_LITE, tier: 'routine', keyIndex: i, cooldownUntil: 0 });
+    });
+  }
+  if (!opts.fresh) _poolCache = pool;
+  if (!_loggedPool && opts.fresh === undefined) {
+    _loggedPool = true;
+    console.log(`[LLM pool: ${pool.map(e => `${e.provider}(${e.model} ${e.tier})`).join(' → ') || '(none)'}]`);
+  }
+  return pool;
+}
+
+/** Reset the cached pool AND the rotation start indices (tests that mutate
+ * env between calls need deterministic ordering). */
+export function resetKeyPoolCache() {
+  _poolCache = null;
+  _loggedPool = false;
+  _rrStart.clear();
+}
+
+let _poolCache = null;
+let _loggedPool = false;
+
+/**
+ * Order pool entries for a call: the requested tier on the primary provider
+ * first, then the other tier on the same keys (model rotation inside one
+ * key), then the fallback provider's tiers. Rotates the start index within
+ * each (provider, tier) group so multiple keys drain evenly.
+ */
+const _rrStart = new Map();
+function orderPoolEntries(pool, tier) {
+  const other = tier === 'rebuttal' ? 'routine' : 'rebuttal';
+  const groups = [
+    pool.filter(e => e.provider === 'groq' && e.tier === tier),
+    pool.filter(e => e.provider === 'groq' && e.tier === other),
+    pool.filter(e => e.provider !== 'groq' && e.tier === tier),
+    pool.filter(e => e.provider !== 'groq' && e.tier === other)
+  ];
+  const out = [];
+  for (const g of groups) {
+    if (g.length === 0) continue;
+    const groupKey = `${g[0].provider}:${g[0].tier}`;
+    const start = _rrStart.get(groupKey) || 0;
+    _rrStart.set(groupKey, (start + 1) % g.length);
+    out.push(...[...g.slice(start), ...g.slice(0, start)]);
+  }
+  return out;
+}
+
+/**
+ * Cooldown for a rate-limited entry: prefer the API's "try again in X" from
+ * the error message (observed Groq: "try again in 5m19.68s"; Gemini:
+ * "Please retry in 26.05s"), then the Retry-After header, then a 60s
+ * fallback. Capped so a daily-exhausted entry doesn't block forever — the
+ * pool just never finds a working key and the safe fallback takes over.
+ */
+const MAX_COOLDOWN_MS = 15 * 60 * 1000;
+function cooldownMs(err, fallbackMs = 60000) {
+  const m = String(err?.message || '').match(/try again in (?:(\d+)m\s*)?(\d+(?:\.\d+)?)s/i);
+  if (m) {
+    const mins = m[1] ? parseInt(m[1], 10) : 0;
+    return Math.min((mins * 60 + parseFloat(m[2])) * 1000, MAX_COOLDOWN_MS);
+  }
+  const h = err?.headers || err?.response?.headers || {};
+  const ra = parseFloat(h['retry-after'] || h['Retry-After']);
+  if (!Number.isNaN(ra) && ra >= 0) return Math.min(ra * 1000, MAX_COOLDOWN_MS);
+  return fallbackMs;
+}
+
+/** Wrap a pool entry into a callable (injectable fns for offline tests). */
+function entryCallFn(entry, fns) {
+  if (fns && fns[entry.provider]) {
+    return (params) => fns[entry.provider](params, { key: entry.key, model: entry.model });
+  }
+  const impl = PROVIDER_IMPLS[entry.provider];
+  return (params) => impl(params, { key: entry.key, model: entry.model });
+}
+
+// ========================================
 // GENERATE COMPLETION — walk the chain
 // ========================================
 const DEFAULT_CHAIN_RETRY = { maxRetries: 2, baseDelayMs: 2000, maxDelayMs: 20000 };
 
-/**
- * Run a chat completion through the provider chain (Groq → Gemini by
- * default). Each provider gets its own transient-retry window; rate-limit
- * errors skip retries and cascade immediately (circuit breaker). When every
- * provider fails, the LAST error is thrown so the existing service.js safe
- * fallback / human escalation still apply.
- *
- * @param {Object} params — { messages, temperature, top_p, frequency_penalty, max_tokens }
- * @param {Object} [opts]
- * @param {Array<{name, fn}>} [opts.providers] — override the chain (tests)
- * @param {Object} [opts.retry] — override per-provider retry options (tests)
- * @returns {Promise<{text: string}>}
- */
-export async function generateCompletion(params, opts = {}) {
-  const providers = opts.providers || buildProviderChain();
-  if (providers.length === 0) {
-    throw new Error('LLM: no providers configured (ANA_LLM_PROVIDERS empty or all API keys missing)');
-  }
-
-  const retry = {
+function buildRetry(opts) {
+  return {
     maxRetries: opts.retry?.maxRetries ?? DEFAULT_CHAIN_RETRY.maxRetries,
     baseDelayMs: opts.retry?.baseDelayMs ?? DEFAULT_CHAIN_RETRY.baseDelayMs,
     maxDelayMs: opts.retry?.maxDelayMs ?? DEFAULT_CHAIN_RETRY.maxDelayMs
   };
+}
 
+/**
+ * LEGACY CHAIN WALK (explicit provider list — tests + external callers).
+ * Each provider gets its own transient-retry window; rate-limit errors skip
+ * retries and cascade immediately (circuit breaker). When every provider
+ * fails, the LAST error is thrown.
+ */
+async function walkChain(params, providers, retry) {
   let lastError = null;
   for (let i = 0; i < providers.length; i++) {
     const p = providers[i];
@@ -327,5 +462,83 @@ export async function generateCompletion(params, opts = {}) {
       console.log(`[LLM ${p.name}: ${kind} — ${String(err.message).substring(0, 140)}] ${next}`);
     }
   }
+  throw lastError;
+}
+
+/**
+ * Run a chat completion. Two paths:
+ *
+ * 1. POOL PATH (production default): tiered key/model rotation — the
+ *    requested tier's model first (routine → 8b/flash-lite, rebuttal →
+ *    70b/flash), then the other model on the same keys, then the fallback
+ *    provider's tiers. 429s park the entry (cooldown) and cascade to the
+ *    next entry — no futile retries. All entries failed → LAST error
+ *    thrown so service.js's safe fallback / human escalation still apply.
+ *
+ * 2. LEGACY CHAIN PATH (opts.providers — tests/external callers): the
+ *    original Groq → Gemini chain semantics, unchanged.
+ *
+ * @param {Object} params — { messages, temperature, top_p, frequency_penalty, max_tokens }
+ * @param {Object} [opts]
+ * @param {string} [opts.tier] — 'routine' | 'rebuttal' (pool path)
+ * @param {Object} [opts.pool] — { fresh, fns } pool overrides (tests)
+ * @param {Array<{name, fn}>} [opts.providers] — legacy chain override (tests)
+ * @param {Object} [opts.retry] — override retry options (tests)
+ * @returns {Promise<{text: string}>}
+ */
+export async function generateCompletion(params, opts = {}) {
+  const retry = buildRetry(opts);
+
+  // === LEGACY CHAIN PATH (explicit provider list) ===
+  if (opts.providers) {
+    if (opts.providers.length === 0) {
+      throw new Error('LLM: no providers configured (ANA_LLM_PROVIDERS empty or all API keys missing)');
+    }
+    return walkChain(params, opts.providers, retry);
+  }
+
+  // === POOL PATH (production default) ===
+  const tier = opts.tier === 'rebuttal' ? 'rebuttal' : 'routine';
+  const pool = buildKeyPool(opts.pool);
+  if (pool.length === 0) {
+    throw new Error('LLM: no providers configured (ANA_LLM_PROVIDERS empty or all API keys missing)');
+  }
+  const ordered = orderPoolEntries(pool, tier);
+  const fns = opts.pool?.fns;
+  let lastError = null;
+  let attempted = 0;
+  for (const entry of ordered) {
+    if (Date.now() < (entry.cooldownUntil || 0)) continue; // parked after a 429
+    attempted++;
+    const callFn = entryCallFn(entry, fns);
+    const label = `${entry.provider}(${entry.model}) key${entry.keyIndex + 1}`;
+    try {
+      const result = await withRetry(() => callFn(params), {
+        maxRetries: retry.maxRetries,
+        baseDelayMs: retry.baseDelayMs,
+        maxDelayMs: retry.maxDelayMs,
+        retryableErrors: RETRYABLE_NO_RATE_LIMIT,
+        onRetry: (err, attemptN) => {
+          console.log(`[LLM ${label} RETRY ${attemptN}/${retry.maxRetries}] ${String(err.message).substring(0, 100)}`);
+        }
+      });
+      console.log(`[LLM ${label}: responded]`);
+      return result;
+    } catch (err) {
+      lastError = err;
+      if (isRateLimit(err)) {
+        entry.cooldownUntil = Date.now() + cooldownMs(err);
+        console.log(`[LLM ${label}: rate limit — circuit breaker, parked ${Math.round(cooldownMs(err) / 1000)}s → next pool entry]`);
+      } else {
+        console.log(`[LLM ${label}: ${String(err.message).substring(0, 140)} → next pool entry]`);
+      }
+    }
+  }
+  if (attempted === 0) {
+    console.log('[LLM: ALL POOL ENTRIES PARKED (cooldown) — nothing attempted]');
+    // Clear error, never `throw null` (a parked pool has no lastError).
+    throw new Error('LLM: all pool entries parked (cooldown) — no provider attempted');
+  }
+  console.log(`[LLM: ALL POOL ENTRIES FAILED — ${String(lastError?.message || '').substring(0, 140)}]`);
   throw lastError;
 }

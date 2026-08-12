@@ -256,6 +256,16 @@ export function detectPhase({ u, conv, session, isRent }) {
 }
 
 /**
+ * TIER ROUTING MAP (unit-tested — the offline seam returns before the LLM
+ * call, so the mapping is extracted to stay pinable): skeptical / soft
+ * rejection turns (intent REJECTED) get the SMART tier (70b / flash) for
+ * rebuttal quality; everything else is ROUTINE (8b / flash-lite).
+ */
+export function tierForClassification(classification) {
+  return classification?.intent === 'REJECTED' ? 'rebuttal' : 'routine';
+}
+
+/**
  * Run the persuasion LLM call (native Macedonian, ends with a cooperation
  * question). Wrapped in withRetry for transient API failures.
  *
@@ -286,12 +296,21 @@ export async function runPersuasion({ conv, userInput, classification, isRent })
   const persuasionContext = buildPersuasionContext(classification);
   const prompt = buildPersuasionPrompt(conv, userInput, persuasionContext, isRent);
 
-  // LLM PROVIDER CHAIN (reported, lead-level outage: Groq 429 TPD exhaustion
-  // froze persuasion and escalated live leads). llm-provider.js owns every
-  // provider + the cascade: Groq first (config.MODEL), Gemini 2.5 Flash on
-  // rate limit/outage, and the existing service.js safe fallback + human
-  // escalation stay the final net. A missing API key is surfaced by
-  // buildProviderChain's skip + generateCompletion's no-providers error.
+  // LLM PROVIDER CHAIN + TIERED MODEL SPLIT (user-approved, reported
+  // lead-level outage: Groq 429 TPD exhaustion froze persuasion and
+  // escalated live leads). llm-provider.js owns every provider + the
+  // cascade: Groq first, Gemini on rate limit/outage, and the existing
+  // service.js safe fallback + human escalation stay the final net.
+  //
+  // TIER ROUTING (smart split, approved): skeptical/soft-rejection turns
+  // (classification.intent === 'REJECTED') get the SMART tier (config.MODEL
+  // = 70b / GEMINI_MODEL = flash) — the model with the stronger rebuttal
+  // quality. Everything else (INTERESTED, gated ACCEPTED, unclassified)
+  // is ROUTINE (config.MODEL_LITE = 8b / GEMINI_MODEL_LITE = flash-lite).
+  // Groq's quota is PER-MODEL (observed 429 was "for model
+  // llama-3.3-70b-versatile ... TPD: Limit 100000"), so the two tiers draw
+  // from SEPARATE daily buckets on the same key ≈ 600K TPD combined.
+  const tier = tierForClassification(classification);
   const result = await generateCompletion({
     messages: [
       {
@@ -304,7 +323,7 @@ export async function runPersuasion({ conv, userInput, classification, isRent })
     top_p: 0.75,
     frequency_penalty: 0.15,
     max_tokens: 150
-  });
+  }, { tier });
 
   let response = (result?.text || "").trim();
   response = postProcessPersuasionResponse(response, isRent);

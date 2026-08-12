@@ -73,16 +73,33 @@ function envIntOrEmpty(name, fallback) {
 
 export const config = {
   // === LLM ===
+  // TIERED MODELS (user-approved split): MODEL = the SMART tier for
+  // skeptical/rebuttal persuasion turns; MODEL_LITE = the ROUTINE tier for
+  // the bulk of persuasion replies. Both models have SEPARATE Groq
+  // per-model quota buckets (the observed 70b 429 was "for model
+  // llama-3.3-70b-versatile ... TPD: Limit 100000" — exhausting one model
+  // does not touch the other), so the split multiplies daily capacity
+  // inside a single key. Free-tier reality (Aug 2026): 70b = 100K TPD
+  // (~41 calls/day at ~2.4K tokens/call), 8b = 500K TPD (~208 calls/day).
   MODEL: envStr('ANA_MODEL', "llama-3.3-70b-versatile"),
+  MODEL_LITE: envStr('ANA_MODEL_LITE', "llama-3.1-8b-instant"),
   // PROVIDER FALLBACK CHAIN (reported: Groq TPD exhaustion froze the
   // persuasion phase). Ordered comma-separated provider names walked by
   // llm-provider.js — Groq primary, then Gemini (independent free-tier
   // quota), cascading on rate limits/outages. The safe fallback + human
   // escalation remain the final net. "groq" alone restores old behavior.
   LLM_PROVIDERS: envStr('ANA_LLM_PROVIDERS', 'groq,gemini'),
-  // Gemini fallback model (AI Studio free tier: gemini-2.5-flash-lite is
-  // cheaper, gemini-2.5-flash is the default — both ~1,500 RPD free).
+  // Gemini fallback model (AI Studio free tier). OBSERVED on this account
+  // (live 429): "generate_content_free_tier_requests, limit: 20, model:
+  // gemini-2.5-flash" — the free tier is REQUEST-counted (~20/day), NOT
+  // token-counted, so shortening prompts does NOT multiply Gemini capacity
+  // (only Groq, which is TPD-bound, benefits from fewer tokens). Gemini
+  // capacity multiplies via: (a) more PROJECTS (quota is per-project, not
+  // per-key — GEMINI_API_KEYS comma-list), (b) more MODELS (flash-lite has
+  // its own per-model bucket — the ROUTINE tier). gemini-2.5-flash = smart
+  // tier; gemini-2.5-flash-lite = routine tier (cheaper/higher throughput).
   GEMINI_MODEL: envStr('ANA_GEMINI_MODEL', 'gemini-2.5-flash'),
+  GEMINI_MODEL_LITE: envStr('ANA_GEMINI_MODEL_LITE', 'gemini-2.5-flash-lite'),
   TEMPERATURE: envFloat('ANA_TEMPERATURE', 0.2),
   MAX_TOKENS: envInt('ANA_MAX_TOKENS', 120),
   // Conversation turns fed to the persuasion prompt. INPUT tokens count
