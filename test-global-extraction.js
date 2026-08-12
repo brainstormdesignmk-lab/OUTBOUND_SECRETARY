@@ -143,8 +143,13 @@ assert("N8d: 'dvaese i tri kvadrati' → totalSqm=23 (dvaese=20 + tri=3)", resul
 //   c) "seeset kvadrati" keeps 60 (full form unaffected).
 result = runGlobalExtraction("seesetipet kvadrati", {});
 assert("N8e: 'seesetipet kvadrati' → totalSqm=65 (merged form, no truncated double-count)", result.totalSqm === 65, `got ${result.totalSqm}`);
+// TRUNCATED TEENS (reported, lead 3571074: "na peti od dvanaese" →
+// totalFloors=2 because "dvanaese" (12) was missing from the parsers and the
+// substring scan fell through to "dva"→2). The whole teens family now
+// parses, so "trinaese kvadrati" (13 m²) extracts 13 — while the phantom
+// "ese"→60 leak stays blocked (the exact teens match runs first).
 result = runGlobalExtraction("trinaese kvadrati", {});
-assert("N8e2: 'trinaese kvadrati' → totalSqm NOT set (no 'ese'→60 substring leak)", result.totalSqm === undefined, `got ${JSON.stringify(result.totalSqm)}`);
+assert("N8e2: 'trinaese kvadrati' → totalSqm=13 (truncated teen parses, NOT 60)", result.totalSqm === 13, `got ${JSON.stringify(result.totalSqm)}`);
 result = runGlobalExtraction("seeset kvadrati", {});
 assert("N8f: 'seeset kvadrati' → totalSqm=60 (full form unaffected)", result.totalSqm === 60, `got ${result.totalSqm}`);
 
@@ -1378,6 +1383,30 @@ result = runGlobalExtraction("OSUMDESET TI REKOV", {}, 'totalSqm');
 assert("SQH5: 'OSUMDESET TI REKOV' → totalSqm=80", result.totalSqm === 80, `got ${JSON.stringify(result.totalSqm)}`);
 result = runGlobalExtraction("OSUMDESET I SEST TI KAZAV", {}, 'totalSqm');
 assert("SQH6: 'OSUMDESET I SEST TI KAZAV' → totalSqm=86", result.totalSqm === 86, `got ${JSON.stringify(result.totalSqm)}`);
+
+// ========================================
+// TRUNCATED TEENS IN COMPOUND FLOOR (reported, lead 3571074): "na peti od
+// dvanaese" (5th of 12) collected totalFloors=2 — "dvanaese" is the Viber-
+// truncated дванаесет (12), which was missing from both number parsers so
+// the substring scan fell through to "dva"→2. The full teens family now
+// parses in parseMacedonianNumber + parseNumberWords (Latin + Cyrillic,
+// full + truncated forms).
+// ========================================
+result = runGlobalExtraction("na peti od dvanaese", {});
+assert("TEEN1: 'na peti od dvanaese' → floor=5 (peti ordinal)", result.floor === 5, `got ${JSON.stringify(result.floor)}`);
+assert("TEEN1: 'na peti od dvanaese' → totalFloors=12 (was 2)", result.totalFloors === 12, `got ${JSON.stringify(result.totalFloors)}`);
+result = runGlobalExtraction("na vtori od trinaese", {});
+assert("TEEN2: 'na vtori od trinaese' → floor=2 totalFloors=13", result.floor === 2 && result.totalFloors === 13, `got ${JSON.stringify(result)}`);
+result = runGlobalExtraction("na sesti od osumnaese", {});
+assert("TEEN3: 'na sesti od osumnaese' → floor=6 totalFloors=18", result.floor === 6 && result.totalFloors === 18, `got ${JSON.stringify(result)}`);
+// Cyrillic compound
+result = runGlobalExtraction("на петти од дванаесе", {});
+assert("TEEN4: Cyrillic 'на петти од дванаесе' → floor=5 totalFloors=12", result.floor === 5 && result.totalFloors === 12, `got ${JSON.stringify(result)}`);
+// Teens as bare sqm repeats and word-sqm answers
+result = runGlobalExtraction("dvanaese ti kazav", {}, 'totalSqm');
+assert("TEEN5: 'dvanaese ti kazav' → totalSqm=12 (bare teen repeat)", result.totalSqm === 12, `got ${JSON.stringify(result.totalSqm)}`);
+result = runGlobalExtraction("petnaese kvadrati", {});
+assert("TEEN6: 'petnaese kvadrati' → totalSqm=15 (teen word-sqm)", result.totalSqm === 15, `got ${JSON.stringify(result.totalSqm)}`);
 
 // KEEP: keyword paths unaffected by the pure-phrase guard
 result = runGlobalExtraction("seese i osum kvadrata so terasa golema", {});

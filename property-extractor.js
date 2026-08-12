@@ -39,15 +39,22 @@ export function parseMacedonianNumber(text) {
     'осум': 8, 'osum': 8,
     'девет': 9, 'devet': 9,
     'десет': 10, 'deset': 10,
-    'edinaeset': 11, 'единаесет': 11,
-    'dvanaeset': 12, 'дванаесет': 12,
+    // TEENS 11-19 — full forms PLUS the Viber-truncated forms (reported, lead
+    // 3571074: "na peti od dvanaese" = 5th of 12 collected totalFloors=2
+    // because the truncated "dvanaese" was missing here and the substring
+    // scan fell through to "dva" → 2). The truncated teens drop the final
+    // "t" (дванаесет → dvanaese). The words map is scanned LONGEST-FIRST, so
+    // each truncated form outranks its unit prefix ("dvanaese" > "dva").
+    'edinaeset': 11, 'единаесет': 11, 'edinaese': 11, 'единаесе': 11,
+    'dvanaeset': 12, 'дванаесет': 12, 'dvanaese': 12, 'дванаесе': 12,
     'trinaeset': 13, 'тринаесет': 13, 'trinaese': 13, 'тринаесе': 13,
-    'cetirinaeset': 14, 'четиринаесет': 14,
-    'petnaeset': 15, 'петнаесет': 15,
-    'sesnaeset': 16, 'шеснаесет': 16,
-    'sedumnaeset': 17, 'седумнаесет': 17,
-    'osumnaeset': 18, 'осумнаесет': 18,
-    'devetnaeset': 19, 'деветнаесет': 19,
+    'cetirinaeset': 14, 'четиринаесет': 14, 'cetirinaese': 14, 'четиринаесе': 14,
+    'petnaeset': 15, 'петнаесет': 15, 'petnaese': 15, 'петнаесе': 15,
+    'sesnaeset': 16, 'шеснаесет': 16, 'sesnaese': 16, 'шеснаесе': 16,
+    'sestnaeset': 16, 'шестнаесет': 16, 'sestnaese': 16, 'шестнаесе': 16,
+    'sedumnaeset': 17, 'седумнаесет': 17, 'sedumnaese': 17, 'седумнаесе': 17,
+    'osumnaeset': 18, 'осумнаесет': 18, 'osumnaese': 18, 'осумнаесе': 18,
+    'devetnaeset': 19, 'деветнаесет': 19, 'devetnaese': 19, 'деветнаесе': 19,
     'ses': 6, 'cetri': 4, 'cetiri': 4,
     'vtor': 2, 'tret': 3, 'cetvrt': 4, 'petti': 5,
     'sesti': 6, 'sedmi': 7, 'osmi': 8, 'devetti': 9,
@@ -105,6 +112,21 @@ export function parseNumberWords(text) {
     'osum': 8, 'осум': 8,
     'devet': 9, 'девет': 9,
     'deset': 10, 'десет': 10,
+    // TEENS 11-19 — full + Viber-truncated forms (reported, lead 3571074:
+    // "dvanaese" = 12 was unparseable here, so compound totals like
+    // "na peti od dvanaese" fell through to parseMacedonianNumber's "dva"
+    // substring match → totalFloors=2). Exact whole-phrase match, so adding
+    // them is safe: "trinaese" (13) matches before any "ese"→60 pattern.
+    'edinaeset': 11, 'единаесет': 11, 'edinaese': 11, 'единаесе': 11,
+    'dvanaeset': 12, 'дванаесет': 12, 'dvanaese': 12, 'дванаесе': 12,
+    'trinaeset': 13, 'тринаесет': 13, 'trinaese': 13, 'тринаесе': 13,
+    'cetirinaeset': 14, 'четиринаесет': 14, 'cetirinaese': 14, 'четиринаесе': 14,
+    'petnaeset': 15, 'петнаесет': 15, 'petnaese': 15, 'петнаесе': 15,
+    'sesnaeset': 16, 'шеснаесет': 16, 'sesnaese': 16, 'шеснаесе': 16,
+    'sestnaeset': 16, 'шестнаесет': 16, 'sestnaese': 16, 'шестнаесе': 16,
+    'sedumnaeset': 17, 'седумнаесет': 17, 'sedumnaese': 17, 'седумнаесе': 17,
+    'osumnaeset': 18, 'осумнаесет': 18, 'osumnaese': 18, 'осумнаесе': 18,
+    'devetnaeset': 19, 'деветнаесет': 19, 'devetnaese': 19, 'деветнаесе': 19,
     // Truncated Viber forms for the "i {unit}" connector: "osumdeset i ses"
     // (86) — 'ses'/'шес' are shorthand for 'sest'/'шест' (6).
     'ses': 6, 'шес': 6

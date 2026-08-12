@@ -84,6 +84,23 @@ assertEqual(parseMacedonianNumber("deset"), 10, "deset → 10");
 assertEqual(parseMacedonianNumber("trinaeset"), 13, "trinaeset → 13");
 assertEqual(parseMacedonianNumber("petnaeset"), 15, "petnaeset → 15");
 
+// TRUNCATED TEENS (reported, lead 3571074: "na peti od dvanaese" →
+// totalFloors=2 because Viber-shortened "dvanaese" (12) was missing and the
+// substring scan fell through to "dva" → 2). Unit parity with the full
+// forms above — both parsers, Latin + Cyrillic.
+assertEqual(parseMacedonianNumber("dvanaese"), 12, "TEEN-u1: 'dvanaese' → 12 (truncated, was 2)");
+assertEqual(parseNumberWords("dvanaese"), 12, "TEEN-u2: parseNumberWords('dvanaese') → 12");
+assertEqual(parseMacedonianNumber("дванаесе"), 12, "TEEN-u3: 'дванаесе' → 12 (Cyrillic truncated)");
+assertEqual(parseNumberWords("trinaese"), 13, "TEEN-u4: parseNumberWords('trinaese') → 13 (exact match before 'ese'→60)");
+assertEqual(parseMacedonianNumber("petnaese"), 15, "TEEN-u5: 'petnaese' → 15 (was 5)");
+assertEqual(parseMacedonianNumber("osumnaese"), 18, "TEEN-u6: 'osumnaese' → 18 (was 8)");
+assertEqual(parseNumberWords("devetnaese"), 19, "TEEN-u7: parseNumberWords('devetnaese') → 19");
+// COLLISION CONTROL (reviewer): the closest pair — "dvaese" (дваесе, 20)
+// must stay 20 after "dvanaese" (дванаесе, 12) was added; the two differ by
+// the medial "na", so they must never cross-parse.
+assertEqual(parseMacedonianNumber("dvaese"), 20, "TEEN-u8: 'dvaese' (20) unaffected by 'dvanaese' (12)");
+assertEqual(parseMacedonianNumber("дваесе"), 20, "TEEN-u9: 'дваесе' (20) unaffected (Cyrillic)");
+
 // ============================================================
 // TEST GROUP: parseNumberWords
 // ============================================================
