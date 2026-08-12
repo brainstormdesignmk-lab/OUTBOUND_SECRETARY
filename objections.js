@@ -311,7 +311,13 @@ function isAskingForExplanation(text) {
 }
 
 function isAskingAboutPhone(text) {
-  return /od kade|од каде|brojot|бројот|каде го добивте|od kade vi e|од каде ви е|kako go dobivte|како го добивте/i.test(text);
+  // The full Viber vocabulary for "where did you get my number": od kade / od
+  // kaj (от каде / од кај — kaj is the common dialect form), brojot / brojov
+  // (brojov is the -ov form of бројот), dobivte / najdovte (got / found).
+  // Reported (lead 5531598): "OD KADE VI E BROJOV?" was stolen by the agency
+  // matcher and "OD KAJ TI E BROJOV?" fell through to the LLM — both must
+  // land on the direct "Го добив вашиот број од огласот..." answer.
+  return /od kade|од каде|od kaj|од кај|brojot|бројот|brojov|бројов|kade go dobivte|каде го добивте|kade go najdovte|каде го најдовте|kaj go dobivte|кај го добивте|kaj go najdovte|кај го најдовте|od kade vi e|од каде ви е|od kaj ti e|од кај ти е|kako go dobivte|како го добивте|kako go najdovte|како го најдовте/i.test(text);
 }
 
 // ========================================

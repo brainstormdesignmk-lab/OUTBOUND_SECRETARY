@@ -479,7 +479,14 @@ export function runEarlyResponses({ u, isRent, session }) {
   // agency itself: name, experience, location). Answer immediately. Never
   // continue data collection until the question is addressed.
   // ========================================
-  if (!tenantPrefAnswerContext && isAskingAboutAgency(u)) {
+  // PHONE-ORIGIN PRIORITY: isAskingAboutAgency matches "kade vi e|каде ви е"
+  // ("kade vi e kancelarijata?"), which substring-matches "OD KADE VI E
+  // BROJOV?" (reported lead 5531598) — the owner asking WHERE THE NUMBER
+  // CAME FROM must get the direct "Го добив вашиот број од огласот..."
+  // answer (handled below), never the agency pitch. Same disease class as
+  // the commission-gate priority: question-specific handlers win over the
+  // broad agency matcher.
+  if (!tenantPrefAnswerContext && !isAskingAboutPhone(u) && isAskingAboutAgency(u)) {
     const agencyAnswers = [
       'Ние сме Metropolis, агенција за недвижности. Работиме повеќе од 10 години и имаме искуство со продажба и издавање на станови, куќи и деловни простори. Дали имате некое друго прашање?',
       'Јас сум Ана од Metropolis. Metropolis е агенција за недвижности со повеќегодишно искуство на македонскиот пазар. Нашата канцеларија е во Скопје. Дали сакате да дознаете нешто повеќе?',

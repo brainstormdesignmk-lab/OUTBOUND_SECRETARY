@@ -418,6 +418,25 @@ const phoneOriginSession = createSession('sale');
 const phoneOriginRes = await generateResponse(phoneOriginSession, 'od kade go dobivte brojot?');
 assert(`e2e sale phone-origin "od kade go dobivte brojot?" → phone answer (not money objection)`, phoneOriginRes.type === 'NORMAL' && /Го добив вашиот број/.test(phoneOriginRes.text), `got "${(phoneOriginRes.text || '').substring(0, 100)}"`);
 
+// 7e. THE reported phrasings (lead 5531598): "OD KADE VI E BROJOV?" (which
+// used to be STOLEN by the agency matcher's "kade vi e" → the owner got the
+// Metropolis pitch) and "OD KAJ TI E BROJOV?" (od kaj + brojov — which used
+// to fall through to the LLM entirely). Both must land on the direct
+// "Го добив вашиот број од огласот..." answer — the number is from the ad.
+for (const q of ['OD KADE VI E BROJOV?', 'OD KAJ TI E BROJOV?', 'OD KADE VI E BROJOT?', 'od kaj ti e brojov', 'OD KADE GO DOBIVTE BROJOT', 'kade go dobivte brojot', 'KADE GO NAJDOVTE', 'KAJ GO NAJDOVTE', 'от каде ти е бројов', 'од кај ти е бројот', 'kade go najdovte brojot']) {
+  const phoneQSession = createSession('sale');
+  const phoneQRes = await generateResponse(phoneQSession, q);
+  assert(`e2e sale phone-origin ${JSON.stringify(q)} → direct from-the-ad answer (not agency pitch)`, phoneQRes.type === 'NORMAL' && /Го добив вашиот број од огласот/.test(phoneQRes.text) && !/Metropolis е агенција|повеќегодишно искуство/.test(phoneQRes.text), `got "${(phoneQRes.text || '').substring(0, 100)}"`);
+}
+// 7f. Guards must NOT break: an agency question is still an agency question,
+// and a money question still gets the money objection.
+const agencyKeepSession = createSession('sale');
+const agencyKeepRes = await generateResponse(agencyKeepSession, 'kade vi e kancelarijata?');
+assert(`e2e sale "kade vi e kancelarijata?" → agency answer (not phone-origin)`, agencyKeepRes.type === 'NORMAL' && /Metropolis/.test(agencyKeepRes.text), `got "${(agencyKeepRes.text || '').substring(0, 100)}"`);
+const moneyKeepSession = createSession('sale');
+const moneyKeepRes = await generateResponse(moneyKeepSession, 'OD KADE SE PARITE?');
+assert(`e2e sale "OD KADE SE PARITE?" → money objection (not phone-origin)`, moneyKeepRes.type === 'NORMAL' && /конечната цена|разликат/.test(moneyKeepRes.text) && !/Го добив вашиот број/.test(moneyKeepRes.text), `got "${(moneyKeepRes.text || '').substring(0, 100)}"`);
+
 // 8. Sale sanity — sale availability KEEPS the approved no-commission phrasing
 // (rotates "без провизија за вас" / "без никакви давачки" / "без никакви
 // обврски" — the exact opposite of the rent rule).
