@@ -120,6 +120,44 @@ function createSession() {
 }
 
 // ========================================
+// 3b. SENDING QUESTION — owner asks where/how to send the photos
+//     → answered with QUESTION ack, stays in AWAITING_PHOTOS
+//     (reported: "NA OVOJ BROJ DA GI PRATAM?" got owner_back → CLOSE
+//     without ever being answered)
+// ========================================
+{
+  const variants = [
+    'na ovoj broj da gi pratam ?',
+    'NA OVOJ BROJ DA GI PRATAM ?',  // exact reported message
+    'kade da gi pratam?',
+    'na koj broj da gi ispratam?',
+    'dali da gi pratam na viber?',
+    'tuka da gi pratam?',
+    'mozam da gi pratam na viber?',
+    'kade da gi isprajam?',
+    'na koja adresa da gi pratam?'
+  ];
+  for (const v of variants) {
+    const session = createSession();
+    session.phase = PHASES.AWAITING_PHOTOS;
+    const resp = runAwaitingPhotos({ u: v, session });
+    assert(`sending question "${v}" → QUESTION ack`, resp && resp.type === 'QUESTION', `got ${resp?.type}`);
+    assert(`sending question "${v}" stays in AWAITING_PHOTOS`, session.phase === PHASES.AWAITING_PHOTOS, `got "${session.phase}"`);
+    assert(`sending question "${v}" ack mentions sending`, /испратете|испратете|ги очекувам|Viber/i.test(resp?.text || ''), `got ${resp?.text}`);
+  }
+}
+
+{
+  // Past-tense delivery must still resolve as RECEIVED (branch 1), not the
+  // question ack — the new regex must not hijack deliveries.
+  const session = createSession();
+  session.phase = PHASES.AWAITING_PHOTOS;
+  const resp = runAwaitingPhotos({ u: 'eve, gi isprativ na viber', session });
+  assert('past delivery still resolves to CLOSE (not question ack)', resp && resp.type === 'CLOSE', `got ${resp?.type}`);
+  assert('past delivery still transitions → CLOSED', session.phase === PHASES.CLOSED, `got "${session.phase}"`);
+}
+
+// ========================================
 // 4. OWNER BACK — owner resumes talking → null + DATA_COLLECTION
 // ========================================
 {

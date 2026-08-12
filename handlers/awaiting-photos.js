@@ -104,6 +104,28 @@ const PHOTOS_RECEIVED_RE = /(?:evе|еве|evo|ево|eto|ето)\b|isprativ|и�
 const PHOTOS_UNAVAILABLE_RE = /nema\s+fotografi|нема\s+фотографии|nema\s+sliki|нема\s+слики|nema\s+da\s+pratam|нема\s+да\s+пратам|ne\s+mozam\s+da\s+ispratam|не\s+можам\s+да\s+испратам|ne\s+mozam\s+da\s+pratam|не\s+можам\s+да\s+пратам|ne\s+mozam|не\s+можам|ne\s+se\s+pri\s+raka|не\s+се\s+при\s+рака|nemam\s+sliki|немам\s+слики|nemam\s+fotografi|немам\s+фотографии|bez\s+sliki|без\s+слики|bez\s+fotografi|без\s+фотографии/i;
 
 // ========================================
+// PHOTOS SENDING QUESTION — the owner asks where/how to send the photos
+// ("NA OVOJ BROJ DA GI PRATAM?", "KADE DA GI PRATAM?", "NA KOJ BROJ?",
+// "DALI DA GI PRATAM NA VIBER?"). Answer it and KEEP waiting.
+// ========================================
+// First-person present/future sending forms ("da/ке gi pratam",
+// "ispratam", "isprajam") OR an address/place context + sending verb
+// ("na ovoj broj", "na koj broj/adresa", "kade", "tuka", "ovde",
+// "viber"). Past-tense deliveries ("isprativ", "gi prativ") are handled
+// by PHOTOS_RECEIVED_RE above and must never land here.
+// Alt 3 (place words) requires the "gi" object — a reflexive non-photos
+// phrase like "kade da se pratam" (where do I go/report) must not get the
+// photos ack. "na viber" alone strongly implies the photos context, so it
+// keeps the flexible form.
+const PHOTOS_SENDING_QUESTION_RE = /(?:da\s+li|дали)?(?:da|ке|ќе|treba|треба|mozam|можам)\s+gi\s+(?:pratam|пратам|ispratam|испратам|isprajam|испраќам)|(?:na\s+)?(?:ovoj|кој|koj|ova|ова)\s+(?:broj|adresa|адреса|adres|адрес)[^\n]{0,30}?(?:pratam|пратам|ispratam|испратам|isprajam|испраќам)|(?:kade|каде|кај|tuka|тука|ovde|овде)[^\n]{0,30}?gi\s+(?:pratam|пратам|ispratam|испратам|isprajam|испраќам)|na\s+viber[^\n]{0,40}?(?:pratam|пратам|ispratam|испратам|isprajam|испраќам)/i;
+
+const PHOTOS_SENDING_QUESTION_ACK = [
+  'Да, испратете ги на Viber на овој број. Ќе ги очекувам!',
+  'Секако! Испратете ги на Viber на овој број кога ќе бидат готови.',
+  'Да, точно така — на Viber на овој број. Ви благодарам!'
+];
+
+// ========================================
 // Close messages (rotational, Macedonian) — mirrored from runDataCollectionFlow
 // ========================================
 const PHOTOS_RECEIVED_CLOSE = [
@@ -159,6 +181,21 @@ export function runAwaitingPhotos({ u, session }) {
     return {
       text: PHOTOS_UNAVAILABLE_CLOSE[Math.floor(Math.random() * PHOTOS_UNAVAILABLE_CLOSE.length)],
       type: "CLOSE"
+    };
+  }
+
+  // === 2.5 PHOTOS SENDING QUESTION — owner asks where/how to send the photos ===
+  // ("NA OVOJ BROJ DA GI PRATAM?", "KADE DA GI PRATAM?", "NA KOJ BROJ?").
+  // Answer the question and KEEP waiting — a question is never a reason to
+  // close. Reported: owner asked "NA OVOJ BROJ DA GI PRATAM?" and Ana
+  // closed without answering, because the message fell through to owner_back
+  // and, with all fields already collected, the resumed flow closed
+  // immediately. No transition → phase stays AWAITING_PHOTOS.
+  if (PHOTOS_SENDING_QUESTION_RE.test(u)) {
+    console.log(`[PHOTOS: sending question — answered, staying in AWAITING_PHOTOS]`);
+    return {
+      text: PHOTOS_SENDING_QUESTION_ACK[Math.floor(Math.random() * PHOTOS_SENDING_QUESTION_ACK.length)],
+      type: "QUESTION"
     };
   }
 
