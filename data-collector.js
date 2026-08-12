@@ -171,13 +171,24 @@ function extractTotalSqm(u, data) {
   // no sqm keyword attached (the "3 M2" belongs to the terrace), so the
   // keyword patterns above miss it. An explicit "вкупно"/"vkupno" (total)
   // marks the number phrase as the total size. Guarded against price context
-  // ("vkupno ... iljadi evra"), floor context ("vkupno 7 sprata"), and year
-  // context ("osumdeset godina") — those are never totalSqm.
+  // ("vkupno ... iljadi evra"), floor context ("vkupno 7 sprata"), year
+  // context ("osumdeset godina"), and room context ("vkupno 3 sobi") —
+  // those are never totalSqm.
+  // VKUPNO WINDOW (reported, lead 3571074): on the history-scan path ALL
+  // owner messages are joined into one text. Parsing the WHOLE text would
+  // let parseNumberWords crown a number from an UNRELATED message (the
+  // greedy scanner finds "cetrsto dvaeset" anywhere). Restrict parsing to a
+  // window around the vkupno marker — BIDIRECTIONAL (~30 chars before, ~90
+  // after) so both "VKUPNO IMA OSUMDESET I SES ..." and "OSUMDESET SE
+  // VKUPNO" (reviewer finding: the number can sit BEFORE the marker) are
+  // still caught while far-away numbers stay unreachable.
   if (/vkupno|вкупно/i.test(u) &&
-      !/iljadi|илјади|evra|евра|eur|evro|евро|sprat|спрат|kat|кат|lift|лифт|elevator|godina|година|izgraden|граден|katnica|катница/i.test(u)) {
-    const parsed = parseNumberWords(u);
+      !/iljadi|илјади|evra|евра|eur|evro|евро|sprat|спрат|kat|кат|lift|лифт|elevator|godina|година|izgraden|граден|katnica|катница|sobi|соби|soba|соба|spalni|спални/i.test(u)) {
+    const vkIdx = u.search(/vkupno|вкупно/i);
+    const vkWindow = u.slice(Math.max(0, vkIdx - 30), vkIdx + 90);
+    const parsed = parseNumberWords(vkWindow);
     if (parsed !== null && parsed >= 10 && parsed <= 999) return { totalSqm: parsed };
-    const vkDigits = u.match(/\b(\d{2,4})\b/);
+    const vkDigits = vkWindow.match(/\b(\d{2,4})\b/);
     if (vkDigits) {
       const n = parseInt(vkDigits[1]);
       if (n >= 10 && n <= 999) return { totalSqm: n };
@@ -203,13 +214,46 @@ function extractTotalSqm(u, data) {
       const n = parseInt(bareSqmDigit[1], 10);
       if (n >= 10 && n <= 999) return { totalSqm: n };
     }
-    // Multi-word number phrases ("OSUMDESET I SEST" = 86) parse only via
-    // parseNumberWords — parseMacedonianNumber is single-word only.
+    // PURE NUMBER PHRASE GUARD (reported, lead 3571074): the annoyed-repeat
+    // fallback must only accept a message whose ENTIRE content is a bare
+    // number phrase ("86 TI KAZAV" → "86", "OSUMDESET I SEST TI REKOV" →
+    // "OSUMDESET I SEST"). On the history-scan path ALL owner messages are
+    // joined into one text, and parseNumberWords is a GREEDY scanner — it
+    // found the RENT ("cetrsto dvaeset" in "... ti kazav cetrsto dvaeset
+    // evra mesecno ...") and crowned totalSqm=420, so the sqm question was
+    // NEVER asked (reported). The guard rejects any text containing a
+    // non-number word (evra, mesecno, kvadrata, sobi...), keeping the legit
+    // bare repeats working. Conservative tradeoff (reviewer-acknowledged):
+    // a "DA 86 TI KAZAV" prefix (stripped → "DA 86") is deliberately NOT
+    // accepted — "da" is not a number token — the confirmatory "Дали
+    // точната вредност е 86?" re-ask covers that shape safely.
     const bareSqmWord = uRepeatStrippedSqm.trim();
-    const w = parseNumberWords(bareSqmWord);
-    if (w !== null && w >= 10 && w <= 999) return { totalSqm: w };
+    if (isBareNumberPhrase(bareSqmWord)) {
+      const w = parseNumberWords(bareSqmWord);
+      if (w !== null && w >= 10 && w <= 999) return { totalSqm: w };
+    }
   }
   return null;
+}
+
+// ========================================
+// PURE NUMBER PHRASE CHECK — every whitespace token must be a digit, a
+// Macedonian number word (parseNumberWords), or the connector "i"/"и".
+// Used to gate the annoyed-repeat totalSqm fallbacks (extractTotalSqm +
+// assessConfidence) so a greedy parseNumberWords over a LONG text (the
+// history-scan's joined owner messages) can never crown a number that
+// belongs to ANOTHER field (reported: the rent "ti kazav cetrsto dvaeset
+// evra mesecno" → totalSqm=420, sqm question never asked).
+// ========================================
+function isBareNumberPhrase(text) {
+  if (!text) return false;
+  const tokens = text.trim().split(/\s+/).filter(Boolean);
+  if (tokens.length === 0) return false;
+  return tokens.every(tok =>
+    /^\d+$/.test(tok) ||
+    /^(?:i|и)$/i.test(tok) ||
+    parseNumberWords(tok) !== null
+  );
 }
 
 function extractBedrooms(u, data) {
@@ -1255,7 +1299,12 @@ function assessConfidence(field, value, input) {
     }
     // Multi-word number phrases ("OSUMDESET I SEST" = 86) parse only via
     // parseNumberWords — parseMacedonianNumber is single-word only.
-    if (field === 'totalSqm') {
+    // PURE PHRASE GUARD (reported, lead 3571074): must be a bare number
+    // phrase — a greedy parse over long text (the history-scan's joined
+    // owner messages) would crown the RENT as totalSqm and the sqm question
+    // would never be asked. "... ti kazav cetrsto dvaeset evra mesecno ..."
+    // contains evra/mesecno → NOT a bare phrase → not HIGH.
+    if (field === 'totalSqm' && isBareNumberPhrase(stripped)) {
       const wn = parseNumberWords(stripped);
       if (wn !== null && wn >= 10 && wn <= 999) return 'HIGH';
     }

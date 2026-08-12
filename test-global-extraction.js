@@ -6,7 +6,7 @@ import { createHarness } from './test-helpers.js';
 // Validates that multi-field messages like "80 kvadrati, tret kat, ima lift"
 // extract all three fields in one pass.
 // ========================================
-import { runGlobalExtraction, assessConfidence } from './data-collector.js';
+import { runGlobalExtraction, assessConfidence, scanHistoryForField } from './data-collector.js';
 import { extractTerraceNumber } from './property-extractor.js';
 
 const harness = createHarness();
@@ -1344,6 +1344,58 @@ assert("RN7: 'renoviran 2020' → renovationYear=2020", result.renovationYear ==
 assert("RN7: 'renoviran 2020' → cleanPrice NOT extracted from year", result.cleanPrice === undefined, `got ${JSON.stringify(result.cleanPrice)}`);
 result = runGlobalExtraction("2000ta", { renovated: false, renovationYear: null });
 assert("RN8: renovationYear not extracted when renovated=false", !('renovationYear' in result), `got ${JSON.stringify(result.renovationYear)}`);
+
+// ========================================
+// SQM HISTORY-SCAN FALSE-POSITIVE (reported, lead 3571074): the owner's rent
+// answer "ti kazav cetrsto dvaeset evra mesecno" (420 €/month, annoyed
+// repeat) was crowned as totalSqm=420 by scanHistoryForField's greedy
+// parseNumberWords over the JOINED owner messages — the sqm question was
+// never asked and the wrong value stored. The annoyed-repeat fallbacks in
+// extractTotalSqm + assessConfidence now require a PURE NUMBER PHRASE.
+// ========================================
+
+result = runGlobalExtraction("ti kazav cetrsto dvaeset evra mesecno", { transactionType: 'rent' }, 'totalSqm');
+assert("SQH1: rent repeat 'ti kazav cetrsto dvaeset evra mesecno' → totalSqm NOT extracted", result.totalSqm === undefined, `got ${JSON.stringify(result.totalSqm)}`);
+assert("SQH1: ... but monthlyRent STILL extracts 420", result.monthlyRent === 420, `got ${JSON.stringify(result.monthlyRent)}`);
+
+const sqhMsgs = [
+  { role: 'user', text: 'da probame' },
+  { role: 'user', text: 'ti kazav cetrsto dvaeset evra mesecno' },
+  { role: 'user', text: 'sloboden momentalno' },
+  { role: 'user', text: 'ne sakam turci i albanci' },
+  { role: 'user', text: 'nikako milenici, se mi e novo' },
+];
+const sqhScan = scanHistoryForField('totalSqm', sqhMsgs, {});
+assert("SQH2: history scan does NOT crown totalSqm=420 from joined messages", sqhScan === null, `got ${JSON.stringify(sqhScan)}`);
+
+const sqhConf = assessConfidence('totalSqm', 420, 'ti kazav cetrsto dvaeset evra mesecno');
+assert("SQH3: assessConfidence(totalSqm, 420, rent repeat) NOT HIGH", sqhConf !== 'HIGH', `got ${sqhConf}`);
+
+// KEEP: legit bare repeats still extract (pure number phrases)
+result = runGlobalExtraction("86 TI KAZAV", {}, 'totalSqm');
+assert("SQH4: '86 TI KAZAV' → totalSqm=86 (legit bare repeat preserved)", result.totalSqm === 86, `got ${JSON.stringify(result.totalSqm)}`);
+result = runGlobalExtraction("OSUMDESET TI REKOV", {}, 'totalSqm');
+assert("SQH5: 'OSUMDESET TI REKOV' → totalSqm=80", result.totalSqm === 80, `got ${JSON.stringify(result.totalSqm)}`);
+result = runGlobalExtraction("OSUMDESET I SEST TI KAZAV", {}, 'totalSqm');
+assert("SQH6: 'OSUMDESET I SEST TI KAZAV' → totalSqm=86", result.totalSqm === 86, `got ${JSON.stringify(result.totalSqm)}`);
+
+// KEEP: keyword paths unaffected by the pure-phrase guard
+result = runGlobalExtraction("seese i osum kvadrata so terasa golema", {});
+assert("SQH7: 'seese i osum kvadrata so terasa golema' → totalSqm=68 (keyword path)", result.totalSqm === 68, `got ${JSON.stringify(result.totalSqm)}`);
+result = runGlobalExtraction("VKUPNO IMA OSUMDESET I SES I TERASA OD 3 M2", {});
+assert("SQH8: vkupno context → totalSqm=86 (windowed parse preserved)", result.totalSqm === 86, `got ${JSON.stringify(result.totalSqm)}`);
+result = runGlobalExtraction("OSUMDESET SE VKUPNO", {}, 'totalSqm');
+assert("SQH9: number BEFORE vkupno marker → totalSqm=80 (bidirectional window)", result.totalSqm === 80, `got ${JSON.stringify(result.totalSqm)}`);
+
+// Other fields stay safe over the SAME joined rent text (reviewer check:
+// the NUMBER_SNIFFING STEP-2 guard does NOT apply to history scans, so
+// confirm bedrooms/floor/totalFloors can't crown the rent number either)
+const sqhOther = scanHistoryForField('bedrooms', sqhMsgs, {});
+assert("SQH10: history scan of bedrooms → null (rent number not crowned)", sqhOther === null, `got ${JSON.stringify(sqhOther)}`);
+const sqhFloor = scanHistoryForField('floor', sqhMsgs, {});
+assert("SQH11: history scan of floor → null", sqhFloor === null, `got ${JSON.stringify(sqhFloor)}`);
+const sqhTotFloors = scanHistoryForField('totalFloors', sqhMsgs, {});
+assert("SQH12: history scan of totalFloors → null", sqhTotFloors === null, `got ${JSON.stringify(sqhTotFloors)}`);
 
 // ========================================
 // TEST SUMMARY
