@@ -394,11 +394,28 @@ function extractFloor(u, data) {
   }
 
   // Check for potkrovje first
+  // POTKROVJE (attic) sits ABOVE the last floor — floor = totalFloors + 1.
+  // Reported: bare "NA POTKROVJE" was stored as floor=7 from a fabricated
+  // (data.totalFloors || 6) default — the guess invented a 6-floor building.
+  // Now NO guess ever happens:
+  //   1. Same-message totalFloors hint ("potkrovje, 10katnica", "potkrovje
+  //      od 10") → floor = hint + 1 AND totalFloors = hint (cross-rule hint).
+  //   2. totalFloors already collected (data.totalFloors) → floor = N + 1.
+  //   3. totalFloors unknown → return null. The data-collection handler
+  //      detects the potkrovje answer, sets floorPendingPotkrovje, asks the
+  //      totalFloors question FIRST, then derives floor = totalFloors + 1.
   if (/potkrovje|поткровје|podkrovje|подкровје|potkrov|поткров|potkrov|поткров/i.test(u)) {
-    // First check if this SAME message also contains totalFloors (cross-rule hint)
-    const storyHint = u.match(/(\d{1,3})\s*(katnica|катница|kata|ката|sprata|спрата|sprat|спрат|eta|ета|etaža|етажа)/i);
-    const totalFloors = storyHint ? parseInt(storyHint[1]) : (data.totalFloors || 6);
-    return { floor: totalFloors + 1 };
+    const storyHint = u.match(/(\d{1,3})\s*(katnica|катница|kata|ката|sprata|спрата|sprat|спрат|eta|ета|etaža|етажа)/i) ||
+                      u.match(/(?:od|од)\s+(\d{1,3})$/i);
+    if (storyHint) {
+      const hint = parseInt(storyHint[1]);
+      if (hint >= 1 && hint <= 50) return { floor: hint + 1, totalFloors: hint };
+    }
+    if (typeof data.totalFloors === 'number') {
+      return { floor: data.totalFloors + 1 };
+    }
+    console.log('[FLOOR: potkrovje without known totalFloors — deferring (handler asks totalFloors first)]');
+    return null;
   }
   // Ordinal floors (прв, втор, трет, петти, etc.)
   // TIME-COUNT GUARD (reported quirk): ordinals counting occurrences or days

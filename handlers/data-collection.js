@@ -568,6 +568,23 @@ export function runComplexStatefulHandlers({ u, userInput, session, nextField, h
   // that flow (a business space has heating too).
   const isCommercialLead = session.adMemory?.propertyType === 'commercial' || session.collectedData?.propertyType === 'commercial';
 
+  // === floor — POTKROVJE DEFERRAL (reported) ===
+  // The attic (поткровје) sits ABOVE the last floor: floor = totalFloors + 1.
+  // extractFloor computes it directly when totalFloors is known (collected or
+  // same-message hint). When the owner answers the floor question with
+  // "NA POTKROVJE" and totalFloors is NOT known yet, extractFloor returns
+  // null (it must NEVER guess — the old (totalFloors || 6) default fabricated
+  // a 6-floor building and stored floor=7). Set the deferral flag so the
+  // question flow asks totalFloors FIRST and derives floor when it arrives.
+  if (nextField === 'floor' &&
+      session.collectedData.floor === undefined &&
+      session.collectedData.floorPendingPotkrovje === undefined &&
+      /potkrovje|поткровје|podkrovje|подкровје|potkrov|поткров/i.test(u) &&
+      typeof session.collectedData.totalFloors !== 'number') {
+    session.collectedData.floorPendingPotkrovje = true;
+    console.log('[POTKROVJE: totalFloors unknown — deferring floor, will ask totalFloors first]');
+  }
+
   // === terraceSqm (Handles ALL cases) ===
   if (!isLandLead && !isCommercialLead && session.collectedData.terraceSqm === undefined && session.collectedData.hasTerrace === undefined) {
 
@@ -1294,6 +1311,38 @@ export function runDataCollectionFlow({ u, userInput, session, adMemory, hasScra
     }
   }
 
+  // ========================================
+  // POTKROVJE DEFERRAL RESOLUTION (reported)
+  // The owner answered the floor question with "NA POTKROVJE" (attic) while
+  // totalFloors was still unknown — extractFloor never guesses, so the flag
+  // below was set by runComplexStatefulHandlers. Here:
+  //   - totalFloors is now known (the owner just answered it) → derive
+  //     floor = totalFloors + 1, clear the flag;
+  //   - totalFloors still missing → redirect the question to totalFloors so
+  //     the derivation can happen, instead of re-asking the floor question
+  //     the owner already answered ("ti kazav potkrovje").
+  // ========================================
+  if (session.collectedData.floorPendingPotkrovje) {
+    if (typeof session.collectedData.totalFloors === 'number') {
+      // Only derive when floor is STILL missing — if the owner later answered
+      // the floor directly with a real value ("na vtor kat" while the
+      // redirected totalFloors question was pending), never clobber it.
+      if (session.collectedData.floor === undefined || session.collectedData.floor === null) {
+        session.collectedData.floor = session.collectedData.totalFloors + 1;
+        session.collectedData.floorConfidence = 0.95;
+        console.log(`[POTKROVJE: floor = ${session.collectedData.totalFloors} + 1 = ${session.collectedData.floor}]`);
+      } else {
+        console.log(`[POTKROVJE: floor already answered directly (${session.collectedData.floor}) — keeping it, dropping deferral]`);
+      }
+      delete session.collectedData.floorPendingPotkrovje;
+      const postPotkrovjeKnown = { ...adMemory, ...session.collectedData };
+      nextField = getNextMissingField(postPotkrovjeKnown);
+    } else if (nextField === 'floor') {
+      nextField = 'totalFloors';
+      console.log('[POTKROVJE: totalFloors unknown — asking totalFloors question first]');
+    }
+  }
+
   if (!nextField) {
     // NATURAL CLOSE: all fields collected — property folder + CSV + message.
     return buildCloseResponse(session);
@@ -1450,6 +1499,13 @@ export function runDataCollectionFlow({ u, userInput, session, adMemory, hasScra
 
       // If the question is generic, replace with property-specific
       let finalQuestion = question;
+      // POTKROVJE DEFERRAL (reported): while floor is deferred pending
+      // totalFloors, the redirected totalFloors question carries an explicit
+      // explanation — the owner already told us the floor (potkrovje), so a
+      // generic re-ask would read as if Ana ignored their answer.
+      if (nextField === 'totalFloors' && session.collectedData.floorPendingPotkrovje) {
+        finalQuestion = 'Бидејќи станот е на поткровје, колку спрата има зградата вкупно?';
+      }
       if (rotatedVariant) {
         finalQuestion = rotatedVariant;
       } else if (question && question.includes('станот')) {
@@ -1464,7 +1520,11 @@ export function runDataCollectionFlow({ u, userInput, session, adMemory, hasScra
       // LIST being non-empty (not just the map key) so a hypothetical empty
       // list degrades to the confirmatory phrasing instead of silently
       // repeating the plain question.
-      if (attempts >= 2 && !pickRotatingVariant(nextField, attempts, propertyLabel)) {
+      if (attempts >= 2 && !pickRotatingVariant(nextField, attempts, propertyLabel) &&
+          // POTKROVJE DEFERRAL: the redirected totalFloors question already
+          // carries its own explanatory phrasing — don't shadow it with the
+          // generic confirmatory sentence on a re-ask.
+          !(nextField === 'totalFloors' && session.collectedData.floorPendingPotkrovje)) {
         const confQuestion = CONFIRMATORY_QUESTIONS[nextField];
         if (confQuestion) {
           finalQuestion = confQuestion(propertyLabel);

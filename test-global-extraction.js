@@ -285,16 +285,31 @@ assert("D2: renovationYear extracted when renovated=true", result.renovationYear
 // ========================================
 console.log(`\n📦 GROUP: Edge cases`);
 
-// Test 15: Potkrovje without totalFloors → defaults to 6
+// Test 15: Potkrovje WITHOUT totalFloors → NO guess (reported: bare "NA
+// POTKROVJE" used to store floor=7 from a fabricated (totalFloors || 6)
+// default — the attic sits above the LAST floor, which is unknown, so the
+// extractor must NOT invent one; the data-collection handler defers floor
+// and asks totalFloors first, then derives floor = totalFloors + 1).
 result = runGlobalExtraction("potkrovje", {});
-assert("E1: potkrovje defaults to floor=7 (6+1)", result.floor === 7, `got ${result.floor}`);
+assert("E1: potkrovje without totalFloors → floor NOT extracted (no guess)", result.floor === undefined, `got ${result.floor}`);
+result = runGlobalExtraction("NA POTKROVJE", {}, "floor");
+assert("E1b: 'NA POTKROVJE' preferred=floor, no totalFloors → floor NOT extracted", result.floor === undefined, `got ${result.floor}`);
+
+// Test 15c: Potkrovje WITH totalFloors already collected → floor = N + 1
+result = runGlobalExtraction("NA POTKROVJE", { totalFloors: 10 }, "floor");
+assert("E1c: potkrovje + totalFloors=10 → floor=11", result.floor === 11, `got ${result.floor}`);
 
 // Test 16: Potkrovje WITH 10katnica in same message — cross-rule extraction
 // NOTE: This tests the cross-rule hint: extractFloor should find "10katnica"
-// in the SAME message and use 10 instead of defaulting to 6.
+// in the SAME message and use 10 instead of guessing.
 result = runGlobalExtraction("potkrovje, 10katnica", {}, "potkrovje, 10katnica");
 assert("E2: potkrovje+10katnica → floor=11 (cross-rule hint)", result.floor === 11, `got ${result.floor}`);
 assert("E2: potkrovje+10katnica → totalFloors=10", result.totalFloors === 10, `got ${result.totalFloors}`);
+
+// Test 16b: "potkrovje od 10" — compound-phrase hint also derives the total
+result = runGlobalExtraction("na potkrovje od 10", {}, "floor");
+assert("E2b: 'na potkrovje od 10' → floor=11", result.floor === 11, `got ${result.floor}`);
+assert("E2b: 'na potkrovje od 10' → totalFloors=10", result.totalFloors === 10, `got ${result.totalFloors}`);
 
 // Test 17: Ordinal floor
 result = runGlobalExtraction("vtor kat", {});
