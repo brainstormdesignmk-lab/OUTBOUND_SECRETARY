@@ -1459,6 +1459,17 @@ assert("SQH12: history scan of totalFloors → null", sqhTotFloors === null, `go
   const r = runGlobalExtraction('4000 m2', { transactionType: 'sale' });
   assert('PPSQ4: discovery "4000 m2" → totalSqm=4000, no pricePerSqm', r.totalSqm === 4000 && r.pricePerSqm === undefined, `got ${JSON.stringify(r)}`);
 }
+{
+  // REPORTED (lead 75885, plot): the owner answered the totalSqm question
+  // with the WORD form "5000 kvadrata" — same phantom as "4000 m2", the
+  // number must never be crowned pricePerSqm. Covers the Latin and Cyrillic
+  // word units the guard's unit list carries.
+  const r = runGlobalExtraction('5000 kvadrata', { transactionType: 'sale' }, 'totalSqm');
+  assert('PPSQ5: "5000 kvadrata" answering totalSqm → totalSqm=5000', r.totalSqm === 5000, `got ${JSON.stringify(r)}`);
+  assert('PPSQ5: ... → NO pricePerSqm', r.pricePerSqm === undefined, `got ${JSON.stringify(r)}`);
+  const r2 = runGlobalExtraction('5000 квадрата', { transactionType: 'sale' }, 'totalSqm');
+  assert('PPSQ6: "5000 квадрата" answering totalSqm → totalSqm=5000, no pricePerSqm', r2.totalSqm === 5000 && r2.pricePerSqm === undefined, `got ${JSON.stringify(r2)}`);
+}
 
 // ========================================
 // TEST SUMMARY
