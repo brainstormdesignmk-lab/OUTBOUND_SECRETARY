@@ -93,7 +93,9 @@ console.log('\n=== T1: the reported case — strike-2 warning must survive the f
     sent.some(t => /опомен/i.test(t || '')),
     `got ${sent.length} msg(s): ${JSON.stringify(sent.map(t => (t || '').substring(0, 40)))}`);
   assert('T1: the follow-up sentence was ALSO answered (batch keeps processing)',
-    sent.some(t => /соработуваме/i.test(t || '')),
+    // The deterministic persuasion ladder (ANA_OFFLINE_LLM seam) ends every
+    // line with a cooperation ask — any of its closing phrasings counts.
+    sent.some(t => /соработуваме|соработк|пробаме|почнеме/i.test(t || '')),
     `got ${JSON.stringify(sent.map(t => (t || '').substring(0, 40)))}`);
   assert('T1: strikes=2 persisted through the batch',
     engine.getSession('5540516').offensiveStrikes === 2,

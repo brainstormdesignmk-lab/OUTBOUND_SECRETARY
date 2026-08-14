@@ -265,9 +265,83 @@ export function tierForClassification(classification) {
   return classification?.intent === 'REJECTED' ? 'rebuttal' : 'routine';
 }
 
+// ========================================
+// DETERMINISTIC PERSUASION LADDER (LLM-free floor, like Lina's code-built
+// replies). Used when NO LLM can answer — every provider exhausted (429/TPD
+// on Groq AND Gemini), a parked pool, or ANA_OFFLINE_LLM=1. Before this,
+// an outage sent owners "Извинете, имав техничка грешка" (createSafeFallback)
+// and consecutive errors escalated live leads to a human — the worst moment
+// to lose a conversation. Now the owner gets a natural, intent-aware
+// persuasion line that ends with the cooperation question, so the funnel
+// continues until the tokens come back.
+//
+// Rent/sale-aware: on RENT the owner pays the standard 50%/100% commission,
+// so the value pitch never claims "без провизија" — only the sale line may.
+// Rotates variants so consecutive leads don't read the same sentence.
+// ========================================
+function pickVariants(list) {
+  return list[Math.floor(Math.random() * list.length)];
+}
+
+export function buildDeterministicPersuasion(classification, isRent) {
+  const intent = classification?.intent;
+  const confidence = classification?.confidence ?? 0;
+
+  // SOFT/SKEPTICAL REJECTION (conf < 0.8 — the firm rejections are already
+  // handled deterministically in detectPhase: rebuttal → goodbye → cut).
+  // Rent owners DO pay the commission, so only the sale line may promise
+  // "без провизија".
+  if (intent === 'REJECTED') {
+    if (isRent) {
+      return pickVariants([
+        'Разбирам дека не сте сигурни. Агенцијата ви носи проверени клиенти, организира посети и се грижи за целиот процес на издавање — а провизијата се плаќа само на денот на потпишување. Дали би пробале да ви најдеме клиент?',
+        'Ве разбирам. Нашата работа е да ви најдеме вистински заинтересиран закупец и да го средиме целиот процес наместо вас. Дали сте расположени да пробаме?',
+        'Нема притисок. Само сакам да знаете дека агенцијата ви заштедува време — ние ги проверуваме клиентите и ги организираме посетите. Дали би размислиле?'
+      ]);
+    }
+    return pickVariants([
+      'Разбирам дека не сте сигурни. Агенцијата не зема ништо од вас за услугата — само ви ја зголемува видливоста на огласот и ви носи заинтересирани купувачи. Дали би пробале?',
+      'Ве разбирам. Нашата цел е да ви ја добиеме бараната цена, а разликата е наша провизија — вие немате никакви обврски. Дали сте расположени да пробаме?',
+      'Нема притисок. Само сакам да знаете дека со нас огласот добива поголема видливост и вистински заинтересирани клиенти. Дали би размислиле?'
+    ]);
+  }
+
+  // GENUINE INTEREST WITH RESERVATIONS (the runPersuasion majority).
+  if (intent === 'INTERESTED' && confidence > 0.5) {
+    if (isRent) {
+      return pickVariants([
+        'Одлично. Агенцијата ви носи проверени закупувачи, организира посети и го води процесот до потпишување. Дали сте расположени да почнеме со соработка?',
+        'Супер. Ние ви наоѓаме клиент, организираме сè наместо вас, а провизијата се плаќа само на денот на потпишување. Дали да почнеме?'
+      ]);
+    }
+    return pickVariants([
+      'Одлично. Агенцијата ви носи заинтересирани клиенти, организира посети и го води целиот процес — без никаква провизија од ваша страна. Дали сте расположени да почнеме со соработка?',
+      'Супер. Ние ви ја зголемуваме видливоста на огласот и ви носиме вистински заинтересирани купувачи. Дали да почнеме?'
+    ]);
+  }
+
+  // UNCERTAIN / LOW-CONFIDENCE INTEREST — warm, gentle, no pressure.
+  if (intent === 'INTERESTED') {
+    return pickVariants([
+      'Разбирам. Размислете мирно — кога ќе сакате, ние сме тука да ви помогнеме со огласот. Дали сте расположени да пробаме?',
+      'Нема брзање. Кажете ми ако имате некое прашање, а доколку сакате, можеме да почнеме со соработка. Што велите?'
+    ]);
+  }
+
+  // FALLBACK (unclassified / anything else) — the generic cooperation ask.
+  return pickVariants([
+    'Разбирам. Агенцијата ви ја зголемува видливоста на огласот и ви носи заинтересирани клиенти. Дали сте расположени да соработуваме?',
+    'Ве разбирам. Доколку имате прашање, тука сум — а ако сакате, можеме да почнеме со соработка. Дали сте расположени?'
+  ]);
+}
+
 /**
  * Run the persuasion LLM call (native Macedonian, ends with a cooperation
  * question). Wrapped in withRetry for transient API failures.
+ *
+ * LLM-FREE FLOOR: when every LLM provider fails (429/TPD/parked pool) or
+ * ANA_OFFLINE_LLM=1, the reply is the code-built deterministic ladder above
+ * — the owner never sees "техничка грешка" and the conversation continues.
  *
  * @param {Object} ctx
  * @param {string} ctx.u — lowercased trimmed user input
@@ -286,11 +360,12 @@ export async function runPersuasion({ conv, userInput, classification, isRent })
   // detection, global extraction, persuasion — without hitting the live
   // Groq API (slow + network-dependent; the battery must stay offline).
   // Read at CALL time (not module load), so production — which never sets
-  // the flag — is completely unaffected. Returns a canned NORMAL reply so
-  // the caller observes the same shape a real persuasion response has.
+  // the flag — is completely unaffected. Returns the deterministic ladder
+  // (intent-aware now, not the old single canned line) so the caller
+  // observes the same shape a real persuasion response has.
   // ========================================
   if (process.env.ANA_OFFLINE_LLM === '1') {
-    return { text: 'Разбирам. Дали сте расположени да соработуваме?', type: 'NORMAL' };
+    return { text: buildDeterministicPersuasion(classification, isRent), type: 'NORMAL' };
   }
 
   const persuasionContext = buildPersuasionContext(classification);
@@ -299,8 +374,10 @@ export async function runPersuasion({ conv, userInput, classification, isRent })
   // LLM PROVIDER CHAIN + TIERED MODEL SPLIT (user-approved, reported
   // lead-level outage: Groq 429 TPD exhaustion froze persuasion and
   // escalated live leads). llm-provider.js owns every provider + the
-  // cascade: Groq first, Gemini on rate limit/outage, and the existing
-  // service.js safe fallback + human escalation stay the final net.
+  // cascade: Groq first, Gemini on rate limit/outage, and the deterministic
+  // ladder below is the final net — the owner gets a natural persuasion
+  // line, NEVER "техничка грешка" and NEVER a human escalation caused by a
+  // quota outage.
   //
   // TIER ROUTING (smart split, approved): skeptical/soft-rejection turns
   // (classification.intent === 'REJECTED') get the SMART tier (config.MODEL
@@ -311,19 +388,29 @@ export async function runPersuasion({ conv, userInput, classification, isRent })
   // llama-3.3-70b-versatile ... TPD: Limit 100000"), so the two tiers draw
   // from SEPARATE daily buckets on the same key ≈ 600K TPD combined.
   const tier = tierForClassification(classification);
-  const result = await generateCompletion({
-    messages: [
-      {
-        role: "system",
-        content: "Ти си Ана. Бидете природни, професионални и кратки на македонски. Секогаш завршувај со прашање за соработка. Не биди наметлива. Користи стандарден македонски книжевен јазик."
-      },
-      { role: "user", content: prompt }
-    ],
-    temperature: 0.20,
-    top_p: 0.75,
-    frequency_penalty: 0.15,
-    max_tokens: 150
-  }, { tier });
+  let result;
+  try {
+    result = await generateCompletion({
+      messages: [
+        {
+          role: "system",
+          content: "Ти си Ана. Бидете природни, професионални и кратки на македонски. Секогаш завршувај со прашање за соработка. Не биди наметлива. Користи стандарден македонски книжевен јазик."
+        },
+        { role: "user", content: prompt }
+      ],
+      temperature: 0.20,
+      top_p: 0.75,
+      frequency_penalty: 0.15,
+      max_tokens: 150
+    }, { tier });
+  } catch (e) {
+    // EVERY provider exhausted (429/TPD/parked pool) or all keys missing —
+    // the LLM-free floor takes over. Log the reason, keep the conversation
+    // alive with a deterministic persuasion line. This is the Lina pattern:
+    // the LLM adds voice when it's up; the code-built reply is the floor.
+    console.error(`[PERSUASION: LLM unavailable (${String(e.message).substring(0, 120)}) — deterministic floor reply]`);
+    return { text: buildDeterministicPersuasion(classification, isRent), type: 'NORMAL' };
+  }
 
   let response = (result?.text || "").trim();
   response = postProcessPersuasionResponse(response, isRent);

@@ -49,7 +49,7 @@ import {
   resetKeyPoolCache
 } from './llm-provider.js';
 import { createSafeFallback } from './retry-utils.js';
-import { runPersuasion, tierForClassification } from './handlers/persuasion-phase.js';
+import { runPersuasion, tierForClassification, buildDeterministicPersuasion } from './handlers/persuasion-phase.js';
 
 const harness = createHarness();
 const assert = harness.assert;
@@ -329,7 +329,83 @@ const r = await runPersuasion({
   classification: { intent: 'INTERESTED', confidence: 0.6 },
   isRent: false
 });
-assert('G1: canned NORMAL reply from offline seam', r.type === 'NORMAL' && /соработуваме/.test(r.text || ''), `got ${JSON.stringify(r)}`);
+assert('G1: NORMAL reply from offline seam (intent-aware ladder)',
+  r.type === 'NORMAL' && /соработк|почнеме/.test(r.text || '') && r.text.length > 20,
+  `got ${JSON.stringify(r)}`);
+
+// ============================================================
+// PART I — DETERMINISTIC PERSUASION LADDER (the LLM-free floor —
+// intent-aware lines keyed on the classifier, rent/sale-aware, so an
+// outage never sends "техничка грешка" to an owner)
+// ============================================================
+console.log('\n========================================');
+console.log('🧪 I: deterministic persuasion ladder — intent-aware, rent/sale-aware');
+console.log('========================================\n');
+
+// INTERESTED high conf (sale) — value pitch, ends with a cooperation ask
+const hiSale = buildDeterministicPersuasion({ intent: 'INTERESTED', confidence: 0.7 }, false);
+assert('I1: high-conf INTERESTED (sale) — value pitch with cooperation ask',
+  /соработк|почнеме/.test(hiSale) && !/техничка грешка/.test(hiSale),
+  `got ${JSON.stringify(hiSale)}`);
+
+// INTERESTED high conf (rent) — must NEVER claim "без провизија"
+const hiRent = buildDeterministicPersuasion({ intent: 'INTERESTED', confidence: 0.7 }, true);
+assert('I2: high-conf INTERESTED (rent) — no "без провизија" claim (rent owner pays the fee)',
+  !/без провизија|немате никакви обврски/i.test(hiRent),
+  `got ${JSON.stringify(hiRent)}`);
+
+// Low-conf INTERESTED — gentle, no pressure
+const low = buildDeterministicPersuasion({ intent: 'INTERESTED', confidence: 0.3 }, false);
+assert('I3: low-conf INTERESTED — gentle tone (Разбирам/Нема брзање/Нема притисок)',
+  /Разбирам|Нема брзање|Нема притисок/.test(low),
+  `got ${JSON.stringify(low)}`);
+
+// REJECTED (sale) — may use the "не зема ништо" benefit
+const rejSale = buildDeterministicPersuasion({ intent: 'REJECTED', confidence: 0.6 }, false);
+assert('I4: REJECTED (sale) — benefit line allowed (не зема ништо / без обврски)',
+  /не зема ништо|немате никакви обврски|видливост|бараната цена/.test(rejSale),
+  `got ${JSON.stringify(rejSale)}`);
+
+// REJECTED (rent) — the sale-only claim must NEVER leak to a rent owner
+const rejRent = buildDeterministicPersuasion({ intent: 'REJECTED', confidence: 0.6 }, true);
+assert('I5: REJECTED (rent) — no sale-only "без провизија/немате обврски" claim',
+  !/не зема ништо|немате никакви обврски|без провизија/i.test(rejRent),
+  `got ${JSON.stringify(rejRent)}`);
+
+// Fallback (unclassified) — generic cooperation ask, still ends with a question
+const fbLine = buildDeterministicPersuasion(null, false);
+assert('I6: unclassified fallback — generic cooperation ask',
+  /соработуваме|соработк|расположени/.test(fbLine) && /\?/.test(fbLine),
+  `got ${JSON.stringify(fbLine)}`);
+
+// ============================================================
+// PART J — runPersuasion LLM-free floor: every provider DOWN (or no keys
+// at all) → the owner gets the deterministic ladder, NEVER the
+// "техничка грешка" fallback. (ANA_OFFLINE_LLM is unset so the real
+// provider path runs — with zero keys it throws "no providers" → caught.)
+// ============================================================
+console.log('\n========================================');
+console.log('🧪 J: runPersuasion with every LLM down → deterministic floor reply');
+console.log('========================================\n');
+
+delete process.env.ANA_OFFLINE_LLM;
+delete process.env.GROQ_API_KEYS;
+delete process.env.GROQ_API_KEY;
+delete process.env.GEMINI_API_KEYS;
+delete process.env.GEMINI_API_KEY;
+const floor = await runPersuasion({
+  conv: 'Ана: Здраво.\nСопственик: Hm, ne znam.',
+  userInput: 'hm, ne znam',
+  classification: { intent: 'INTERESTED', confidence: 0.4 },
+  isRent: false
+});
+assert('J1: all providers down → NORMAL (not ERROR), deterministic line',
+  floor.type === 'NORMAL' && /соработк|Разбирам|Нема/.test(floor.text || ''),
+  `got ${JSON.stringify(floor)}`);
+assert('J2: never the technical-error line to an owner',
+  !/техничка грешка/.test(floor.text || ''),
+  `got ${JSON.stringify(floor)}`);
+process.env.ANA_OFFLINE_LLM = '1'; // restore — the rest of the suite expects the offline seam
 
 // TIER ROUTING MAP (the offline seam returns before the LLM call, so the
 // classification → tier mapping is pinned directly): skeptical/soft-rejection
