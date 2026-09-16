@@ -10,7 +10,9 @@
 //   Strike 1 → professional rebuff (STRIKE_1_RESPONSES — e.g. "Ве молам, да ја
 //              задржиме комуникацијата професионална.")
 //   Strike 2 → final warning (STRIKE_2_RESPONSES — "...последна опомена...")
-//   Strike 3 → TERMINATE_SESSION + add to blocklist
+//   Strike 3 → TERMINATE + add to blocklist + ONE ban notice to the owner
+//              (TERMINATION_NOTICE: "Разговорот е завршен.") — after that,
+//              absolute silence (the blocklist swallows every further message).
 //
 // STRIKE DECAY (user-approved):
 //   - Strike 1 decays: if the NEXT message is normal (owner corrects himself),
@@ -141,6 +143,12 @@ export function getStrikeResponse(strikeCount, isRent) {
   if (strikeCount === 2) {
     return STRIKE_2_RESPONSES[Math.floor(Math.random() * STRIKE_2_RESPONSES.length)];
   }
-  // Strike 3 — protocol says output ONLY this string
+  // Strike 3 — protocol says output ONLY this string (service-level marker;
+  // the engine/campaign routing replaces it with the user-approved ban notice
+  // TERMINATION_NOTICE before anything reaches the owner).
   return "TERMINATE_SESSION";
 }
+
+// Ban notice (user-approved): on strike 3 the offender must KNOW they are
+// banned — this one line IS sent; everything afterwards stays silent.
+export const TERMINATION_NOTICE = 'Разговорот е завршен.';

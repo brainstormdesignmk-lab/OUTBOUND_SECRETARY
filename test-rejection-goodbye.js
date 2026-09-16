@@ -343,10 +343,11 @@ for (const [label, msg] of [
 }
 
 // ------------------------------------------------------------
-// PART E — e2e: the exact reported strike ladder ends with silent TERMINATE
+// PART E — e2e: the exact reported strike ladder ends with TERMINATE
 // (reported lead 5540516: "kucko razebana" was NOT detected → Ana sent a
 // selling follow-up instead of cutting the conversation. Now the third
-// offense returns TERMINATE — the engine never sends its text to the owner.)
+// offense returns TERMINATE — the routing layer sends the ONE ban notice
+// ("Разговорот е завршен.") and everything after it stays silent.)
 // ------------------------------------------------------------
 console.log('\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
 console.log('✂️  PART E: e2e — dosadna si → otkaci se → kucko razebana → TERMINATE');
@@ -371,7 +372,7 @@ console.log('━━━━━━━━━━━━━━━━━━━━━━�
 
     const e3 = await sendMessage(session, 'pa prekini go vise ednas . kucko razebana');
     console.log(`  E3 "pa prekini go vise ednas . kucko razebana" → ${e3.type}: ${(e3.text || '').substring(0, 55)}`);
-    assert('E3: the insult → TERMINATE (strike 3, never sent to the owner)',
+    assert('E3: the insult → TERMINATE (strike 3; routing layer sends the ban notice)',
       e3.type === 'TERMINATE' && e3.text === 'TERMINATE_SESSION' && session.offensiveStrikes === 3,
       `type=${e3.type} strikes=${session.offensiveStrikes}`);
   } finally {

@@ -26,7 +26,7 @@ process.env.ANA_OFFLINE_LLM = '1';
 
 import { createHarness } from './test-helpers.js';
 import { generateResponse } from './service.js';
-import { isNumberBlocked, loadBlocklist, addToBlocklist, BLOCKLIST_PATH, STRIKE_1_RESPONSES } from './offensive-filter.js';
+import { isNumberBlocked, loadBlocklist, addToBlocklist, BLOCKLIST_PATH, STRIKE_1_RESPONSES, TERMINATION_NOTICE } from './offensive-filter.js';
 import { writeFileSync } from 'fs';
 
 // ========================================
@@ -168,7 +168,9 @@ async function runScenario2() {
   res = await sendMessage(session, "пичка ти матер");
   assert("S2-S3: type=TERMINATE", res.type === "TERMINATE", `got ${res.type}`);
   assert("S2-S3: strike counter=3", session.offensiveStrikes === 3, `got ${session.offensiveStrikes}`);
-  assert("S2-S3: text=TERMINATE_SESSION", res.text === "TERMINATE_SESSION", `got ${res.text}`);
+  // service layer still returns the internal marker — the routing layer
+  // (engine/campaign) replaces it with the ban notice before sending.
+  assert("S2-S3: text=TERMINATE_SESSION (service marker)", res.text === "TERMINATE_SESSION", `got ${res.text}`);
 
   // Verify number was added to blocklist
   await new Promise(r => setTimeout(r, 200)); // Wait for async fs write
@@ -210,7 +212,7 @@ async function runScenario3() {
   res = await sendMessage(session, "секс");
   assert("S3-S3: type=TERMINATE", res.type === "TERMINATE", `got ${res.type}`);
   assert("S3-S3: strike counter=3", session.offensiveStrikes === 3, `got ${session.offensiveStrikes}`);
-  assert("S3-S3: text=TERMINATE_SESSION", res.text === "TERMINATE_SESSION", `got ${res.text}`);
+  assert("S3-S3: text=TERMINATE_SESSION (service marker)", res.text === "TERMINATE_SESSION", `got ${res.text}`);
 
   // Verify blocked
   await new Promise(r => setTimeout(r, 200));
@@ -244,7 +246,7 @@ async function runScenario4() {
   res = await sendMessage(session, "ke te ubijam");
   assert("S4-S3: type=TERMINATE", res.type === "TERMINATE", `got ${res.type}`);
   assert("S4-S3: strike counter=3", session.offensiveStrikes === 3, `got ${session.offensiveStrikes}`);
-  assert("S4-S3: text=TERMINATE_SESSION", res.text === "TERMINATE_SESSION", `got ${res.text}`);
+  assert("S4-S3: text=TERMINATE_SESSION (service marker)", res.text === "TERMINATE_SESSION", `got ${res.text}`);
 
   // Blocklist check
   await new Promise(r => setTimeout(r, 200));
@@ -331,7 +333,7 @@ async function runScenario6() {
   res = await sendMessage(session, "begaj");
   assert("S6-S4: type=TERMINATE", res.type === "TERMINATE", `got ${res.type}`);
   assert("S6-S4: strike counter=3", session.offensiveStrikes === 3, `got ${session.offensiveStrikes}`);
-  assert("S6-S4: text=TERMINATE_SESSION", res.text === "TERMINATE_SESSION", `got ${res.text}`);
+  assert("S6-S4: text=TERMINATE_SESSION (service marker)", res.text === "TERMINATE_SESSION", `got ${res.text}`);
 
   console.log(`   ✔ Scenario 6 complete: strike 1 decays to 0, strike 2 persists to termination`);
 }
@@ -367,7 +369,10 @@ async function runScenario7() {
   res = await sendMessage(session, "PICKA");
   assert("S7-S3: type=TERMINATE", res.type === "TERMINATE", `got ${res.type}`);
   assert("S7-S3: strike counter=3", session.offensiveStrikes === 3, `got ${session.offensiveStrikes}`);
-  assert("S7-S3: text=TERMINATE_SESSION", res.text === "TERMINATE_SESSION", `got ${res.text}`);
+  assert("S7-S3: text=TERMINATE_SESSION (service marker)", res.text === "TERMINATE_SESSION", `got ${res.text}`);
+
+  // GROUP: the ban notice constant — what the routing layer sends on strike 3
+  assert("TERMINATION_NOTICE is the ban notice", TERMINATION_NOTICE === 'Разговорот е завршен.', JSON.stringify(TERMINATION_NOTICE));
 
   // Verify blocked with reason=sexual
   await new Promise(r => setTimeout(r, 200));

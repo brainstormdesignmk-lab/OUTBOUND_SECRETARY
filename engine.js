@@ -47,7 +47,7 @@ import { generateFirstMessage, generateResponse } from './service.js';
 import { LeadSession, LeadState } from './scheduler.js';
 import { antiBan } from './anti-ban.js';
 import { getFollowUpMessage, getNoResponseClose } from './deal-terms.js';
-import { isNumberBlocked, addToBlocklist } from './offensive-filter.js';
+import { isNumberBlocked, addToBlocklist, TERMINATION_NOTICE } from './offensive-filter.js';
 import { isValidMessage } from './retry-utils.js';
 import { getSessionStore } from './session-store.js';
 import { appendToCSV } from './lead-processor.js';
@@ -706,11 +706,14 @@ export class MultiLeadEngine {
   async _routeResponse(session, response) {
     const { text, type } = response || {};
 
-    // TERMINATE: never sent to the owner (strike-3 protocol).
+    // TERMINATE (strike 3): the offender gets ONE ban notice (user-approved:
+    // "Разговорот е завршен.") so they know they are banned — everything
+    // afterwards stays silent. Blocklist + terminal state still apply first.
     if (type === 'TERMINATE') {
       addToBlocklist(session.phone, 'offensive_behavior_strike3');
       session.markBlocklisted();
       appendToCSV(session);
+      await this._send(session, TERMINATION_NOTICE, { typed: false });
       this.emit('closed', { leadId: session.leadId, outcome: 'terminated' });
       return { type, action: 'terminated' };
     }

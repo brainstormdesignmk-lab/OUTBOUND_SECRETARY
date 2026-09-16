@@ -21,7 +21,7 @@ process.env.ANA_OFFLINE_LLM = '1';
 
 import { createHarness } from './test-helpers.js';
 import { MultiLeadEngine } from './engine.js';
-import { isNumberBlocked, loadBlocklist, BLOCKLIST_PATH } from './offensive-filter.js';
+import { isNumberBlocked, loadBlocklist, BLOCKLIST_PATH, TERMINATION_NOTICE } from './offensive-filter.js';
 import { writeFileSync } from 'fs';
 
 // Unique test phones (normalized, no +/00) — one per scenario so a
@@ -124,6 +124,9 @@ console.log('\n=== T2: escalation THROUGH a batch — warning then TERMINATE ===
 
   assert('T2: strike-2 warning sent mid-batch',
     sent.some(t => /опомен/i.test(t || '')),
+    `got ${JSON.stringify(sent.map(t => (t || '').substring(0, 40)))}`);
+  assert('T2: the strike-3 BAN NOTICE was sent (owner knows they are banned)',
+    sent.some(t => t === TERMINATION_NOTICE),
     `got ${JSON.stringify(sent.map(t => (t || '').substring(0, 40)))}`);
   assert('T2: strike 3 still reached inside the batch (TERMINATE not skipped)',
     engine.getSession('5540516').offensiveStrikes === 3,

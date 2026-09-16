@@ -4,7 +4,7 @@ import { generateResponse } from './service.js';
 import { LeadSession, LeadState } from './scheduler.js';
 import { antiBan } from './anti-ban.js';
 import { getFollowUpMessage, getNoResponseClose } from './deal-terms.js';
-import { isNumberBlocked, addToBlocklist } from './offensive-filter.js';
+import { isNumberBlocked, addToBlocklist, TERMINATION_NOTICE } from './offensive-filter.js';
 import { isValidPhone, isValidMessage } from './retry-utils.js';
 import { SessionStore, getSessionStore } from './session-store.js';
 import { metrics } from './metrics.js';
@@ -342,7 +342,8 @@ export class Campaign {
         console.log(`   ⏩ thinking delay skipped — Ana types now`);
       }
 
-      // TERMINATE responses should NOT be sent to the owner (strike 3 protocol)
+      // TERMINATE (strike 3): blocklist + terminal state, then send the ONE
+      // ban notice (user-approved) so the owner knows they are banned.
       if (response.type === 'TERMINATE') {
         console.log(`   🚫 SESSION TERMINATED — offensive behavior (strike 3)`);
         metrics.inc('terminated', 1, { phone: session.phone });
@@ -350,6 +351,10 @@ export class Campaign {
         addToBlocklist(session.phone, 'offensive_behavior_strike3');
         session.markBlocklisted(); // appliance-grade: BLOCKLISTED is its own terminal state
         appendToCSV(session);
+        console.log(`   📤 Ana: "${TERMINATION_NOTICE}"`);
+        session.addSentMessage(TERMINATION_NOTICE);
+        metrics.inc('messagesSent');
+        antiBan.recordSent(session.phone);
         this.sessionStore.save(this.sessions); // persist the terminal state (crash-safe)
         console.log(`   ❌ Lead terminated due to offensive behavior.`);
         return;
