@@ -18,7 +18,8 @@ import {
   extractTerraceNumber,
   parseYearBuilt,
   parseOrientation,
-  parseAvailableFromDate
+  parseAvailableFromDate,
+  ORDINAL_YEAR_CONTEXT_RE
 } from './property-extractor.js';
 import { extractTenantPreferences } from './property-intelligence.js';
 
@@ -113,14 +114,30 @@ function extractTenantPrefs(u, data) {
 // payload + broker comment). Rent-only: a sale listing never asks about
 // tenants/pets.
 // ========================================
+// PETS-ALLOWED NEGATIVE SIGNAL (shared, binary-correction audit): a message
+// stating pets are NOT allowed. Extracted from extractPetsAllowed's negative
+// branch so the stored-true correction gate (mirror of documentationClean's
+// DOCUMENTATION_ISSUE_RE) and the branch itself share ONE vocabulary — a
+// bare-yes "DA" stored petsAllowed=true, and a later "NE, ZABRANETI SE
+// MILENICI" must be able to correct it.
+const PETS_ALLOWED_NEGATIVE_RE = /(?:ne|не)\s+(?:sakam|сакам|dozvoluvam|дозволувам|primam|примам)\s+(?:milenici|миленици|kucinja|кучиња|kuche|куче|kuce|куце|mace|маче|maca|маца|macka|мачка)|(?:ne|не)\s+se\s+(?:dozvoleni|дозволени)\s+(?:milenici|миленици|kucinja|кучиња)|(?:milenici|миленици|kucinja|кучиња)\s+(?:ne|не)\s+se\s+(?:dozvoleni|дозволени)|bez\s+(?:milenici|миленици|kucinja|кучиња|kuche|куче|kuce|куце|mace|маче|maca|маца|macka|мачка|zivotni|животни|zivotno|животно)|nema\s+(?:milenici|миленици|kucinja|кучиња|zivotni|животни)|samo\s+bez\s+(?:milenici|миленици|kucinja|кучиња)|zabraneto|zabraneti|забрането|zabraneni|забранети|ne\s+moze\s+(?:milenici|миленици)|не\s+може\s+(?:миленици|миленици)|nikako\s+(?:milenici|миленици|kucinja|кучиња|kuche|куче|kuce|куце|mace|маче|maca|маца|macka|мачка|zivotni|животни|pets)|(?:milenici|миленици|kucinja|кучиња|zivotni|животни)\s+nikako|(?:milenici|миленици|kucinja|кучиња|kuche|куче|kuce|куце|mace|маче|maca|маца|macka|мачка|zivotni|животни|zivotno|животно|pets)(?:[\s,;]+(?:milenici|миленици|kucinja|кучиња|kuche|куче|kuce|куце|mace|маче|maca|маца|macka|мачка|zivotni|животни|zivotno|животно|pets))*[\s,;]+(?:ne|не)\s*$|(?:nikako|никако)\s+(?:osven|освен)\s+(?:milenici|миленици|kucinja|кучиња|kuche|куче|kuce|куце|mace|маче|maca|маца|macka|мачка|zivotni|животни|papagal|папагал|ribi|риби|ptici|птици|pets)/i;
+function isPetsAllowedNegative(u) {
+  return PETS_ALLOWED_NEGATIVE_RE.test(u);
+}
+
 function extractPetsAllowed(u, data) {
   if (data.transactionType !== 'rent') return null;
-  if (data.petsAllowed !== undefined && data.petsAllowed !== null) return null;
+  // BINARY CORRECTION (audit, mirror of documentationClean): a stored true
+  // from a bare-yes answer may be corrected by a later negative statement
+  // ("DA" then "NE, ZABRANETI SE MILENICI"); a stored false never flips
+  // (no flip-flop).
+  if (data.petsAllowed === false) return null;
+  if (data.petsAllowed === true && !isPetsAllowedNegative(u)) return null;
   // NEGATIVE checked first (mirror extractAC): the positive branch below
   // matches ANY "milenici" mention, so "ne sakam milenici" would otherwise
   // collect petsAllowed=true. Covers both word orders, the definite forms
   // ("milenicite ne se dozvoleni"), and the "samo bez" restriction family.
-  if (/(?:ne|не)\s+(?:sakam|сакам|dozvoluvam|дозволувам|primam|примам)\s+(?:milenici|миленици|kucinja|кучиња|kuche|куче|kuce|куце|mace|маче|maca|маца|macka|мачка)|(?:ne|не)\s+se\s+(?:dozvoleni|дозволени)\s+(?:milenici|миленици|kucinja|кучиња)|(?:milenici|миленици|kucinja|кучиња)\s+(?:ne|не)\s+se\s+(?:dozvoleni|дозволени)|bez\s+(?:milenici|миленици|kucinja|кучиња|kuche|куче|kuce|куце|mace|маче|maca|маца|macka|мачка|zivotni|животни|zivotno|животно)|nema\s+(?:milenici|миленици|kucinja|кучиња|zivotni|животни)|samo\s+bez\s+(?:milenici|миленици|kucinja|кучиња)|zabraneto|забрането|zabraneni|забранети|ne\s+moze\s+(?:milenici|миленици)|не\s+може\s+(?:миленици|миленици)|nikako\s+(?:milenici|миленици|kucinja|кучиња|kuche|куче|kuce|куце|mace|маче|maca|маца|macka|мачка|zivotni|животни|pets)|(?:milenici|миленици|kucinja|кучиња|zivotni|животни)\s+nikako|(?:milenici|миленици|kucinja|кучиња|kuche|куче|kuce|куце|mace|маче|maca|маца|macka|мачка|zivotni|животни|zivotno|животно|pets)(?:[\s,;]+(?:milenici|миленици|kucinja|кучиња|kuche|куче|kuce|куце|mace|маче|maca|маца|macka|мачка|zivotni|животни|zivotno|животно|pets))*[\s,;]+(?:ne|не)\s*$|(?:nikako|никако)\s+(?:osven|освен)\s+(?:milenici|миленици|kucinja|кучиња|kuche|куче|kuce|куце|mace|маче|maca|маца|macka|мачка|zivotni|животни|papagal|папагал|ribi|риби|ptici|птици|pets)/i.test(u)) return { petsAllowed: false };
+  if (isPetsAllowedNegative(u)) return { petsAllowed: false };
   // POSITIVE: pet vocabulary with an allow verb/adjective. Both word orders:
   // pets-first ("milenici se dozvoleni") and allow-word-first ("dozvoleni se
   // kucinja", "moze so milenici"). The separator between the allow word and
@@ -183,7 +200,13 @@ function extractTotalSqm(u, data) {
   // Skip if already set
   if (data.totalSqm !== undefined && data.totalSqm !== null) return null;
   // Sqm-specific context: match number before m2/кв/квадрати words
-  const sqmMatch = u.match(/(\d{2,4})\s*(m2|м2|квадрати|кв|sqm|kvadrati|kvadrata|квадрата|квадрат|kv|кв)/i);
+  // APPROXIMATE -ТИНА SUFFIX (reported gap, #3): Viber owners answer the
+  // sqm question with an approximate quantity — "60тина квадрати",
+  // "60-тина квадрати" (≈60 m²). The suffix between the digit and the sqm
+  // keyword used to break the pattern, so the answer stalled and SKIPPED
+  // totalSqm after the 2-attempt cap. The optional (?:-?\s*тина\s*)? group
+  // admits it; plain "65 квадрати" is untouched.
+  const sqmMatch = u.match(/(\d{2,4})\s*(?:-?\s*тина\s*)?(m2|м2|квадрати|кв|sqm|kvadrati|kvadrata|квадрата|квадрат|kv|кв)/i);
   if (sqmMatch) return { totalSqm: parseInt(sqmMatch[1]) };
   // Word-based sqm: parse Macedonian number words before sqm keyword
   // e.g., "seeset i pet kvadrati" → 65, "trideset m2" → 30
@@ -443,6 +466,18 @@ function extractFloor(u, data) {
   // The [а-яa-z]* suffix eats inflections ("вториот ден"), (?:\s|$) prevents
   // matching word parts ("denes" contains "den" but is not a time phrase),
   // and "kat"/"sprat" are NOT time words so "tret kat" still extracts 3.
+  // ORDINAL-YEAR CONTEXT GUARD (reported lead 5436709): "DEVEESTRETA" =
+  // девеес(ет) трета (90+3 = 93 → yearBuilt 1993) is a YEAR answer to "Која
+  // година е граден?", never a floor — but the merged form contains "tret"
+  // (3), so parseOrdinalFloor below would crown floor=3 from a year answer
+  // (same disease class as the decade-context "osumdesti" → 1980s guard in
+  // countBedrooms; the shared ORDINAL_YEAR_CONTEXT_RE keeps them in sync).
+  // In the reported flow floor was already collected, but a volunteered or
+  // history-scanned year answer in a fresh session must never phantom-crown.
+  if (ORDINAL_YEAR_CONTEXT_RE.test(u)) {
+    console.log('[FLOOR: skip — ordinal-year context ("девеесет трета" = year, not floor)]');
+    return null;
+  }
   const uNoTimeCount = u.replace(
     /(?:prv|прв|vtor|втор|tret|трет|cetvrt|четврт|petti|петти|peti|пети|sesti|шести|sedmi|седми|osmi|осми|devetti|деветти)[а-яa-z]*\s*(?:pat|пат|den|ден|mesto|место)(?:\s|$)/gi,
     ' '
@@ -634,6 +669,16 @@ function extractTotalFloors(u, data) {
   // The suffix used to break the whole-message bare-number checks below, so
   // the answer was NOT collected on the first attempt. Strip the suffix first
   // ("7 TI KAZAV" → "7", "SEDUM TI REKOV" → "SEDUM") so the fallback fires.
+  // ORDINAL-YEAR CONTEXT GUARD (reported lead 5436709): "DEVEESTRETA" =
+  // девеес(ет) трета (93 → yearBuilt 1993) is a YEAR answer, never a total-
+  // floors count — the bare-word fallback below would read the "трета"→3 via
+  // parseMacedonianNumber's "tret" substring (same disease as the countBedrooms
+  // / extractFloor decade guards; shared ORDINAL_YEAR_CONTEXT_RE keeps them in
+  // sync).
+  if (ORDINAL_YEAR_CONTEXT_RE.test(u)) {
+    console.log('[TOTAL FLOORS: skip — ordinal-year context ("девеесет трета" = year, not floors)]');
+    return null;
+  }
   const uRepeatStripped = u.replace(ANNOYED_REPEAT_RE, ' ').trim();
   const bareDigit = uRepeatStripped.match(/^(\d{1,3})$/);
   if (bareDigit) {
@@ -656,11 +701,29 @@ function extractTotalFloors(u, data) {
   return null;
 }
 
+// ELEVATOR NEGATIVE SIGNAL (shared, binary-correction audit): a message
+// stating there is NO elevator. Extracted from extractElevator's negative
+// branch so the stored-true correction gate and the branch share ONE
+// vocabulary — a bare-yes "DA" stored elevator=true, and a later "NEMA
+// LIFT" must be able to correct it.
+const ELEVATOR_NEGATIVE_RE = /bez lift|без лифт|nema lift/i;
+function isElevatorNegative(u) {
+  return ELEVATOR_NEGATIVE_RE.test(u);
+}
+
 function extractElevator(u, data) {
-  if (data.elevator !== undefined && data.elevator !== null) return null;
+  // BINARY CORRECTION (audit, mirror of documentationClean): a stored true
+  // from a bare-yes answer may be corrected by a later negative statement
+  // ("DA" then "NEMA LIFT"); a stored false never flips (no flip-flop).
+  if (data.elevator === false) return null;
+  if (data.elevator === true && !isElevatorNegative(u)) return null;
+  // NEGATIVE FIRST (branch-order fix, found in the audit): the old order
+  // checked the positive "lift" keyword BEFORE "nema lift", so "NEMA
+  // LIFT" matched the bare "lift" token and stored elevator=true — the
+  // negative branch was dead. Negative-first (mirror extractAC/pets).
+  if (isElevatorNegative(u)) return { elevator: false };
   // Require lift-specific context — don't match bare "da"/"ne"
   if (/lift|лифт|elevator|ima lift|има лифт/i.test(u)) return { elevator: true };
-  if (/bez lift|без лифт|nema lift/i.test(u)) return { elevator: false };
   return null;
 }
 
@@ -693,15 +756,29 @@ function isSplitAC(u) {
   // handler (H32/B16) where the heating question was just asked.
   return /sistem|систем|klima|клима|ured|уред|inverter|инвертер|kompresor|компресор|(?:ima|има)(?:\s+(?:i|и))?\s+(?:split|сплит)/i.test(u);
 }
+// AC NEGATIVE SIGNAL (shared, binary-correction audit): a message stating
+// there is NO air conditioning. Extracted from extractAC's negative branch
+// so the stored-true correction gate and the branch share ONE vocabulary —
+// a bare-yes "DA" stored ac=true, and a later "NEMA KLIMA" must be able
+// to correct it.
+const AC_NEGATIVE_RE = /nema\s+klima|нема\s+клима|klima\s+nema|клима\s+нема|klimata\s+nema|климата\s+нема|bez\s+klima|без\s+клима|klima\s+ne\s+treba|клима\s+не\s+треба|klimata\s+ne\s+treba|климата\s+не\s+треба|ne\s+treba\s+klima|не\s+треба\s+клима|nema\s+potreba\s+od\s+klima|нема\s+потреба\s+од\s+клима|klima\s+nema\s+potreba|клима\s+нема\s+потреба/i;
+function isACNegative(u) {
+  return AC_NEGATIVE_RE.test(u);
+}
+
 function extractAC(u, data) {
-  if (data.ac !== undefined && data.ac !== null) return null;
+  // BINARY CORRECTION (audit, mirror of documentationClean): a stored true
+  // from a bare-yes answer may be corrected by a later negative statement
+  // ("DA" then "NEMA KLIMA"); a stored false never flips (no flip-flop).
+  if (data.ac === false) return null;
+  if (data.ac === true && !isACNegative(u)) return null;
   // NEGATION CHECKED FIRST (reported lead 5540516): the positive keyword
   // branch below matches ANY "klima" mention, so "KLIMA NEMA AMA
   // ORIENTACIJATA MU E JUG TAKA DA NE TREBA" (no AC — it's south-facing, so
   // it doesn't need one) used to collect ac:true. Covers both word orders
   // ("nema klima" and "klima nema"), the definite form ("klimata nema"),
   // and the "ne treba" family ("AC not needed" ⇒ no AC).
-  if (/nema\s+klima|нема\s+клима|klima\s+nema|клима\s+нема|klimata\s+nema|климата\s+нема|bez\s+klima|без\s+клима|klima\s+ne\s+treba|клима\s+не\s+треба|klimata\s+ne\s+treba|климата\s+не\s+треба|ne\s+treba\s+klima|не\s+треба\s+клима|nema\s+potreba\s+od\s+klima|нема\s+потреба\s+од\s+клима|klima\s+nema\s+potreba|клима\s+нема\s+потреба/i.test(u)) return { ac: false };
+  if (isACNegative(u)) return { ac: false };
   // Require AC-specific context — cooling/cooling-related words only.
   // klimata/klima ured/inverter klima all pass AC_KLIMA_RE; "klimatski
   // uslovi" (climate conditions) and "mikroklima" (microclimate) never do.
@@ -794,17 +871,37 @@ function extractHeating(u, data) {
   // the message has no parno/centralno/struja/drva/etc. keywords.
   // "split" uses the shared isSplitAC guard (city Split must never phantom —
   // audit; same disease class as the "togas"→gas fix).
+  // PARNO WINS OVER INVERTER (reported, lead 3571074): parno mentioned
+  // ANYWHERE in the conversation (tracked as collectedData.heatingParnoMentioned
+  // by the data-collection heating handler) means inverter is the AC, never
+  // the heating — even when THIS message has no parno word (the owner
+  // mentioned parno in an earlier message).
   if ((/inverter|инвертер/i.test(u) || isSplitAC(u)) &&
-      !/parno|парно|struja|струја|drva|дрва|pelet|пелет|nafta|нафта|gas|гас|toplovod|топловод|centralno|централно|gradsko|градско|sopstveno|сопствено/i.test(u)) {
+      !/parno|парно|struja|струја|drva|дрва|pelet|пелет|nafta|нафта|gas|гас|toplovod|топловод|centralno|централно|gradsko|градско|sopstveno|сопствено/i.test(u) &&
+      !data.heatingParnoMentioned) {
     return { heating: "inverter", heatingType: "inverter" };
   }
 
   return null;
 }
 
+// PARKING NEGATIVE SIGNAL (shared, binary-correction audit): a message
+// stating there is NO parking. Extracted from extractParking's negative
+// branch so the stored-true correction gate and the branch share ONE
+// vocabulary — a bare-yes "DA" stored parking=true, and a later "NEMA
+// PARKING" must be able to correct it.
+const PARKING_NEGATIVE_RE = /nema parking|нема паркинг|nema garaza|нема гаража|nema graza|нема граза|bez parking|без паркинг|без гаража|без граза|bez garaza|bez graza|nema parkiranje|нема паркирање|bez parkiranje|без паркирање/i;
+function isParkingNegative(u) {
+  return PARKING_NEGATIVE_RE.test(u);
+}
+
 function extractParking(u, data) {
-  if (data.parking !== undefined && data.parking !== null) return null;
-  if (/nema parking|нема паркинг|nema garaza|нема гаража|nema graza|нема граза|bez parking|без паркинг|без гаража|без граза|bez garaza|bez graza|nema parkiranje|нема паркирање|bez parkiranje|без паркирање/i.test(u)) {
+  // BINARY CORRECTION (audit, mirror of documentationClean): a stored true
+  // from a bare-yes answer may be corrected by a later negative statement
+  // ("DA" then "NEMA PARKING"); a stored false never flips (no flip-flop).
+  if (data.parking === false) return null;
+  if (data.parking === true && !isParkingNegative(u)) return null;
+  if (isParkingNegative(u)) {
     return { parking: false };
   }
   // "graza" = the common Latin-script misspelling of "гаража" (garage) —
@@ -902,15 +999,29 @@ function extractOrientation(u, data) {
   return null;
 }
 
+// FURNISHED NEGATIVE SIGNAL (shared, binary-correction audit): a message
+// stating the unit is NOT furnished. Extracted from extractFurnished's
+// negative branch so the stored-true correction gate and the branch share
+// ONE vocabulary — a bare-yes "DA" stored furnished=true, and a later
+// "PRAZEN E" must be able to correct it.
+const FURNISHED_NEGATIVE_RE = /prazen|правен|bez namestaj|без мебел|nenamesten|ненаместен|prazno|празно|gola sostojba|гола состојба|ne e namesten|не е наместен|sam ke si nosam|сам ќе си носам|se nosam|се носам|nisto ne ostanuva|ништо не останува|se e moe|се е мое/i;
+function isFurnishedNegative(u) {
+  return FURNISHED_NEGATIVE_RE.test(u);
+}
+
 function extractFurnished(u, data) {
-  if (data.furnished !== undefined && data.furnished !== null) return null;
+  // BINARY CORRECTION (audit, mirror of documentationClean): a stored true
+  // from a bare-yes answer may be corrected by a later negative statement
+  // ("DA" then "PRAZEN E"); a stored false never flips (no flip-flop).
+  if (data.furnished === false) return null;
+  if (data.furnished === true && !isFurnishedNegative(u)) return null;
   // Require furniture-specific context — don't match bare "ne" (could be any question)
   // NOTE: Short patterns like "gol" or "prav" are intentionally excluded because they
   // false-match as substrings in non-furniture words (e.g., "gol" matches "golemi" = big).
   // Only specific furniture phrases are matched: "prazen/правен" (empty), "bez namestaj/без мебел"
   // (no furniture), "nenamesten/ненаместен" (unfurnished), "prazno/празно" (empty),
   // "gola sostojba/гола состојба" (bare condition), "ne e namesten/не е наместен" (not furnished).
-  if (/prazen|правен|bez namestaj|без мебел|nenamesten|ненаместен|prazno|празно|gola sostojba|гола состојба|ne e namesten|не е наместен|sam ke si nosam|сам ќе си носам|se nosam|се носам|nisto ne ostanuva|ништо не останува|se e moe|се е мое/i.test(u)) {
+  if (isFurnishedNegative(u)) {
     return { furnished: false, furnishedLevel: "empty" };
   }
   if (/komplet|ful|full|kompletno|celosno|целосно|m paket|м пакет|top namesten|топ наместен|namesten|наместен|opremen|опремен|kompletno namesten|комплетно наместен|se prodava namesten|се продава наместен/i.test(u)) {
@@ -930,13 +1041,51 @@ function extractFurnished(u, data) {
 function extractYearBuilt(u, data) {
   if (data.yearBuilt !== undefined && data.yearBuilt !== null) return null;
   const year = parseYearBuilt(u);
-  return year !== null ? { yearBuilt: year } : null;
+  if (year !== null) return { yearBuilt: year };
+  // AGE-BASED ANSWER (reported gap, #3): the owner answers "Која година е
+  // граден?" with the building's AGE — "пред 5 години" (5 years ago),
+  // "pred pet godini" (word number). parseYearBuilt only knows explicit
+  // years, so an age answer used to stall and SKIP yearBuilt after the
+  // 2-attempt cap. Guarded: fires only with a construction-verb (граден/
+  // изграден/ѕидан) OR when the whole message is a PURE age phrase — a
+  // purchase/ownership answer ("go kupiv pred 3 godini" = I bought it 3
+  // years ago) is NOT the construction year and must never be crowned.
+  // Mirror of the renovation-year "pred X godini" logic in extractRenovated.
+  const hasBuildCtx = /graden|граден|gradena|градена|izgraden|изграден|izgradena|изградена|zidan|ѕидан|zidana|ѕидана|sagraden|саграден|gradb|градб/i.test(u);
+  const isPureAge = /^(?:pred|пред|pri|при)\s+\S+\s+(?:godini|години|god|год|godina|година)[.!?,]*$/i.test(u.trim());
+  const predDigits = u.match(/(?:pred|пред|pri|при)\s+(\d{1,3})\s+(?:godini|години|god|год|godina|година)/i);
+  if (predDigits && (hasBuildCtx || isPureAge)) {
+    return { yearBuilt: new Date().getFullYear() - parseInt(predDigits[1], 10) };
+  }
+  const predWord = u.match(/(?:pred|пред|pri|при)\s+([a-zа-я]+)\s+(?:godini|години|god|год|godina|година)/i);
+  if (predWord && (hasBuildCtx || isPureAge)) {
+    const wordNum = parseMacedonianNumber(predWord[1]);
+    if (wordNum !== null && wordNum >= 1 && wordNum <= 100) {
+      return { yearBuilt: new Date().getFullYear() - wordNum };
+    }
+  }
+  return null;
+}
+
+// RENOVATED NEGATIVE SIGNAL (shared, binary-correction audit): a message
+// stating the unit was NOT renovated. Extracted from extractRenovated's two
+// negative branches (simple "ne e renoviran" + the tight negation guard)
+// so the stored-true correction gate and the branches share ONE vocabulary
+// — a bare-yes "DA" stored renovated=true, and a later "NE E RENOVIRAN"
+// must be able to correct it.
+const RENOVATED_NEGATIVE_RE = /ne e renoviran|не е реновиран|nema renoviran|нема реновирано|ne e renovirano|не е реновирано|nema renovirano|нема реновирано|ne renoviran|не реновиран|(?:^|\s)(?:ne|не)\s+(?:(?:go|se|me|ti|ga|gi|sme|ste|e|ja|bea|sum|si|го|се|ме|ти|га|ги|сме|сте|е|ја|беа|сум|си)\s+){0,2}(?:renoviran[аоие]?|реновиран[аоие]?|renoviravme|реновиравме|renoviraa|реновираа|renovirav|реновирав|renovira|реновира|renoviral|renovirale|renovirali|реновирал|реновирале|реновирали|obnoven[аоие]?|обновен[аоие]?|osvezen[аоие]?|освежен[аоие]?)/i;
+function isRenovatedNegative(u) {
+  return RENOVATED_NEGATIVE_RE.test(u);
 }
 
 function extractRenovated(u, data) {
-  if (data.renovated !== undefined && data.renovated !== null) return null;
+  // BINARY CORRECTION (audit, mirror of documentationClean): a stored true
+  // from a bare-yes answer may be corrected by a later negative statement
+  // ("DA" then "NE E RENOVIRAN"); a stored false never flips (no flip-flop).
+  if (data.renovated === false) return null;
+  if (data.renovated === true && !isRenovatedNegative(u)) return null;
   // Require renovation-specific context — don't match bare "ne" (which could be elevator question)
-  if (/ne e renoviran|не е реновиран|nema renoviran|нема реновирано|ne e renovirano|не е реновирано|nema renovirano|нема реновирано|ne renoviran|не реновиран/i.test(u)) {
+  if (isRenovatedNegative(u)) {
     return { renovated: false, renovationYear: null };
   }
   // TIGHT NEGATION GUARD: Check if ANY renovation keyword is directly negated by
@@ -947,7 +1096,9 @@ function extractRenovated(u, data) {
   // to renovated=true. The check is TIGHT — only allows ne + [optional pronoun] + verb,
   // with NO clause separators (dali, znam, mozam, etc.) in between.
   // This intentionally does NOT catch "ne znam dali e renoviran" (uncertain, not negated).
-  if (/(?:^|\s)(?:ne|не)\s+(?:(?:go|se|me|ti|ga|gi|sme|ste|e|ja|bea|sum|si|го|се|ме|ти|га|ги|сме|сте|е|ја|беа|сум|си)\s+){0,2}(?:renoviran[аоие]?|реновиран[аоие]?|renoviravme|реновиравме|renoviraa|реновираа|renovirav|реновирав|renovira|реновира|renoviral|renovirale|renovirali|реновирал|реновирале|реновирали|obnoven[аоие]?|обновен[аоие]?|osvezen[аоие]?|освежен[аоие]?)/i.test(u)) {
+  // (Shared RENOVATED_NEGATIVE_RE covers this guard too — the combined
+  // vocabulary is used by the stored-true correction gate above.)
+  if (isRenovatedNegative(u)) {
     return { renovated: false, renovationYear: null };
   }
   // Check if year is embedded — prefer year near renovation keywords
@@ -1110,8 +1261,62 @@ function extractRenovationYear(u, data) {
   return null;
 }
 
+// DOCUMENTATION-ISSUE VOCABULARY (shared) — a message carrying a real
+// documentation problem (mortgage, lien, encumbrance, legal dispute...).
+// Extracted to a named const + helper because THREE places need it: the
+// extractor's negative branch below, the runGlobalExtraction never-overwrite
+// gate (DOCUMENTATION CORRECTION — "IMA HIPOTEKA" must flip a premature
+// documentationClean=true to false, the exact mirror of the price-correction
+// gate), and the ownerName/address handlers (a docs-issue message is a docs
+// answer, NEVER a name/address — reported lead 5436709: "IMA HIPOTEKA" was
+// stored as ownerName="Ima Hipoteka"). Negative lookbehinds block "nema X" /
+// "bez X" forms ("nema hipoteka" = clean docs, a POSITIVE).
+export const DOCUMENTATION_ISSUE_RE = /(?<!nema |нема |bez |без )hipoteka|(?<!nema |нема |bez |без )хипотека|(?<!nema |нема |bez |без )ostavinska|(?<!nema |нема |bez |без )оставинска|razvod|развод|sudski|судски|(?<!nema |нема |bez |без |nemam |немам |nikakvi |никакви |absolutno |апсолутно |vekje |веќе |voopsto |воопшто |stvarno |стварно |ne e |не е |ne sum imal |не сум имал |ne bev imal |не бев имал )problem|(?<!nema |нема |bez |без |nemam |немам |nikakvi |никакви |absolutno |апсолутно |vekje |веќе |voopsto |воопшто |stvarno |стварно |ne e |не е |ne sum imal |не сум имал |ne bev imal |не бев имал )проблем|ne e cist|не е чист|ne e cista|не е чиста|(?<!nema |нема |bez |без |nemam |немам |nikakvi |никакви |absolutno |апсолутно |vekje |веќе |voopsto |воопшто |stvarno |стварно |ne e |не е |ne sum imal |не сум имал |ne bev imal |не бев имал )komplikacii|(?<!nema |нема |bez |без |nemam |немам |nikakvi |никакви |absolutno |апсолутно |vekje |веќе |voopsto |воопшто |stvarno |стварно |ne e |не е |ne sum imal |не сум имал |ne bev imal |не бев имал )компликации|(?<!nema |нема |bez |без )teret|(?<!nema |нема |bez |без )терет|(?<!nema |нема |bez |без )zabrana|(?<!nema |нема |bez |без )забрана|zalozen|заложен|imam hipoteka|имам хипотека|ima hipoteka|има хипотека|ima problem|има проблем|ima teret|има терет|ima zabrana|има забрана|ne e cist imoten list|не е чист имотен лист|ne e legalizirano|не е легализирано|spor|спор|ne e sredeno|не е средено|ne e sredena|не е средена|ne se sredeni|не се средени|nema sredena dokumentacija|нема средена документација/i;
+
+export function isDocumentationIssue(u) {
+  return DOCUMENTATION_ISSUE_RE.test(u);
+}
+
+// ========================================
+// BINARY-FIELD NEGATIVE SIGNALS (shared, correction audit)
+// Every binary field (petsAllowed, renovated, elevator, ac, parking,
+// furnished, documentationClean) had the same late-correction dead-end as
+// the reported docs case (lead 5436709): a bare-yes stored true, then the
+// owner's follow-up negative statement ("NEMA LIFT", "NE E RENOVIRAN") was
+// DROPPED by the never-overwrite contract — the negative branch was dead
+// once the field had any value. The audit found it in ALL six non-docs
+// fields (and a live branch-order bug: fresh "NEMA LIFT" stored
+// elevator=true because the positive "lift" token matched first). Each
+// extractor now: (1) refuses to flip a stored false, (2) lets a strong
+// negative signal correct a stored true (mirror of the docs gate), and
+// (3) checks negative BEFORE positive. This dispatcher powers the
+// runGlobalExtraction never-overwrite gate AND the handler-level storage
+// gate — the same three places documentationClean's isDocumentationIssue
+// serves.
+// ========================================
+export function isBinaryCorrectionSignal(field, u) {
+  switch (field) {
+    case 'petsAllowed': return isPetsAllowedNegative(u);
+    case 'renovated': return isRenovatedNegative(u);
+    case 'elevator': return isElevatorNegative(u);
+    case 'ac': return isACNegative(u);
+    case 'parking': return isParkingNegative(u);
+    case 'furnished': return isFurnishedNegative(u);
+    case 'documentationClean': return isDocumentationIssue(u);
+    default: return false;
+  }
+}
+
 function extractDocumentationClean(u, data) {
-  if (data.documentationClean !== undefined && data.documentationClean !== null) return null;
+  // DOCUMENTATION CORRECTION (reported lead 5436709): the owner answered the
+  // docs question with a bare yes ("DA IMAM" → documentationClean=true) and
+  // THEN revealed the real state ("IMA HIPOTEKA" — there IS a mortgage, docs
+  // are NOT clean). The never-overwrite contract would keep the premature
+  // true forever; only the negative branch may CORRECT a stored true — a
+  // docs-issue statement overrides a previously-set positive (mirror of the
+  // price-correction gate). A stored false is never touched (no flip-flop).
+  if (data.documentationClean === false) return null;
+  if (data.documentationClean === true && !isDocumentationIssue(u)) return null;
 
   // IMPORTANT: Run POSITIVE check FIRST — "nema hipoteka" (no mortgage) is a POSITIVE
   // documentation signal (clean docs), not a negative issue. If the negative check
@@ -1126,7 +1331,7 @@ function extractDocumentationClean(u, data) {
   // keywords like "cist imoten" — otherwise "ne e cist imoten list" (not clean
   // property deed) would false-match as positive. The negative lookbehind
   // (?<!ne e |не е ) ensures these are caught by the negative check below.
-  if (/(?<!ne e |не е )(?:cist imoten list|чист имотен лист|cist imoten|чист имотен|cisto na moe ime|чисто на мое име)|cisti dokumenti|чисти документи|cista dokumentacija|чиста документација|nema hipoteka|нема хипотека|nema ostavinska|нема оставинска|nema teret|нема терет|nema zabrana|нема забрана|legalizira[nno]|легализира[нно]|legalen|легален|katastar|катастар|vlasnicki list|власнички лист|katastarski plan|катастарски план|uredna dokumentacija|уредна документација/i.test(u)) {
+  if (/(?<!ne e |не е )(?:cist imoten list|чист имотен лист|cist imoten|чист имотен|cisto na moe ime|чисто на мое име)|cisti dokumenti|чисти документи|cista dokumentacija|чиста документација|nema hipoteka|нема хипотека|nema ostavinska|нема оставинска|nema teret|нема терет|nema zabrana|нема забрана|legalizira[nno]|легализира[нно]|legalen|легален|katastar|катастар|vlasnicki list|власнички лист|katastarski plan|катастарски план|uredna dokumentacija|уредна документација|(?<!nema |нема |bez |без |ne e |не е )(?:sredena dokumentacija|средена документација|dokumentacijata e sredena|документацијата е средена|dokumentite se sredeni|документите се средени|se e sredeno so dokumentite|се е средено со документите)/i.test(u)) {
     return { documentationClean: true, documentationIssues: null };
   }
 
@@ -1144,7 +1349,7 @@ function extractDocumentationClean(u, data) {
   // is a positive answer, not a docs issue — without the guard it set
   // documentationClean=false. The positive answer is caught by the
   // field-specific bare-yes map when the documentation question is current.
-  if (/(?<!nema |нема |bez |без )hipoteka|(?<!nema |нема |bez |без )хипотека|(?<!nema |нема |bez |без )ostavinska|(?<!nema |нема |bez |без )оставинска|razvod|развод|sudski|судски|(?<!nema |нема |bez |без |nemam |немам |nikakvi |никакви |absolutno |апсолутно |vekje |веќе |voopsto |воопшто |stvarno |стварно |ne e |не е |ne sum imal |не сум имал |ne bev imal |не бев имал )problem|(?<!nema |нема |bez |без |nemam |немам |nikakvi |никакви |absolutno |апсолутно |vekje |веќе |voopsto |воопшто |stvarno |стварно |ne e |не е |ne sum imal |не сум имал |ne bev imal |не бев имал )проблем|ne e cist|не е чист|ne e cista|не е чиста|(?<!nema |нема |bez |без |nemam |немам |nikakvi |никакви |absolutno |апсолутно |vekje |веќе |voopsto |воопшто |stvarno |стварно |ne e |не е |ne sum imal |не сум имал |ne bev imal |не бев имал )komplikacii|(?<!nema |нема |bez |без |nemam |немам |nikakvi |никакви |absolutno |апсолутно |vekje |веќе |voopsto |воопшто |stvarno |стварно |ne e |не е |ne sum imal |не сум имал |ne bev imal |не бев имал )компликации|(?<!nema |нема |bez |без )teret|(?<!nema |нема |bez |без )терет|(?<!nema |нема |bez |без )zabrana|(?<!nema |нема |bez |без )забрана|zalozen|заложен|imam hipoteka|имам хипотека|ima hipoteka|има хипотека|ima problem|има проблем|ima teret|има терет|ima zabrana|има забрана|ne e cist imoten list|не е чист имотен лист|ne e legalizirano|не е легализирано|spor|спор|ne e sredeno|не е средено/i.test(u)) {
+  if (/(?<!nema |нема |bez |без )hipoteka|(?<!nema |нема |bez |без )хипотека|(?<!nema |нема |bez |без )ostavinska|(?<!nema |нема |bez |без )оставинска|razvod|развод|sudski|судски|(?<!nema |нема |bez |без |nemam |немам |nikakvi |никакви |absolutno |апсолутно |vekje |веќе |voopsto |воопшто |stvarno |стварно |ne e |не е |ne sum imal |не сум имал |ne bev imal |не бев имал )problem|(?<!nema |нема |bez |без |nemam |немам |nikakvi |никакви |absolutno |апсолутно |vekje |веќе |voopsto |воопшто |stvarno |стварно |ne e |не е |ne sum imal |не сум имал |ne bev imal |не бев имал )проблем|ne e cist|не е чист|ne e cista|не е чиста|(?<!nema |нема |bez |без |nemam |немам |nikakvi |никакви |absolutno |апсолутно |vekje |веќе |voopsto |воопшто |stvarno |стварно |ne e |не е |ne sum imal |не сум имал |ne bev imal |не бев имал )komplikacii|(?<!nema |нема |bez |без |nemam |немам |nikakvi |никакви |absolutno |апсолутно |vekje |веќе |voopsto |воопшто |stvarno |стварно |ne e |не е |ne sum imal |не сум имал |ne bev imal |не бев имал )компликации|(?<!nema |нема |bez |без )teret|(?<!nema |нема |bez |без )терет|(?<!nema |нема |bez |без )zabrana|(?<!nema |нема |bez |без )забрана|zalozen|заложен|imam hipoteka|имам хипотека|ima hipoteka|има хипотека|ima problem|има проблем|ima teret|има терет|ima zabrana|има забрана|ne e cist imoten list|не е чист имотен лист|ne e legalizirano|не е легализирано|spor|спор|ne e sredeno|не е средено|ne e sredena|не е средена|ne se sredeni|не се средени|nema sredena dokumentacija|нема средена документација/i.test(u)) {
     let docsIssue = "other";
     if (/hipoteka|хипотека/i.test(u)) docsIssue = "hipoteka";
     else if (/ostavinska|оставинска/i.test(u)) docsIssue = "ostavinska";
@@ -1252,7 +1457,15 @@ const FIELD_CONFIDENCE_KEYWORDS = {
   // extractMonthlyRent only fires when transactionType==='rent' — the sale
   // price keeps its own currency keywords on cleanPrice. A bare "350" (no
   // currency word) still scores MEDIUM → confirmation re-ask (unchanged).
-  'monthlyRent': /kirija|кирија|mesecno|месечно|izdavam|издавам|izdava|издава|iznajmuvam|изнајмувам|iznajmuva|изнајмува|pod kirija|под кирија|evra|евра|evri|еври|evro|евро|eur|reziski|режиски/i,
+  // PRICE-ASKING VERBS (reported, lead 3571074): "TRISTA PEESET MU BARAM"
+  // ("350, that's what I'm asking [for it]") — a clear direct answer to the
+  // rent question, but the verb "baram"/"му барам" was missing here, so the
+  // message scored MEDIUM (0.60) and Ana asked "Дали точната вредност е
+  // 350?" despite the owner having answered clearly. Mirror the cleanPrice
+  // price-quote markers (baram/sakam/za mene). Safe: extractPrice refuses
+  // "sakam 3 sobi"/"baram 3 sobi" (room/sobi context) and other-field
+  // phrasings, so the HIGH only fires on a genuine price statement.
+  'monthlyRent': /kirija|кирија|mesecno|месечно|izdavam|издавам|izdava|издава|iznajmuvam|изнајмувам|iznajmuva|изнајмува|pod kirija|под кирија|evra|евра|evri|еври|evro|евро|eur|reziski|режиски|baram|барам|sakam|сакам|za mene|за мене|mu baram|му барам/i,
   // AVAILABLE-FROM DATE — month names, day markers, immediate words, and the
   // RELATIVE-DATE vocabulary are unambiguous date answers to "Од кога ќе биде
   // слободен?". RELATIVE FORMS (reported): "ZA DVA DENA" (in 2 days), "za dve
@@ -1694,7 +1907,7 @@ const BARE_NO_RE = /^(?:ne|не|nema|нема|nemam|немам|bez|без|go nem
   // documentation question is CURRENT, these ownership assertions are the
   // answer → documentationClean=true.
   const BARE_YES_FIELD_RE = {
-  documentationClean: /^(?:se e cisto|се е чисто|cisto e|чисто е|cista e|чиста е|se e cist|се е чист|cist e|чист е|cisto|чисто|sve e cisto|све е чисто|sve cisto|све чисто|se cisti|се чисти|cisti se|чисти се|site dokumenti cisti|сите документи чисти|dokumentite se cisti|документите се чисти|uredno e|уредно е|sredeno e|средено е|kompletno cisto|комплетно чисто|nema problemi|нема проблеми|nema problem|нема проблем|nemam problemi|немам проблеми|nema nikakvi problemi|нема никакви проблеми|nemam nikakvi problemi|немам никакви проблеми|nema vekje problemi|нема веќе проблеми|sve e vo red|сè е во ред|se e vo red|се е во ред|sve vo red|сè во ред|se e cisto, nema problemi|се е чисто, нема проблеми|cisto e, nema problemi|чисто е, нема проблеми|nema problemi so dokumentite|нема проблеми со документите|se e cisto so dokumentite|се е чисто со документите|imam na moe ime|имам на мое име|na moe ime|на мое име|e na moe ime|е на мое име|imam imoten list|имам имотен лист|imam dokumenti|имам документи|imam cist|имам чист|cisto e na moe ime|чисто е на мое име|imam na moe ime, cisto e|имам на мое име, чисто е|imam na moe ime, nema problemi|имам на мое име, нема проблеми|se e cisto, imam na moe ime|се е чисто, имам на мое име|cisto e, na moe ime|чисто е, на мое име|se e cisto, na moe ime|се е чисто, на мое име|ti rekov deka imam|ти реков дека имам|rekov deka imam|реков дека имам|ti kazav deka imam|ти кажав дека имам|kazav deka imam|кажав дека имам|ti rekov deka go imam|ти реков дека го имам|ti rekov deka imam na moe ime|ти реков дека имам на мое име|rekov deka imam na moe ime|реков дека имам на мое име)$/i,
+  documentationClean: /^(?:se e cisto|се е чисто|cisto e|чисто е|cista e|чиста е|se e cist|се е чист|cist e|чист е|cisto|чисто|sve e cisto|све е чисто|sve cisto|све чисто|se cisti|се чисти|cisti se|чисти се|site dokumenti cisti|сите документи чисти|dokumentite se cisti|документите се чисти|uredno e|уредно е|sredeno e|средено е|se e sredeno|се е средено|se e sredena|се е средена|sredena e|средена е|sredena dokumentacija|средена документација|dokumentacijata e sredena|документацијата е средена|dokumentite se sredeni|документите се средени|se e sredeno so dokumentite|се е средено со документите|kompletno cisto|комплетно чисто|nema problemi|нема проблеми|nema problem|нема проблем|nemam problemi|немам проблеми|nema nikakvi problemi|нема никакви проблеми|nemam nikakvi problemi|немам никакви проблеми|nema vekje problemi|нема веќе проблеми|sve e vo red|сè е во ред|se e vo red|се е во ред|sve vo red|сè во ред|se e cisto, nema problemi|се е чисто, нема проблеми|cisto e, nema problemi|чисто е, нема проблеми|nema problemi so dokumentite|нема проблеми со документите|se e cisto so dokumentite|се е чисто со документите|imam na moe ime|имам на мое име|na moe ime|на мое име|e na moe ime|е на мое име|imam imoten list|имам имотен лист|imam dokumenti|имам документи|imam cist|имам чист|cisto e na moe ime|чисто е на мое име|imam na moe ime, cisto e|имам на мое име, чисто е|imam na moe ime, nema problemi|имам на мое име, нема проблеми|se e cisto, imam na moe ime|се е чисто, имам на мое име|cisto e, na moe ime|чисто е, на мое име|se e cisto, na moe ime|се е чисто, на мое име|ti rekov deka imam|ти реков дека имам|rekov deka imam|реков дека имам|ti kazav deka imam|ти кажав дека имам|kazav deka imam|кажав дека имам|ti rekov deka go imam|ти реков дека го имам|ti rekov deka imam na moe ime|ти реков дека имам на мое име|rekov deka imam na moe ime|реков дека имам на мое име)$/i,
   // PETS ALLOWED (reported): "DOZVOLENI SE" (they're allowed) / "SLOBODNO E"
   // are natural direct answers to "Дали се дозволени миленици?" but carry no
   // pet word — the keyword extractor can't fire. When the pets question is
@@ -1714,7 +1927,12 @@ const BARE_NO_FIELD_RE = {
   // PETS ALLOWED (reported): "ZABRANETO E" / "NE SE DOZVOLENI" / "NEMA" are
   // natural negative answers to "Дали се дозволени миленици?" with no pet
   // word — mapped when the pets question is CURRENT → petsAllowed=false.
-  petsAllowed: /^(?:zabraneto e|забрането е|zabraneto|забрането|zabraneni|забранети|ne se dozvoleni|не се дозволени|nema|нема|ne moze|не може|ne moze da|не може да|ne|не)$/i
+  // (reported, lead 3571074): "NE SE" (не се = "they aren't [allowed]") is
+  // the short direct answer and was NOT caught — the pets question re-asked
+  // with variant 1 despite a clear denial. Also covers the acceptance/allow
+  // verb mirrors ("ne prihakaat", "ne dozvoluvame") for the rotating
+  // question variants.
+  petsAllowed: /^(?:zabraneto e|забрането е|zabraneto|забрането|zabraneni|забранети|ne se dozvoleni|не се дозволени|ne se|не се|nema|нема|ne moze|не може|ne moze da|не може да|ne prihakaat|не прифаќаат|ne dozvoluvam|не дозволувам|ne dozvoluvame|не дозволуваме|ne|не)$/i
 };
 
 // ========================================
@@ -2071,6 +2289,20 @@ function runGlobalExtraction(u, currentData, preferredField) {
           // genuinely carries tenant vocabulary.
           updates[key] = value;
           console.log(`[TENANT MERGE: ${key} ← ${JSON.stringify(value)}]`);
+        } else if (existing === true && value === false && isBinaryCorrectionSignal(key, u)) {
+          // BINARY CORRECTION (documentationClean reported lead 5436709;
+          // audit extended it to ALL binary fields): the owner's follow-up
+          // reveals the negative state ("IMA HIPOTEKA", "NEMA LIFT", "NE E
+          // RENOVIRAN") AFTER a bare-yes answer stored true. The extractor's
+          // negative branch already returned the correction; this gate admits
+          // it through the never-overwrite contract (the only non-price
+          // admission besides tenant-merge, deliberately narrow — fires only
+          // on a genuine field-specific negative signal against a stored
+          // positive). Companion keys (documentationIssues, renovationYear,
+          // furnishedLevel) ride along in the extractor's result and are
+          // admitted by the normal path below.
+          updates[key] = value;
+          console.log(`[BINARY CORRECTION: ${key} ${existing} → ${value} (negative signal in "${u}")]`);
         }
       }
     }

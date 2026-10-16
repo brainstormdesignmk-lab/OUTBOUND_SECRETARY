@@ -74,9 +74,9 @@ function importConfig(envPatch) {
 // ========================================
 {
   const { config } = await importConfig({});
-  assert('default MODEL preserved', config.MODEL === 'llama-3.3-70b-versatile', `got ${config.MODEL}`);
+  assert('default MODEL preserved', config.MODEL === 'qwen/qwen3.8-27b', `got ${config.MODEL}`);
   assert('default LLM_PROVIDERS preserved', config.LLM_PROVIDERS === 'groq,gemini', `got ${config.LLM_PROVIDERS}`);
-  assert('default GEMINI_MODEL preserved', config.GEMINI_MODEL === 'gemini-2.5-flash', `got ${config.GEMINI_MODEL}`);
+  assert('default GEMINI_MODEL preserved', config.GEMINI_MODEL === 'gemini-3.6-flash', `got ${config.GEMINI_MODEL}`);
   assert('default REPLY_TIMEOUT preserved', config.REPLY_TIMEOUT === 30 * 60 * 1000, `got ${config.REPLY_TIMEOUT}`);
   assert('default CSV path is project data/collected-leads.csv', config.CSV_OUTPUT_PATH === EXPECTED_DEFAULT_CSV, `got ${config.CSV_OUTPUT_PATH}`);
   assert('default PROPERTY_ROOT is project data/properties', config.PROPERTY_ROOT === EXPECTED_DEFAULT_PROPERTY_ROOT, `got ${config.PROPERTY_ROOT}`);
@@ -127,7 +127,7 @@ function importConfig(envPatch) {
 // ========================================
 {
   const { config } = await importConfig({ ANA_MODEL: '' });
-  assert('empty string falls back to default', config.MODEL === 'llama-3.3-70b-versatile', `got "${config.MODEL}"`);
+  assert('empty string falls back to default', config.MODEL === 'qwen/qwen3.8-27b', `got "${config.MODEL}"`);
 }
 
 // ========================================

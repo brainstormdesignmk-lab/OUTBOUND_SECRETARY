@@ -877,6 +877,49 @@ assert('PETS: next missing field after tenantPreferences is petsAllowed', wfPets
     `got [${rB.type}] next=${rB.nextField} "${(rB.text || '').slice(0, 60)}"`);
 }
 
+// "NE SE" (reported, lead 3571074): the owner answers the pets question with
+// the short bare denial "NE SE" (не се = "they aren't [allowed]"). This used
+// to fall through every map (no pet word, no allow/deny keyword) and the pets
+// question was RE-ASKED with variant 1 — a clear denial got a re-ask. Now the
+// field-specific bare-no map catches it → petsAllowed=false at HIGH, flow
+// advances straight to totalSqm.
+{
+  const sNS = {
+    adMemory: { transactionType: 'rent', propertyType: 'apartment', propertyLabel: 'станот' },
+    collectedData: {
+      cooperationAccepted: true, transactionType: 'rent',
+      monthlyRent: 550, monthlyRentConfidence: 0.95,
+      availableFrom: 'immediate', availableFromConfidence: 0.95,
+      tenantPreferences: { preferred: ['students'], excluded: [], notes: 'Сопственикот изјави: studenti' }, tenantPreferencesConfidence: 0.95
+    },
+    messages: [{ role: 'model', text: 'Разбирам. Уште неколку прашања. Дали се дозволени миленици во станот?' }],
+    phone: '+38976000015'
+  };
+  const rNS = await generateResponse(sNS, 'NE SE');
+  assert('PETS-NE-SE-1: bare "NE SE" → petsAllowed=false stored on attempt 1',
+    sNS.collectedData.petsAllowed === false,
+    `got ${JSON.stringify(sNS.collectedData.petsAllowed)}`);
+  assert('PETS-NE-SE-2: flow advances to totalSqm immediately (no re-ask)',
+    rNS.type === 'QUESTION' && rNS.nextField === 'totalSqm' && !/миленици|прифаќате/i.test(rNS.text || ''),
+    `got [${rNS.type}] next=${rNS.nextField} "${(rNS.text || '').slice(0, 70)}"`);
+  // Cyrillic variant of the same answer
+  const sNS2 = {
+    adMemory: { transactionType: 'rent', propertyType: 'apartment', propertyLabel: 'станот' },
+    collectedData: {
+      cooperationAccepted: true, transactionType: 'rent',
+      monthlyRent: 550, monthlyRentConfidence: 0.95,
+      availableFrom: 'immediate', availableFromConfidence: 0.95,
+      tenantPreferences: { preferred: ['students'], excluded: [], notes: '' }, tenantPreferencesConfidence: 0.95
+    },
+    messages: [{ role: 'model', text: 'Дали прифаќате станари со миленици?' }],
+    phone: '+38976000016'
+  };
+  const rNS2 = await generateResponse(sNS2, 'не се');
+  assert('PETS-NE-SE-3: Cyrillic "не се" → petsAllowed=false stored',
+    sNS2.collectedData.petsAllowed === false,
+    `got ${JSON.stringify(sNS2.collectedData.petsAllowed)}`);
+}
+
 // Broker comment includes the pets line
 const petsBroker = buildBrokerComment({
   transactionType: 'rent',

@@ -16,24 +16,27 @@
 // This module replaces the single hardcoded Groq call with an ORDERED
 // provider chain (config.LLM_PROVIDERS, default "groq,gemini"):
 //
-//   Groq (primary) ──> Gemini 2.5 Flash (fallback) ──> service.js safe
-//   fallback + human escalation (final net, unchanged)
+//   Groq (primary) ──> Gemini Flash fallback (gemini-3.6-flash) ──>
+//   service.js safe fallback + human escalation (final net, unchanged)
 //
 // Why Gemini: an INDEPENDENT quota (free tier, no card, North Macedonia is
 // not in the EU/UK/CH exclusion zone). OBSERVED on this account (live 429):
 // the Gemini free tier is REQUEST-counted — "generate_content_free_tier_
 // requests, limit: 20, model: gemini-2.5-flash" — and the bucket is PER
 // PROJECT + PER MODEL, so Gemini capacity multiplies via more projects
-// (GEMINI_API_KEYS list) and more models (GEMINI_MODEL_LITE routine tier).
+// (GEMINI_API_KEYS list).
 //
-// TIERED MODEL SPLIT (user-approved, see the pool section below): each
-// Groq key carries BOTH model buckets — rebuttal → config.MODEL (70b),
-// routine → config.MODEL_LITE (8b). The observed 429 was scoped "for model
-// llama-3.3-70b-versatile" (per-model TPD in practice on this account),
-// so the two tiers draw from separate daily buckets on one key. HEDGE: if
-// the account enforces org-level buckets instead (Groq docs historically
-// say org-level), the split is harmless but adds no capacity — verify at
-// console.groq.com/settings/limits before relying on the multiplier.
+// REVERTED MODEL SPLIT (reported live): the 8b "routine" tier made
+// persuasion replies sound much worse — a canned line for "KAKOV TIP NA
+// KLIENTI NUDITE ?" instead of an actual answer. EVERY reply now uses the
+// smart model (config.MODEL = qwen/qwen3.8-27b / GEMINI_MODEL =
+// gemini-3.6-flash); weaker instant models are NOT in the reply path —
+// they belong only to classification-type tasks (temperature/JSON) where
+// linguistic capability doesn't matter.
+// (llama-3.3-70b-versatile was decommissioned by Groq 2026-08-16;
+// qwen3.8-27b probed clean on 2026-09-05 — see config.js MODEL history.)
+// Daily capacity comes from the multi-key pool (one smart-model entry per
+// key) + the Gemini fallback's independent quota, never a weaker model.
 //
 // CIRCUIT BREAKER: rate-limit errors (429 / TPD / RPM) are NOT retried —
 // they cascade to the next provider immediately. Retrying a 429 whose
@@ -119,9 +122,9 @@ function getGroqClient(apiKey) {
 }
 
 // overrides = { key, model } — the pool passes the entry's key/model so one
-// key can rotate across BOTH Groq model buckets (70b rebuttal + 8b routine;
-// per-model TPD quotas are independent). Without overrides (legacy chain
-// path) it falls back to the env key + config.MODEL exactly as before.
+// key can rotate across the pool's smart-model entries (multi-key rotation).
+// Without overrides (legacy chain path) it falls back to the env key +
+// config.MODEL exactly as before.
 function groqProvider(params, overrides = {}) {
   const key = overrides.key || process.env.GROQ_API_KEY;
   const model = overrides.model || config.MODEL;
@@ -174,7 +177,8 @@ export function buildGeminiPayload(messages, gen) {
  * Extract the visible reply from a raw Gemini generateContent response.
  * PURE (no network) — exported for offline tests.
  *
- * gemini-2.5-flash returns reasoning in usageMetadata (counted toward
+ * Gemini Flash (thinking models, incl. the current gemini-3.6-flash) return
+ * reasoning in usageMetadata (counted toward
  * maxOutputTokens) and only the visible text in content.parts — so parts are
  * joined as-is. When finishReason is MAX_TOKENS the budget was exhausted and
  * the visible reply may be cut mid-word (reported incomplete replies); the
@@ -292,27 +296,24 @@ export function buildProviderChain(orderOverride) {
 }
 
 // ========================================
-// TIERED KEY/MODEL POOL — the production path (user-approved)
+// MULTI-KEY POOL — the production path (single reply model, reverted split)
 // ========================================
-// The pool multiplies free-tier capacity WITHOUT any new infrastructure:
-//   - MODEL SPLIT inside one key: each Groq key carries BOTH model buckets
-//     (rebuttal → config.MODEL = 70b, routine → config.MODEL_LITE = 8b).
-//     Groq quotas are PER-MODEL (the observed 429 was "for model
-//     llama-3.3-70b-versatile ... TPD: Limit 100000"), so exhausting one
-//     model never touches the other — one key ≈ 600K TPD ≈ 250 calls/day.
+// The pool multiplies free-tier capacity WITHOUT any new infrastructure
+// and WITHOUT a weaker reply model (the 8b routine tier was reverted —
+// reported: replies sounded much worse):
+//   - ONE ENTRY PER KEY: every entry carries the SMART model (groq →
+//     config.MODEL = 70b, gemini → GEMINI_MODEL = flash). The 8b instant
+//     model is not in the reply path at all.
 //   - KEY LIST: GROQ_API_KEYS / GEMINI_API_KEYS accept comma-separated
 //     keys. Groq quota is ORG-level (each listed key must be a SEPARATE
 //     account to gain anything); Gemini quota is PER-PROJECT, so each
 //     listed Gemini key genuinely adds its own ~20 RPD bucket.
-//   - GEMINI MODEL SPLIT: the same tier logic — smart → GEMINI_MODEL
-//     (2.5-flash), routine → GEMINI_MODEL_LITE (2.5-flash-lite, its own
-//     per-model bucket).
 //   - 429 COOLDOWN: a rate-limited entry is PARKED (cooldown from
 //     Retry-After / "try again in 5m19s" / 60s fallback) and the call
 //     cascades to the next entry — no futile retries (circuit breaker).
-//   - ROTATION: the first-tried key rotates per call within each
-//     (provider, tier) group, so N projects drain evenly instead of
-//     one bucket absorbing all traffic then blocking for its window.
+//   - ROTATION: the first-tried key rotates per call within each provider
+//     group, so N projects drain evenly instead of one bucket absorbing
+//     all traffic then blocking for its window.
 // ========================================
 function keyList(pluralVar, singularVar) {
   const raw = process.env[pluralVar] || process.env[singularVar] || '';
@@ -320,8 +321,10 @@ function keyList(pluralVar, singularVar) {
 }
 
 /**
- * Build the tiered pool entries. Cached once per process (cooldowns must
- * survive across calls); pass { fresh: true } to rebuild (tests).
+ * Build the multi-key pool entries — one SMART-model entry per key (the 8b
+ * routine tier was reverted from the reply path). Cached once per process
+ * (cooldowns must survive across calls); pass { fresh: true } to rebuild
+ * (tests).
  */
 export function buildKeyPool(opts = {}) {
   if (!opts.fresh && _poolCache) return _poolCache;
@@ -332,20 +335,18 @@ export function buildKeyPool(opts = {}) {
   const pool = [];
   if (order.includes('groq')) {
     keyList('GROQ_API_KEYS', 'GROQ_API_KEY').forEach((key, i) => {
-      pool.push({ provider: 'groq', key, model: config.MODEL, tier: 'rebuttal', keyIndex: i, cooldownUntil: 0 });
-      pool.push({ provider: 'groq', key, model: config.MODEL_LITE, tier: 'routine', keyIndex: i, cooldownUntil: 0 });
+      pool.push({ provider: 'groq', key, model: config.MODEL, keyIndex: i, cooldownUntil: 0 });
     });
   }
   if (order.includes('gemini')) {
     keyList('GEMINI_API_KEYS', 'GEMINI_API_KEY').forEach((key, i) => {
-      pool.push({ provider: 'gemini', key, model: config.GEMINI_MODEL, tier: 'rebuttal', keyIndex: i, cooldownUntil: 0 });
-      pool.push({ provider: 'gemini', key, model: config.GEMINI_MODEL_LITE, tier: 'routine', keyIndex: i, cooldownUntil: 0 });
+      pool.push({ provider: 'gemini', key, model: config.GEMINI_MODEL, keyIndex: i, cooldownUntil: 0 });
     });
   }
   if (!opts.fresh) _poolCache = pool;
   if (!_loggedPool && opts.fresh === undefined) {
     _loggedPool = true;
-    console.log(`[LLM pool: ${pool.map(e => `${e.provider}(${e.model} ${e.tier})`).join(' → ') || '(none)'}]`);
+    console.log(`[LLM pool: ${pool.map(e => `${e.provider}(${e.model})`).join(' → ') || '(none)'}]`);
   }
   return pool;
 }
@@ -362,24 +363,21 @@ let _poolCache = null;
 let _loggedPool = false;
 
 /**
- * Order pool entries for a call: the requested tier on the primary provider
- * first, then the other tier on the same keys (model rotation inside one
- * key), then the fallback provider's tiers. Rotates the start index within
- * each (provider, tier) group so multiple keys drain evenly.
+ * Order pool entries for a call: the primary provider's smart-model keys
+ * first (rotated so N keys drain evenly), then the fallback provider's.
+ * Every entry is the same smart model now — the 8b routine tier was
+ * reverted from the reply path.
  */
 const _rrStart = new Map();
-function orderPoolEntries(pool, tier) {
-  const other = tier === 'rebuttal' ? 'routine' : 'rebuttal';
+function orderPoolEntries(pool) {
   const groups = [
-    pool.filter(e => e.provider === 'groq' && e.tier === tier),
-    pool.filter(e => e.provider === 'groq' && e.tier === other),
-    pool.filter(e => e.provider !== 'groq' && e.tier === tier),
-    pool.filter(e => e.provider !== 'groq' && e.tier === other)
+    pool.filter(e => e.provider === 'groq'),
+    pool.filter(e => e.provider !== 'groq')
   ];
   const out = [];
   for (const g of groups) {
     if (g.length === 0) continue;
-    const groupKey = `${g[0].provider}:${g[0].tier}`;
+    const groupKey = g[0].provider;
     const start = _rrStart.get(groupKey) || 0;
     _rrStart.set(groupKey, (start + 1) % g.length);
     out.push(...[...g.slice(start), ...g.slice(0, start)]);
@@ -468,19 +466,18 @@ async function walkChain(params, providers, retry) {
 /**
  * Run a chat completion. Two paths:
  *
- * 1. POOL PATH (production default): tiered key/model rotation — the
- *    requested tier's model first (routine → 8b/flash-lite, rebuttal →
- *    70b/flash), then the other model on the same keys, then the fallback
- *    provider's tiers. 429s park the entry (cooldown) and cascade to the
- *    next entry — no futile retries. All entries failed → LAST error
- *    thrown so service.js's safe fallback / human escalation still apply.
+ * 1. POOL PATH (production default): multi-key rotation over the SMART
+ *    model — every reply uses config.MODEL (70b) / GEMINI_MODEL (flash);
+ *    the 8b routine tier was reverted (reported: replies sounded worse).
+ *    429s park the entry (cooldown) and cascade to the next entry — no
+ *    futile retries. All entries failed → LAST error thrown so service.js's
+ *    safe fallback / human escalation still apply.
  *
  * 2. LEGACY CHAIN PATH (opts.providers — tests/external callers): the
  *    original Groq → Gemini chain semantics, unchanged.
  *
  * @param {Object} params — { messages, temperature, top_p, frequency_penalty, max_tokens }
  * @param {Object} [opts]
- * @param {string} [opts.tier] — 'routine' | 'rebuttal' (pool path)
  * @param {Object} [opts.pool] — { fresh, fns } pool overrides (tests)
  * @param {Array<{name, fn}>} [opts.providers] — legacy chain override (tests)
  * @param {Object} [opts.retry] — override retry options (tests)
@@ -498,12 +495,11 @@ export async function generateCompletion(params, opts = {}) {
   }
 
   // === POOL PATH (production default) ===
-  const tier = opts.tier === 'rebuttal' ? 'rebuttal' : 'routine';
   const pool = buildKeyPool(opts.pool);
   if (pool.length === 0) {
     throw new Error('LLM: no providers configured (ANA_LLM_PROVIDERS empty or all API keys missing)');
   }
-  const ordered = orderPoolEntries(pool, tier);
+  const ordered = orderPoolEntries(pool);
   const fns = opts.pool?.fns;
   let lastError = null;
   let attempted = 0;

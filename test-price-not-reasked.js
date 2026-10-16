@@ -234,6 +234,102 @@ assert('E1: "EDNA KIRIJA" did NOT phantom-extract a terrace',
   `got terraceSqm=${JSON.stringify(s.collectedData.terraceSqm)}`);
 
 // ============================================================
+// PART F — the reported "TRISTA PEESET MU BARAM" first-go catch
+// ============================================================
+// Reported (production log, lead 3571074):
+//
+//   ANA: ...Која е месечната кирија за станот?
+//   OWNER: TRISTA PEESET MU BARAM        („350, тоа го барам за него“)
+//   ▸ EXTRACTED: monthlyRent=350 (0.60) (PENDING)   ← re-ask
+//   ANA: Дали точната вредност е 350? Која е месечната кирија за станот?
+//
+// The value parsed correctly (trista peeset = 300+50 = 350) but scored MEDIUM
+// because the price-ASKING verbs (baram/му барам) were missing from the
+// monthlyRent keyword list (cleanPrice had baram/sakam/za mene). A clear
+// direct answer got a needless confirmation re-ask.
+console.log('\n========================================');
+console.log('🧪 F: "TRISTA PEESET MU BARAM" → monthlyRent=350 HIGH on the FIRST go (reported lead 3571074)');
+console.log('========================================\n');
+
+const firstGo = {
+  phone: '+38970123456',
+  state: 'ACTIVE',
+  phase: 'DATA_COLLECTION',
+  adMemory: { transactionType: 'rent', propertyType: 'apartment', propertyLabel: 'станот', propertyId: '3571074' },
+  collectedData: { cooperationAccepted: true, transactionType: 'rent' },
+  messages: [
+    { role: 'model', text: 'Здраво, јас сум Ана од Metropolis...' },
+    { role: 'user', text: 'da' },
+    { role: 'model', text: 'Одлично. Ќе ми бидат потребни неколку информации за внес на вашата недвижност во системот. Која е месечната кирија за станот?' }
+  ],
+  questionAttempts: {},
+  pendingFollowUp: null,
+  pendingConfirmation: null
+};
+const f1 = await generateResponse(firstGo, 'TRISTA PEESET MU BARAM');
+console.log(`  "TRISTA PEESET MU BARAM" → ${f1.type} — "${f1.text}"`);
+assert('F1: monthlyRent=350 stored on the FIRST go',
+  firstGo.collectedData.monthlyRent === 350,
+  `got monthlyRent=${JSON.stringify(firstGo.collectedData.monthlyRent)}`);
+assert('F1: stored at HIGH (0.95) — no PENDING',
+  firstGo.collectedData.monthlyRentConfidence === 0.95,
+  `got conf=${JSON.stringify(firstGo.collectedData.monthlyRentConfidence)}`);
+assert('F1: NO confirmation re-ask (no "Дали точната вредност" or price question)',
+  !/точн|кириј/.test(f1.text || ''),
+  `got "${f1.text}"`);
+assert('F1: flow advanced to the next field (availableFrom for rent)',
+  f1.type === 'QUESTION' && f1.nextField === 'availableFrom',
+  `got type=${f1.type} next=${f1.nextField}`);
+assert('F1: pendingConfirmation NOT set',
+  firstGo.pendingConfirmation === null,
+  `got ${JSON.stringify(firstGo.pendingConfirmation)}`);
+
+// Cyrillic sibling
+const firstGo2 = {
+  phone: '+38970123456',
+  state: 'ACTIVE',
+  phase: 'DATA_COLLECTION',
+  adMemory: { transactionType: 'rent', propertyType: 'apartment', propertyLabel: 'станот' },
+  collectedData: { cooperationAccepted: true, transactionType: 'rent' },
+  messages: [
+    { role: 'model', text: 'Здраво...' },
+    { role: 'user', text: 'da' },
+    { role: 'model', text: 'Која е месечната кирија за станот?' }
+  ],
+  questionAttempts: {},
+  pendingFollowUp: null,
+  pendingConfirmation: null
+};
+const f2 = await generateResponse(firstGo2, 'триста пеесе му барам');
+assert('F2: Cyrillic "триста пеесе му барам" → monthlyRent=350 HIGH on first go',
+  firstGo2.collectedData.monthlyRent === 350 && firstGo2.collectedData.monthlyRentConfidence === 0.95,
+  `got rent=${JSON.stringify(firstGo2.collectedData.monthlyRent)} conf=${JSON.stringify(firstGo2.collectedData.monthlyRentConfidence)}`);
+assert('F2: no re-ask',
+  !/точн|кириј/.test(f2.text || ''),
+  `got "${f2.text}"`);
+
+// Control: "sakam 3 sobi" (a room count) must NEVER become a rent.
+const roomControl = {
+  phone: '+38970123456',
+  state: 'ACTIVE',
+  phase: 'DATA_COLLECTION',
+  adMemory: { transactionType: 'rent', propertyType: 'apartment', propertyLabel: 'станот' },
+  collectedData: { cooperationAccepted: true, transactionType: 'rent' },
+  messages: [
+    { role: 'model', text: 'Здраво...' },
+    { role: 'user', text: 'da' },
+    { role: 'model', text: 'Која е месечната кирија за станот?' }
+  ],
+  questionAttempts: {},
+  pendingFollowUp: null,
+  pendingConfirmation: null
+};
+await generateResponse(roomControl, 'sakam 3 sobi');
+assert('F3: "sakam 3 sobi" → monthlyRent NOT stored (room context, not a price)',
+  roomControl.collectedData.monthlyRent === undefined,
+  `got monthlyRent=${JSON.stringify(roomControl.collectedData.monthlyRent)}`);
+
+// ============================================================
 // SUMMARY
 // ============================================================
 harness.summary('PRICE-NOT-REASKED TESTS');

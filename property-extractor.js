@@ -137,8 +137,12 @@ export function parseNumberWords(text) {
     'osumnaeset': 18, 'осумнаесет': 18, 'osumnaese': 18, 'осумнаесе': 18,
     'devetnaeset': 19, 'деветнаесет': 19, 'devetnaese': 19, 'деветнаесе': 19,
     // Truncated Viber forms for the "i {unit}" connector: "osumdeset i ses"
-    // (86) — 'ses'/'шес' are shorthand for 'sest'/'шест' (6).
-    'ses': 6, 'шес': 6
+    // (86) — 'ses'/'шес' are shorthand for 'sest'/'шест' (6); "seeset i
+    // cetri" (64) — 'cetri'/'четри' are shorthand for 'cetiri'/'четири' (4,
+    // the second "i" dropped) — reported lead 3571074: "SEESET I CETRI M2"
+    // was read as 60 because only the full "cetiri" matched.
+    'ses': 6, 'шес': 6,
+    'cetri': 4, 'четри': 4
   };
 
   for (const [word, num] of Object.entries(numberWords)) {
@@ -171,10 +175,13 @@ export function parseNumberWords(text) {
     'девет': 9,
     'десет': 10,
     // Truncated Viber forms for the "i {unit}" connector: "osumdeset i ses"
-    // (86) — 'ses'/'шес' are shorthand for 'sest'/'шест' (6).
-    'ses': 6, 'шес': 6
+    // (86) — 'ses'/'шес' are shorthand for 'sest'/'шест' (6). "seeset i
+    // cetri" (64) — 'cetri'/'четри' (4, second "i" dropped) — reported lead
+    // 3571074: the sqm answer "SEESET I CETRI M2" only ever read 60.
+    'ses': 6, 'шес': 6,
+    'cetri': 4, 'четри': 4
   };
-  const rootGroup = '(eden|edna|edno|dva|dve|tri|cetiri|pet|sest|sedum|osum|devet)';
+  const rootGroup = '(eden|edna|edno|dva|dve|tri|cetiri|cetri|pet|sest|sedum|osum|devet)';
   let result = 0;
   let found = false;
   let consumedLength = 0;
@@ -183,6 +190,32 @@ export function parseNumberWords(text) {
   const getStoPrefix = () => {
     if (firstMatchIndex !== null && firstMatchIndex !== 0) {
       const beforeMatch = u.slice(0, firstMatchIndex).trim().toLowerCase();
+      // HUNDREDS-AWARE PREFIX (reported, lead 3571074): "SESTO PEESE" =
+      // шесто пеесе (colloquial 650) was misread as сто+пеесе = 150 — the old
+      // code saw "sesto" ending in "sto" and blindly added 100. The word
+      // BEFORE a mid-string tens match is a HUNDREDS word: map the whole word
+      // (the same compressed/colloquial families the mergedHT pass knows —
+      // "sesto"/"шесто" = шестсто 600, "petsto" = 500, "cetrsto" = 400,
+      // ...), and keep the literal "sto"/"сто" = 100 reading only for the
+      // bare hundred word. Longest-first scan so "seststotini" outranks
+      // "seststo" outranks "sesto".
+      const HUNDREDS_BEFORE = {
+        'seststotini': 600, 'шестстотини': 600, 'seststo': 600, 'шестсто': 600, 'sesto': 600, 'шесто': 600,
+        'petstotini': 500, 'петстотини': 500, 'petsto': 500, 'петсто': 500,
+        'sedumstotini': 700, 'седумстотини': 700, 'sedumsto': 700, 'седумсто': 700,
+        'osumstotini': 800, 'осумстотини': 800, 'osumsto': 800, 'осумсто': 800,
+        'devetstotini': 900, 'деветстотини': 900, 'devetsto': 900, 'деветсто': 900,
+        'cetiristotini': 400, 'четиристотини': 400, 'cetiristo': 400, 'четиристо': 400, 'cetrsto': 400, 'четирсто': 400,
+        'dveste': 200, 'двесте': 200, 'dvesta': 200, 'двеста': 200, 'dvesto': 200, 'двесто': 200,
+        'trieste': 300, 'тристе': 300, 'trista': 300, 'триста': 300, 'triesto': 300, 'триесто': 300, 'tristo': 300, 'тристо': 300,
+        'sto': 100, 'сто': 100
+      };
+      const sorted = Object.entries(HUNDREDS_BEFORE).sort((a, b) => b[0].length - a[0].length);
+      for (const [word, val] of sorted) {
+        if (beforeMatch.endsWith(word)) return val;
+      }
+      // Legacy fallback for an unknown "sto"-suffixed word — keep the old
+      // 100 reading (no behavior change outside the known hundreds words).
       if (beforeMatch.endsWith('sto') || beforeMatch.endsWith('сто')) return 100;
     }
     return 0;
@@ -266,7 +299,12 @@ export function parseNumberWords(text) {
       // the letter-after boundary would reject the whole 400 prefix.
       { prefix: /(?:^|[^a-zа-я])(chetiristotini|cetiristotini|cetirstotini|четиристотини|четирстотини|chetiristo|cetiristo|cetirsto|chetirsto|cetrsto|четиристо|четирсто)/i, hVal: 400 },
       { prefix: /(?:^|[^a-zа-я])(petstotini|петстотини)/i, hVal: 500 },
-      { prefix: /(?:^|[^a-zа-я])(seststotini|шестстотини)/i, hVal: 600 },
+      // 600: full -tini form PLUS the compressed/colloquial forms (reported,
+      // lead 3571074: "SESTO PEESE" = шесто пеесе (650) — "sesto"/"шесто"
+      // is the Viber spelling of шестсто (600), same family as the 400
+      // compressed forms above). Longest-first alternation so "seststotini"
+      // wins over "seststo" over "sesto".
+      { prefix: /(?:^|[^a-zа-я])(seststotini|шестстотини|seststo|шестсто|sesto|шесто)/i, hVal: 600 },
       { prefix: /(?:^|[^a-zа-я])(sedumstotini|седумстотини)/i, hVal: 700 },
       { prefix: /(?:^|[^a-zа-я])(osumstotini|осумстотини)/i, hVal: 800 },
       { prefix: /(?:^|[^a-zа-я])(devetstotini|деветстотини)/i, hVal: 900 },
@@ -487,7 +525,12 @@ export function parseNumberWords(text) {
     // end-of-string or any non-letter/non-digit (space, punctuation, "и", …)
     // while still refusing a partial match inside a longer word ("i sesnaeset"
     // = 16 must not read "ses" as 6).
-    const iBrojMatch = remaining.match(/^[iи]\s*(eden|edna|edno|dva|dve|tri|cetiri|pet|sest|sedum|osum|devet|deset|ses|шес|еден|една|едно|два|две|три|четири|пет|шест|седум|осум|девет|десет)(?=$|[^a-zа-я\d])/i);
+    // TRUNCATED UNIT "cetri"/"четри" (reported, lead 3571074): the owner
+    // answers the sqm question with "SEESET I CETRI M2" — "cetri" is the
+    // Viber-shorthand for "cetiri" (4, the second "i" dropped). Only the
+    // full "cetiri|четири" was listed, so "i cetri" never matched and the
+    // 64 was read as just 60. Same truncation family as "ses"/"шес" (6).
+    const iBrojMatch = remaining.match(/^[iи]\s*(eden|edna|edno|dva|dve|tri|cetiri|cetri|pet|sest|sedum|osum|devet|deset|ses|шес|еден|една|едно|два|две|три|четири|четри|пет|шест|седум|осум|девет|десет)(?=$|[^a-zа-я\d])/i);
     if (iBrojMatch) {
       result += rootMap[iBrojMatch[1].toLowerCase()] || 0;
     }
@@ -532,7 +575,7 @@ export function parseNumberWords(text) {
             const afterTens = remaining.slice(tw.length).trim();
             // Both Latin and Cyrillic connector (i/и) and units accepted,
             // matching the iBrojMatch above ("dvesta seeset i pet" → 265).
-            const unitMatch = afterTens.match(/^[iи]\s*(eden|edna|edno|dva|dve|tri|cetiri|pet|sest|sedum|osum|devet|еден|една|едно|два|две|три|четири|пет|шест|седум|осум|девет)\s*$/i);
+            const unitMatch = afterTens.match(/^[iи]\s*(eden|edna|edno|dva|dve|tri|cetiri|cetri|pet|sest|sedum|osum|devet|еден|една|едно|два|две|три|четири|четри|пет|шест|седум|осум|девет)\s*$/i);
             if (unitMatch) {
               result += rootMap[unitMatch[1].toLowerCase()] || 0;
             }
@@ -554,7 +597,15 @@ export function parseNumberWords(text) {
 // ========================================
 export function parseOrdinalFloor(text) {
   const ordinals = {
+    // GROUND/BASEMENT LEVELS (reported gap, #3): "во подрум" / "сутерен е"
+    // are real answers to "На кој кат се наоѓа станот?" (basement /
+    // souterrain). They used to stall and SKIP floor after the 2-attempt
+    // cap. Recorded as floor 0 — the same value приземје gets — so the
+    // funnel never loses the answer (a listing renders them as ground-level;
+    // the alternative was losing the field entirely).
     'приземје': 0, 'prizemje': 0,
+    'сутерен': 0, 'suteren': 0,
+    'подрум': 0, 'podrum': 0,
     'прв': 1, 'prv': 1,
     'втор': 2, 'vtor': 2,
     'трет': 3, 'tret': 3,
@@ -576,6 +627,20 @@ export function parseOrdinalFloor(text) {
   }
   return null;
 }
+
+// ========================================
+// ORDINAL-YEAR CONTEXT (shared guard) — "девеесет трета" / "DEVEESTRETA"
+// (90+3 = 93 → yearBuilt 1993) is a YEAR answer to "Која година е граден?",
+// NEVER a bedroom/floor count — but the merged form contains "tret" (3), so
+// parseOrdinalFloor/countBedrooms' substring scans would crown bedrooms=3 /
+// floor=3 from a year answer. Mirrors the existing decade-context guards
+// ("osumdesti" → 1980s, not 8 bedrooms): any tens + FEMININE ORDINAL unit
+// (merged or spaced, connector optional) is year context. Full + truncated
+// tens forms ("deveeset"/"devees" — the reported merged form drops the final
+// "ет"), all decades 50s-90s. Exported so data-collector.js's extractFloor
+// uses the same pattern.
+// ========================================
+export const ORDINAL_YEAR_CONTEXT_RE = /(?:deveeset|девеесет|devees|девеес|devedeset|деведесет|devedes|деведес|osumdeset|осумдесет|osumdes|осумдес|osamdeset|осамдесет|osamdes|осамдес|sedumdeset|седумдесет|sedumdes|седумдес|seeset|шеесет|sees|шеес|pedeset|педесет|pedes|педес|peeset|пеесет|pees|пеес)\s*(?:[iи]\s*)?(?:treta|трета|prva|прва|vtora|втора|petta|петта|peta|пета|sesta|шеста|sedma|седма|osma|осма|devetta|деветта|deveta|девета|cetvrta|четврта)/i;
 
 // ========================================
 // Viber ordinal-suffix numbers — "5TI" = 5th, "13TI" = 13th, "1VI" = 1st,
@@ -739,7 +804,7 @@ export function countBedrooms(text) {
     // here exactly like the word fallback below (reviewer finding: its
     // absence let "mesec dva plus edna nedela" sum to 3).
     if (/terasa|тераса|teras|терас|zosto|зошто|zasto|зашто/i.test(u)) return null;
-    if (/izgraden|граден|osumdesti|осумдесетти|osumdeseti|осумдесети|osumdeset|осумдесет|godina|година|gradba|градба|graden|граден|pedesetti|педесетти|deveesetti|девеесетти|deveeseti|девеесети|deveeset|девеесет|devedeseti|деведесети|sedumdesetti|седумдесетти|sedumdeseti|седумдесети|sedumdeset|седумдесет/i.test(u)) return null;
+    if (/izgraden|граден|osumdesti|осумдесетти|osumdeseti|осумдесети|osumdeset|осумдесет|godina|година|gradba|градба|graden|граден|pedesetti|педесетти|deveesetti|девеесетти|deveeseti|девеесети|deveeset|девеесет|devedeseti|деведесети|sedumdesetti|седумдесетти|sedumdeseti|седумдесети|sedumdeset|седумдесет/i.test(u) || ORDINAL_YEAR_CONTEXT_RE.test(u)) return null;
     if (/m2|м2|кв|kvadrati|квадрати|kvadrata|квадрата|kvadrat|квадрат|sqm|kat|кат|sprat|спрат|evra|евра|iljadi|илјади|parking|паркинг|garaza|гаража|lift|лифт|klima|клима/i.test(u)) return null;
     if (timeSpanRe.test(u)) return null;
     return plusSum;
@@ -766,7 +831,7 @@ export function countBedrooms(text) {
     // Skip if message contains year/decade context — "osumdesti" (1980s) should
     // NOT be interpreted as 8 bedrooms. "osum" is a substring of "osumdesti"
     // and parseMacedonianNumber would return 8, but the context is year/decade.
-    if (/izgraden|граден|osumdesti|осумдесетти|osumdeseti|осумдесети|osumdeset|осумдесет|godina|година|gradba|градба|graden|граден|pedesetti|педесетти|deveesetti|девеесетти|deveeseti|девеесети|deveeset|девеесет|devedeseti|деведесети|sedumdesetti|седумдесетти|sedumdeseti|седумдесети|sedumdeset|седумдесет/i.test(u)) return null;
+    if (/izgraden|граден|osumdesti|осумдесетти|osumdeseti|осумдесети|osumdeset|осумдесет|godina|година|gradba|градба|graden|граден|pedesetti|педесетти|deveesetti|девеесетти|deveeseti|девеесети|deveeset|девеесет|devedeseti|деведесети|sedumdesetti|седумдесетти|sedumdeseti|седумдесети|sedumdeset|седумдесет/i.test(u) || ORDINAL_YEAR_CONTEXT_RE.test(u)) return null;
     // Skip if the message has OTHER-FIELD units/context — a number word in an
     // sqm/floor/price sentence ("seeset i cetiri kvadrati" = 64 m²) belongs
     // to that field, not bedrooms. "cetiri" inside the compound "seeset i
@@ -789,7 +854,14 @@ export function countBedrooms(text) {
     // PARKING/GARAGE (reported): "parking mesto na -1 vo centar" extracted
     // bedrooms=1 from the garage LEVEL. The word-number fallback above
     // already skips parking context; the digit fallback must too.
-    if (/m2|м2|кв|kvadrati|квадрати|sqm|kat|кат|sprat|спрат|teras|терас|m²|evra|евра|iljadi|илјади|parking|паркинг|garaza|гаража/i.test(u)) return null;
+    // KVADRATA FORMS (reported, lead 3571074): "3 KVADRATA" — the owner
+    // answered the terrace question with the m² size and only the PLURAL
+    // "kvadrati|квадрати" was guarded, so the singular-genitive "KVADRATA"
+    // slipped through the digit fallback and stored a phantom bedrooms=3
+    // (extractFirstNumber read the "3"). Mirror the word-number fallback's
+    // full unit family: kvadrata/квадрата, kvadrat/квадрат, and the Latin
+    // "kv" abbreviation (the Cyrillic "кв" was already present).
+    if (/m2|м2|кв|kvadrati|квадрати|kvadrata|квадрата|kvadrat|квадрат|kv|sqm|kat|кат|sprat|спрат|teras|терас|m²|evra|евра|iljadi|илјади|parking|паркинг|garaza|гаража/i.test(u)) return null;
     // ORDINAL + FLOOR CONTEXT (reported): "на втори од 7" (Cyrillic) reaches
     // THIS digit fallback because parseMacedonianNumber has no Cyrillic
     // "втор" in its word map — the word-number guard above never fired, and
@@ -1430,6 +1502,51 @@ export function parseYearBuilt(text) {
   if (/60ta|60 та|60та|60-ta|шеесетта|шеесета|шееста|сееста|seesetta|seeseta|seesta/i.test(text)) return 1960;
   if (/2000ti|2000 ти|двеилјадити/i.test(text)) return 2005;
   if (/2000ta|2000 та|двеилјадита/i.test(text)) return 2000;
+
+  // ORDINAL-YEAR FAMILY (reported lead 5436709): the owner answers "Која
+  // година е граден?" with a tens + FEMININE ORDINAL phrase — "DEVEESTRETA"
+  // = девеес(ет) трета = "ninety-third" → 1993. The decade blocks above only
+  // know BARE decades (девеесетта → 1990); these are SPECIFIC years within
+  // the decade (93 → 1993, not the decade 1990). Viber merges and truncates:
+  // full "девеесет трета" / "deveeset treta", merged "девеесеттрета" /
+  // "deveesettreta", and the reported TRUNCATED-ТЕНS merged form
+  // "девеестрета" / "deveestreta" (девеес + трета, the final "ет" of the
+  // tens dropped). Optional connector "и"/"i" + separators admitted. Runs
+  // BEFORE the bare-word decade blocks below so "deveeset treta" can never
+  // degrade to the bare decade 1990. Feminine ordinals only (прва/втора/
+  // трета/четврта/петта/шеста/седма/осма/деветта) — CARDINALS ("осумдесет и
+  // три" = a QUANTITY) are owned by the compound guard below, which returns
+  // null, so no collision (an ordinal unit never matches the guard's
+  // cardinal list, and vice versa).
+  const ORDINAL_YEAR_TENS = [
+    ['девеесет', 90], ['девеес', 90], ['deveeset', 90], ['devees', 90],
+    ['деведесет', 90], ['деведес', 90], ['devedeset', 90], ['devedes', 90],
+    ['осумдесет', 80], ['осумдес', 80], ['osumdeset', 80], ['osumdes', 80],
+    ['осамдесет', 80], ['осамдес', 80], ['osamdeset', 80], ['osamdes', 80],
+    ['седумдесет', 70], ['седумдес', 70], ['sedumdeset', 70], ['sedumdes', 70],
+    ['шеесет', 60], ['шеес', 60], ['seeset', 60], ['sees', 60],
+    ['педесет', 50], ['педес', 50], ['pedeset', 50], ['pedes', 50],
+    ['пеесет', 50], ['пеес', 50], ['peeset', 50], ['pees', 50]
+  ].sort((a, b) => b[0].length - a[0].length);
+  const ORDINAL_YEAR_UNITS = [
+    ['деветта', 9], ['девета', 9], ['devetta', 9], ['deveta', 9],
+    ['четврта', 4], ['cetvrta', 4], ['петта', 5], ['пета', 5], ['petta', 5], ['peta', 5],
+    ['втора', 2], ['vtora', 2], ['трета', 3], ['treta', 3], ['шеста', 6], ['sesta', 6],
+    ['седма', 7], ['sedma', 7], ['осма', 8], ['osma', 8], ['прва', 1], ['prva', 1]
+  ].sort((a, b) => b[0].length - a[0].length);
+  const ordinalLower = text.toLowerCase();
+  for (const [tw, tv] of ORDINAL_YEAR_TENS) {
+    const idx = ordinalLower.indexOf(tw);
+    if (idx === -1) continue;
+    // Optional connector + separators between the tens and the ordinal unit
+    // ("и трета" / "i treta" / "трета" / "трета" merged).
+    let rest = ordinalLower.slice(idx + tw.length).replace(/^\s*[iи]?\s*/, '');
+    for (const [uw, uv] of ORDINAL_YEAR_UNITS) {
+      if (rest.startsWith(uw) && !/[a-zа-я]/.test(rest[uw.length] || '')) {
+        return 1900 + tv + uv;
+      }
+    }
+  }
 
   // COMPOUND-QUANTITY GUARD (reported lead 5540516): "osumdeset i ses" is
   // the QUANTITY 86 ("VKUPNO IMA OSUMDESET I SES ..." = 86 m² total), NOT a

@@ -103,6 +103,21 @@ assert("N4: '5 m2' doesn't match totalSqm (5 < 10)", result.totalSqm === undefin
 result = runGlobalExtraction("seeset i pet kvadrati", {});
 assert("N5: 'seeset i pet kvadrati' → totalSqm=65 (word-based)", result.totalSqm === 65, `got ${result.totalSqm}`);
 
+// Test: TRUNCATED UNIT "cetri" — "SEESET I CETRI M2" (reported lead
+// 3571074): шеесет и четири = 64, but only the full "cetiri" was in the
+// iBrojMatch unit list, so "i cetri" never matched and totalSqm=60 was
+// stored. "cetri"/"четри" is the Viber shorthand for "cetiri" (4, second
+// "i" dropped) — same family as "ses" (6).
+result = runGlobalExtraction("SEESET I CETRI M2", {});
+assert("N5c1: 'SEESET I CETRI M2' → totalSqm=64 (was 60)", result.totalSqm === 64, `got ${result.totalSqm}`);
+result = runGlobalExtraction("шеесет и четри м2", {});
+assert("N5c2: 'шеесет и четри м2' → totalSqm=64 (Cyrillic truncated)", result.totalSqm === 64, `got ${result.totalSqm}`);
+result = runGlobalExtraction("osumdeset i cetri kvadrati", {});
+assert("N5c3: 'osumdeset i cetri kvadrati' → totalSqm=84 (other tens + truncated unit)", result.totalSqm === 84, `got ${result.totalSqm}`);
+// Control: the full form and a different unit are untouched.
+result = runGlobalExtraction("seeset i cetiri m2", {});
+assert("N5c4: 'seeset i cetiri m2' → totalSqm=64 (full form unchanged)", result.totalSqm === 64, `got ${result.totalSqm}`);
+
 // Test: Terrace + sqm in one message — "65 kvadrati so terasa od 3 m2"
 result = runGlobalExtraction("65 kvadrati so terasa od 3 m2", {});
 assert("N6: '65 kvadrati so terasa od 3 m2' → totalSqm=65", result.totalSqm === 65, `got ${result.totalSqm}`);
@@ -169,6 +184,19 @@ assert("N16: '65m2 so terasa od 3 m2' → terraceSqm=3 (number after terasa wins
 // phrase guard) and no copula binds the number to the terrace.
 result = runGlobalExtraction("65 kvadrata so terasa", {});
 assert("N17: '65 kvadrata so terasa' → terraceSqm NOT extracted (no size given)", result.totalSqm === 65 && result.terraceSqm === undefined, `got total=${result.totalSqm} ter=${result.terraceSqm}`);
+// Reported (lead 3571074): the owner answered the terrace question with "IMA"
+// + "3 KVADRATA" (3 m²). The digit-fallback guard in countBedrooms only had
+// the PLURAL "kvadrati|квадрати", so "3 KVADRATA" leaked bedrooms=3 through
+// extractFirstNumber — the global extraction pass stored the phantom before
+// the terrace handler could run. "3 KVADRATA" is a sqm size, never a count.
+result = runGlobalExtraction("3 KVADRATA", {});
+assert("N19: '3 KVADRATA' → NO bedrooms phantom (was bedrooms=3)", result.bedrooms === undefined, `got ${JSON.stringify(result.bedrooms)}`);
+assert("N19: '3 KVADRATA' → totalSqm NOT extracted (no total-sqm keyword)", result.totalSqm === undefined, `got ${JSON.stringify(result.totalSqm)}`);
+result = runGlobalExtraction("3 КВАДРАТА", {});
+assert("N20: '3 КВАДРАТА' (Cyrillic) → NO bedrooms phantom", result.bedrooms === undefined, `got ${JSON.stringify(result.bedrooms)}`);
+// Control: a genuine digit bedroom answer is untouched by the guard.
+result = runGlobalExtraction("3 spalni", {});
+assert("N21: '3 spalni' → bedrooms=3 (real answer unaffected)", result.bedrooms === 3, `got ${JSON.stringify(result.bedrooms)}`);
 // Plural copula (extraction-suite guard, now pinned on the global path):
 // "5 KVADRATI SE TERASI" — 5 m² ARE the terrace. The shared extractor
 // DELIBERATELY returns null (its singular-only copula rule + plural bare-count
@@ -338,6 +366,26 @@ assert("E8: hipoteka → documentationClean=false",
 assert("E8: hipoteka → documentationIssues='hipoteka'", 
   result.documentationIssues === 'hipoteka', 
   `got ${JSON.stringify(result.documentationIssues)}`);
+
+// DIRECT-ANSWER PATH (verification request): "IMA HIPOTEKA" as the FIRST and
+// ONLY answer to the CURRENT docs question (preferredField='documentationClean',
+// NO prior "DA IMAM") — the issue must be extracted directly, not only as a
+// correction of a stored true. Runs through the STEP-1 group pass.
+result = runGlobalExtraction("IMA HIPOTEKA", {}, 'documentationClean');
+assert("E8b: direct 'IMA HIPOTEKA' to docs question → documentationClean=false (no prior DA IMAM)",
+  result.documentationClean === false, `got ${JSON.stringify(result.documentationClean)}`);
+assert("E8c: direct answer carries the issue",
+  result.documentationIssues === 'hipoteka', `got ${JSON.stringify(result.documentationIssues)}`);
+result = runGlobalExtraction("IMA TERET", {}, 'documentationClean');
+assert("E8d: direct 'IMA TERET' → documentationClean=false + teret",
+  result.documentationClean === false && result.documentationIssues === 'teret',
+  `got ${JSON.stringify(result.documentationClean)} ${JSON.stringify(result.documentationIssues)}`);
+result = runGlobalExtraction("NE E CIST IMOTEN LIST", {}, 'documentationClean');
+assert("E8e: direct 'NE E CIST IMOTEN LIST' → documentationClean=false",
+  result.documentationClean === false, `got ${JSON.stringify(result.documentationClean)}`);
+result = runGlobalExtraction("nema hipoteka", {}, 'documentationClean');
+assert("E8f: CONTROL direct 'nema hipoteka' → documentationClean=true (positive, never an issue)",
+  result.documentationClean === true, `got ${JSON.stringify(result.documentationClean)}`);
 
 // Test 21: Renovated with relative year ("pred 2 godini")
 result = runGlobalExtraction("pred 2 godini renoviran", { renovated: true, renovationYear: null });
@@ -622,6 +670,36 @@ assert("RT3d4: bare '350' stays MEDIUM (confirmation preserved)",
   assessConfidence('monthlyRent', 350, '350') === 'MEDIUM',
   `got ${assessConfidence('monthlyRent', 350, '350')}`);
 
+// Test 33d5: THE reported message — "TRISTA PEESET MU BARAM" ("350, that's
+// what I'm asking [for it]") — a CLEAR direct answer to the rent question.
+// The value parsed correctly (trista peeset = 300+50 = 350) but scored MEDIUM
+// (0.60) because the price-ASKING verbs (baram/му барам) were missing from the
+// monthlyRent keyword list (cleanPrice had them) → Ana re-asked "Дали точната
+// вредност е 350?". Fix: mirror the cleanPrice price-quote markers
+// (baram/sakam/za mene) → HIGH, stored immediately on the first go.
+result = runGlobalExtraction("TRISTA PEESET MU BARAM", { transactionType: 'rent' }, 'monthlyRent');
+assert("RT3d5: monthlyRent=350 from 'TRISTA PEESET MU BARAM'", result.monthlyRent === 350, `got ${JSON.stringify(result.monthlyRent)}`);
+assert("RT3d5: cleanPrice NOT extracted for rent", result.cleanPrice === undefined, `got ${JSON.stringify(result.cleanPrice)}`);
+assert("RT3d5: monthlyRent confidence HIGH (mu baram = clear price-asking verb)",
+  assessConfidence('monthlyRent', 350, 'trista peeset mu baram') === 'HIGH',
+  `got ${assessConfidence('monthlyRent', 350, 'trista peeset mu baram')}`);
+// Cyrillic sibling: "ТРИСТА ПЕЕСЕ МУ БАРАМ"
+result = runGlobalExtraction("триста пеесе му барам", { transactionType: 'rent' }, 'monthlyRent');
+assert("RT3d6: Cyrillic monthlyRent=350 (му барам)", result.monthlyRent === 350, `got ${JSON.stringify(result.monthlyRent)}`);
+assert("RT3d6: Cyrillic monthlyRent confidence HIGH",
+  assessConfidence('monthlyRent', 350, 'триста пеесе му барам') === 'HIGH',
+  `got ${assessConfidence('monthlyRent', 350, 'триста пеесе му барам')}`);
+// Control: "sakam/baram N sobi" (a room count, not a price) must NEVER become
+// a HIGH rent — extractPrice refuses room context, and even if a stray number
+// reached extraction the price-verb keyword must not crown it.
+result = runGlobalExtraction("sakam 3 sobi", { transactionType: 'rent' }, 'monthlyRent');
+assert("RT3d7: 'sakam 3 sobi' → monthlyRent NOT extracted (room context)",
+  result.monthlyRent === undefined, `got ${JSON.stringify(result.monthlyRent)}`);
+// Control: a bare price-verb number with no other context stays a price ("baram 350")
+assert("RT3d8: 'baram 350' confidence HIGH (clear price statement)",
+  assessConfidence('monthlyRent', 350, 'baram 350') === 'HIGH',
+  `got ${assessConfidence('monthlyRent', 350, 'baram 350')}`);
+
 // Test 33e2: COMPRESSED HUNDRED-WORD RENT (reported): the owner answered the
 // rent question with "CETRSTOPEESET" — the compressed Viber form of
 // "четиристо пеесет" (400 + 50 = 450), dropping the i's from "четиристо".
@@ -646,6 +724,20 @@ result = runGlobalExtraction("четирсто пеесет", { transactionType:
 assert("RT3f4: monthlyRent=450 from Cyrillic compressed 'четирсто пеесет'", result.monthlyRent === 450, `got ${JSON.stringify(result.monthlyRent)}`);
 result = runGlobalExtraction("cetrsto", { transactionType: 'rent' }, 'monthlyRent');
 assert("RT3f5: monthlyRent=400 from bare compressed 'cetrsto'", result.monthlyRent === 400, `got ${JSON.stringify(result.monthlyRent)}`);
+// Compressed 600 (reported, lead 3571074): "SESTO PEESE" = шесто пеесе
+// (colloquial 650) was misread as сто+пеесе = 150 — getStoPrefix saw
+// "sesto" ending in "sto" and added 100, so Ana confirmed "Дали точната
+// вредност е 150?" and the owner had to correct with "650". The s-dropped
+// 600 (sesto/шесто from шестсто) must extract 650, never 150.
+result = runGlobalExtraction("SESTO PEESE", { transactionType: 'rent' }, 'monthlyRent');
+assert("RT3f9: monthlyRent=650 from compressed 'SESTO PEESE' (шесто пеесе), NOT 150", result.monthlyRent === 650, `got ${JSON.stringify(result.monthlyRent)}`);
+result = runGlobalExtraction("шесто пеесе", { transactionType: 'rent' }, 'monthlyRent');
+assert("RT3f10: monthlyRent=650 from Cyrillic compressed 'шесто пеесе'", result.monthlyRent === 650, `got ${JSON.stringify(result.monthlyRent)}`);
+result = runGlobalExtraction("sesto", { transactionType: 'rent' }, 'monthlyRent');
+assert("RT3f11: monthlyRent=600 from bare compressed 'sesto'", result.monthlyRent === 600, `got ${JSON.stringify(result.monthlyRent)}`);
+// The literal 100+tens reading is untouched
+result = runGlobalExtraction("sto peeset", { transactionType: 'rent' }, 'monthlyRent');
+assert("RT3f12: 'sto peeset' → 150 (literal 100+50 unaffected)", result.monthlyRent === 150, `got ${JSON.stringify(result.monthlyRent)}`);
 // With currency the compressed form scores HIGH like any evra-bound price
 assert("RT3f6: 'cetrstopeeset evra' scores HIGH (currency marker)",
   assessConfidence('monthlyRent', 450, 'cetrstopeeset evra') === 'HIGH',
@@ -862,6 +954,32 @@ assert("DEC8: compact renovationYear decade scores HIGH",
 assert("DEC6: '50-iljadi evra, tocno ne znam' NOT a decade → stays MEDIUM",
   assessConfidence('yearBuilt', 1955, '50-iljadi evra, tocno ne znam') === 'MEDIUM',
   `got ${assessConfidence('yearBuilt', 1955, '50-iljadi evra, tocno ne znam')}`);
+
+// ORDINAL-YEAR FAMILY (reported lead 5436709): "DEVEESTRETA" = девеес(ет) трета
+// = "ninety-third" → 1993 — a SPECIFIC year within the decade. The global path
+// (preferredField=yearBuilt) must extract it at HIGH (no confirmation re-ask,
+// no skip), and the "трета"→3 must NOT phantom into bedrooms/floor/totalFloors
+// (the shared ORDINAL_YEAR_CONTEXT_RE guard blocks those cross-field leaks).
+result = runGlobalExtraction("DEVEESTRETA", {}, 'yearBuilt');
+assert("DEC9: 'DEVEESTRETA' (reported) → yearBuilt=1993",
+  result.yearBuilt === 1993, `got ${result.yearBuilt}`);
+assert("DEC9a: ordinal-year answer scores HIGH (no confirmation re-ask)",
+  assessConfidence('yearBuilt', 1993, 'deveestreta') === 'HIGH',
+  `got ${assessConfidence('yearBuilt', 1993, 'deveestreta')}`);
+result = runGlobalExtraction("ОСУМДЕСЕТ ПЕТТА", {}, 'yearBuilt');
+assert("DEC9b: 'ОСУМДЕСЕТ ПЕТТА' → yearBuilt=1985 (80s family)",
+  result.yearBuilt === 1985, `got ${result.yearBuilt}`);
+result = runGlobalExtraction("ШЕЕСЕТ ПРВА", {}, 'yearBuilt');
+assert("DEC9c: 'ШЕЕСЕТ ПРВА' → yearBuilt=1961 (60s family)",
+  result.yearBuilt === 1961, `got ${result.yearBuilt}`);
+// CONTROLS: the "трета" ordinal must NOT leak into bedrooms/floor/totalFloors
+result = runGlobalExtraction("DEVEESTRETA", {});
+assert("DEC9d: 'DEVEESTRETA' global discovery → NO bedrooms phantom (трета→3 blocked)",
+  result.bedrooms === undefined, `got ${JSON.stringify(result.bedrooms)}`);
+assert("DEC9e: 'DEVEESTRETA' global discovery → NO floor phantom",
+  result.floor === undefined, `got ${JSON.stringify(result.floor)}`);
+assert("DEC9f: 'DEVEESTRETA' global discovery → NO totalFloors phantom",
+  result.totalFloors === undefined, `got ${JSON.stringify(result.totalFloors)}`);
 
 // ========================================
 // TEST GROUP: Edge-case multi-field (ambiguous numbers)
@@ -1328,6 +1446,27 @@ result = runGlobalExtraction("klima nema", {});
 assert("HK15: 'klima nema' → ac=false (negation unchanged)", result.ac === false, `got ${JSON.stringify(result.ac)}`);
 result = runGlobalExtraction("inverzija", {});
 assert("HK16: 'inverzija' → ac/heating stay null (not inverter)", result.ac === undefined && result.heating === undefined, `got ac=${JSON.stringify(result.ac)} heat=${JSON.stringify(result.heating)}`);
+// PARNO WINS OVER INVERTER (reported, lead 3571074): the conversation-level
+// flag collectedData.heatingParnoMentioned (set by the data-collection heating
+// handler when the owner mentioned parno) must block inverter-as-heating even
+// when THIS message has no parno word — inverter becomes the AC instead.
+result = runGlobalExtraction("inverter", { transactionType: 'rent', heatingParnoMentioned: true });
+assert("HK19: 'inverter' + parno-mentioned flag → heating stays null (parno wins), ac=true",
+  result.heating === undefined && result.ac === true,
+  `got heat=${JSON.stringify(result.heating)} ac=${JSON.stringify(result.ac)}`);
+result = runGlobalExtraction("klima inverter", { transactionType: 'rent', heatingParnoMentioned: true });
+assert("HK20: 'klima inverter' + parno-mentioned flag → heating stays null, ac=true",
+  result.heating === undefined && result.ac === true,
+  `got heat=${JSON.stringify(result.heating)} ac=${JSON.stringify(result.ac)}`);
+result = runGlobalExtraction("split sistem", { transactionType: 'rent', heatingParnoMentioned: true });
+assert("HK21: 'split sistem' + parno-mentioned flag → heating stays null, ac=true",
+  result.heating === undefined && result.ac === true,
+  `got heat=${JSON.stringify(result.heating)} ac=${JSON.stringify(result.ac)}`);
+// Control — without the flag, inverter heating still works
+result = runGlobalExtraction("inverter", { transactionType: 'rent' });
+assert("HK22: 'inverter' WITHOUT the flag → heating=inverter (unchanged)",
+  result.heating === 'inverter' && result.ac === true,
+  `got heat=${JSON.stringify(result.heating)} ac=${JSON.stringify(result.ac)}`);
 
 // AC QUESTION ANSWERS — reviewer-caught regression: the AC question is
 // "Дали има клима?", whose natural reply "ima split" / "da, ima split"
@@ -1571,6 +1710,81 @@ assert("NEG6: bare 'nemam' to parking question → parking=false", result.parkin
 // CONTROL: negation idioms do NOT fire in global discovery (no preferredField)
 result = runGlobalExtraction("nemam na moe ime", {});
 assert("NEG7: 'nemam na moe ime' with NO preferredField → NOT extracted", result.documentationClean === undefined, `got ${JSON.stringify(result.documentationClean)}`);
+
+// ── 2f. DOCUMENTATION CORRECTION (reported lead 5436709) ──
+// The owner answered the docs question "DA IMAM" (→ documentationClean=true),
+// then revealed the real state "IMA HIPOTEKA" (there IS a mortgage — docs are
+// NOT clean). The never-overwrite contract must admit this correction: a
+// docs-issue signal flips a stored positive to false + issue (mirror of the
+// price-correction gate). A stored false is never touched (no flip-flop).
+result = runGlobalExtraction("IMA HIPOTEKA", { documentationClean: true });
+assert("DCC1: 'IMA HIPOTEKA' corrects stored documentationClean=true → false", result.documentationClean === false, `got ${JSON.stringify(result.documentationClean)}`);
+assert("DCC1b: correction carries the issue", result.documentationIssues === 'hipoteka', `got ${JSON.stringify(result.documentationIssues)}`);
+result = runGlobalExtraction("има хипотека", { documentationClean: true });
+assert("DCC2: Cyrillic 'има хипотека' corrects → false", result.documentationClean === false, `got ${JSON.stringify(result.documentationClean)}`);
+result = runGlobalExtraction("ima teret", { documentationClean: true });
+assert("DCC3: 'ima teret' corrects → false (teret issue)", result.documentationClean === false && result.documentationIssues === 'teret', `got ${JSON.stringify(result.documentationClean)} ${JSON.stringify(result.documentationIssues)}`);
+// CONTROL: a stored false is never flipped back by a plain message
+result = runGlobalExtraction("55 kvadrati", { documentationClean: false });
+assert("DCC4: stored false stays false (no flip-flop on unrelated msg)", result.documentationClean === undefined, `got ${JSON.stringify(result.documentationClean)}`);
+// CONTROL: a stored true is not touched by a NON-issue message
+result = runGlobalExtraction("55 kvadrati", { documentationClean: true });
+assert("DCC5: stored true stays true on unrelated msg", result.documentationClean === undefined, `got ${JSON.stringify(result.documentationClean)}`);
+// CONTROL: "nema hipoteka" (no mortgage) is a POSITIVE — never a correction
+result = runGlobalExtraction("NEMA HIPOTEKA", { documentationClean: true });
+assert("DCC6: 'nema hipoteka' does NOT correct (positive signal)", result.documentationClean === undefined, `got ${JSON.stringify(result.documentationClean)}`);
+// CONTROL: bare "da" never corrects a stored true
+result = runGlobalExtraction("da", { documentationClean: true });
+assert("DCC7: bare 'da' does NOT correct stored true", result.documentationClean === undefined, `got ${JSON.stringify(result.documentationClean)}`);
+
+// ── BINARY CORRECTION AUDIT (all binary fields, mirror of DCC) ──
+// The docs fix (DCC) fixed ONE binary field. The audit found the SAME
+// late-correction dead-end in every other binary field: a bare-yes stores
+// true, then the owner's follow-up negative statement ("NEMA LIFT" after
+// "DA", "NE E RENOVIRAN", "PRAZEN E") was DROPPED by the never-overwrite
+// contract. Each now corrects a stored true → false on a strong field-
+// specific negative signal (never flips a stored false, never on unrelated
+// or positive messages).
+result = runGlobalExtraction("NEMA LIFT", { elevator: true });
+assert("BCC1: 'NEMA LIFT' corrects stored elevator=true → false", result.elevator === false, `got ${JSON.stringify(result.elevator)}`);
+result = runGlobalExtraction("NEMA LIFT", {});
+assert("BCC1b: FRESH 'NEMA LIFT' → elevator=false (negative-first branch order, live bug)", result.elevator === false, `got ${JSON.stringify(result.elevator)}`);
+result = runGlobalExtraction("BEZ LIFT", { elevator: true });
+assert("BCC1c: 'BEZ LIFT' corrects → false", result.elevator === false, `got ${JSON.stringify(result.elevator)}`);
+result = runGlobalExtraction("NEMA LIFT", { elevator: false });
+assert("BCC1d: stored false never flips (no flip-flop)", result.elevator === undefined, `got ${JSON.stringify(result.elevator)}`);
+result = runGlobalExtraction("ima lift", { elevator: true });
+assert("BCC1e: positive 'ima lift' does NOT correct stored true", result.elevator === undefined, `got ${JSON.stringify(result.elevator)}`);
+result = runGlobalExtraction("55 kvadrati", { elevator: true });
+assert("BCC1f: unrelated msg does NOT correct stored true", result.elevator === undefined, `got ${JSON.stringify(result.elevator)}`);
+result = runGlobalExtraction("NEMA KLIMA", { ac: true });
+assert("BCC2: 'NEMA KLIMA' corrects stored ac=true → false", result.ac === false, `got ${JSON.stringify(result.ac)}`);
+result = runGlobalExtraction("NEMA KLIMA", { ac: true });
+assert("BCC2b: Cyrillic 'НЕМА КЛИМА' corrects → false", result.ac === false, `got ${JSON.stringify(result.ac)}`);
+result = runGlobalExtraction("nema klima", { ac: false });
+assert("BCC2c: stored ac=false never flips", result.ac === undefined, `got ${JSON.stringify(result.ac)}`);
+result = runGlobalExtraction("NEMA PARKING", { parking: true });
+assert("BCC3: 'NEMA PARKING' corrects stored parking=true → false", result.parking === false, `got ${JSON.stringify(result.parking)}`);
+result = runGlobalExtraction("nema parking", { parking: false });
+assert("BCC3b: stored parking=false never flips", result.parking === undefined, `got ${JSON.stringify(result.parking)}`);
+result = runGlobalExtraction("PRAZEN E", { furnished: true });
+assert("BCC4: 'PRAZEN E' corrects stored furnished=true → false", result.furnished === false, `got ${JSON.stringify(result.furnished)}`);
+assert("BCC4b: correction carries furnishedLevel empty", result.furnishedLevel === 'empty', `got ${JSON.stringify(result.furnishedLevel)}`);
+result = runGlobalExtraction("NE E RENOVIRAN", { renovated: true });
+assert("BCC5: 'NE E RENOVIRAN' corrects stored renovated=true → false", result.renovated === false, `got ${JSON.stringify(result.renovated)}`);
+assert("BCC5b: correction clears renovationYear", result.renovationYear === null, `got ${JSON.stringify(result.renovationYear)}`);
+result = runGlobalExtraction("NE GO RENOVIRAVME VOOPSTO", { renovated: true });
+assert("BCC5c: tight negation 'NE GO RENOVIRAVME' corrects → false", result.renovated === false, `got ${JSON.stringify(result.renovated)}`);
+result = runGlobalExtraction("ne e renoviran", { renovated: false });
+assert("BCC5d: stored renovated=false never flips", result.renovated === undefined, `got ${JSON.stringify(result.renovated)}`);
+result = runGlobalExtraction("ZABRANETI SE MILENICI", { petsAllowed: true, transactionType: 'rent' });
+assert("BCC6: 'ZABRANETI SE MILENICI' corrects stored petsAllowed=true → false (rent)", result.petsAllowed === false, `got ${JSON.stringify(result.petsAllowed)}`);
+result = runGlobalExtraction("NE, NIKAKO MILENICI", { petsAllowed: true, transactionType: 'rent' });
+assert("BCC6b: 'NIKAKO MILENICI' corrects → false (rent)", result.petsAllowed === false, `got ${JSON.stringify(result.petsAllowed)}`);
+result = runGlobalExtraction("DOZVOLENI SE", { petsAllowed: true, transactionType: 'rent' });
+assert("BCC6c: positive 'DOZVOLENI SE' does NOT correct stored true", result.petsAllowed === undefined, `got ${JSON.stringify(result.petsAllowed)}`);
+result = runGlobalExtraction("ZABRANETI SE MILENICI", { petsAllowed: false, transactionType: 'rent' });
+assert("BCC6d: stored petsAllowed=false never flips", result.petsAllowed === undefined, `got ${JSON.stringify(result.petsAllowed)}`);
 
 // ── Bare answers ONLY work when the field is being asked (discovery guard) ──
 result = runGlobalExtraction("ne", {});

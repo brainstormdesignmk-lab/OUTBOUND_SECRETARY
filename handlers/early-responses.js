@@ -29,10 +29,42 @@ import {
   getRandomOwnerMustPayResponse,
   isAskingAboutNoAgencyExperience,
   getRandomNoAgencyExperienceResponse,
+  isStandardTermsAck,
+  getRandomStandardTermsResponse,
   isAskingAboutClients,
   isAskingAboutClientQuality,
   getRandomClientQualityResponse,
-  isAskingWhoPaysForLegalCosts
+  isAskingWhoPaysForLegalCosts,
+  isAskingWhatIfNotSold,
+  getRandomWhatIfNotSoldResponse,
+  isAskingAboutTimeline,
+  getRandomTimelineResponse,
+  isAskingAboutClientType,
+  getRandomClientTypeResponse,
+  isAskingHowClientsVerified,
+  getRandomClientVerificationResponse,
+  isAskingAboutMarketing,
+  getRandomMarketingResponse,
+  isAskingAboutExclusivity,
+  getRandomExclusivityResponse,
+  isAskingAboutContractTerms,
+  getRandomContractTermsResponse,
+  isAskingAboutPaymentTiming,
+  getRandomPaymentTimingResponse,
+  isAskingAboutNextStep,
+  getRandomNextStepResponse,
+  isAskingAboutValuation,
+  getRandomValuationResponse,
+  isAskingAboutDocuments,
+  getRandomDocumentsResponse,
+  isAskingAboutDiscount,
+  getRandomDiscountResponse,
+  isAskingAboutOfficeVisit,
+  getRandomOfficeVisitResponse,
+  isAskingAboutWorkingHours,
+  getRandomWorkingHoursResponse,
+  isAskingWhoHandlesProperty,
+  getRandomWhoHandlesResponse
 } from '../objections.js';
 import { parseAvailableFromDate, formatAvailableFromDate } from '../property-extractor.js';
 import { extractTenantPreferences, TENANT_PREFER_RE, TENANT_EXCLUDE_RE } from '../property-intelligence.js';
@@ -315,6 +347,31 @@ export function runEarlyResponses({ u, isRent, session }) {
   }
 
   // ========================================
+  // OBJECTION EXPANSION (property-verb family) — MUST run BEFORE the
+  // property-gone close below: the bare "se prodade|се продаде" (and
+  // "izdade|издаде") alternatives of PROPERTY_GONE_RE match INSIDE
+  // hypothetical/future questions — "STO AKO NE SE PRODADE?" (what if it
+  // doesn't sell), "KOGA KE SE PRODADE MOJOT STAN?" (when will it sell),
+  // "DALI KE SE PRODADE BRZO?" (will it sell fast) — which used to close
+  // the lead as already-sold. These are live negotiation questions: answer
+  // them, never close. A factual "veke prodaden" (already sold, done) is
+  // untouched and still reaches the gone-close.
+  // ========================================
+  if (isAskingWhatIfNotSold(u)) {
+    return {
+      text: getRandomWhatIfNotSoldResponse(isRent),
+      type: "NORMAL"
+    };
+  }
+
+  if (isAskingAboutTimeline(u)) {
+    return {
+      text: getRandomTimelineResponse(isRent),
+      type: "NORMAL"
+    };
+  }
+
+  // ========================================
   // HARDCODED: Property already SOLD / no longer available
   // The owner says the property is GONE from the market — "go prodadov pred
   // dva dena" (I sold it two days ago), "veke prodaden" (already sold),
@@ -518,6 +575,23 @@ export function runEarlyResponses({ u, isRent, session }) {
   }
 
   // ========================================
+  // STANDARD-TERMS ACK (reported): the owner replies "standard" /
+  // "standardna procedura" right after Ana explains the commission /
+  // rent-rules terms — accepting the procedure. It used to fall through
+  // every gate into the LLM, which answered with a generic client pitch
+  // ("Драго ми е што дознав...") instead of confirming the standard
+  // procedure. Rotating canned replies confirm + reassure with the
+  // carefully-filtered clientele. MUST run before the client-type /
+  // how-it-works gates so the specific ack wins over the broad pitches.
+  // ========================================
+  if (isStandardTermsAck(u)) {
+    return {
+      text: getRandomStandardTermsResponse(isRent),
+      type: "NORMAL"
+    };
+  }
+
+  // ========================================
   // TENANT-PREFERENCES ANSWER GUARD (MUST run BEFORE the agency block):
   // the agency handler below matches the bare word "vraboteni" (employees),
   // so a tenant-profile answer — "samo za vraboteni", "preferiram
@@ -654,6 +728,108 @@ export function runEarlyResponses({ u, isRent, session }) {
     const answers = isRent ? rentAnswers : saleAnswers;
     return {
       text: answers[Math.floor(Math.random() * answers.length)],
+      type: "NORMAL"
+    };
+  }
+
+  // ========================================
+  // OBJECTION EXPANSION (general family) — real owner questions that used
+  // to fall through every hardcoded gate into the LLM (or the generic
+  // persuasion ladder): client types (the reported "KAKOV TIP NA KLIENTI
+  // NUDITE ?"), marketing channels, exclusivity, contract terms, payment
+  // timing, next step, valuation, documents, fee negotiation, office
+  // visit, working hours, client verification, case ownership. Each has a
+  // tight matcher + rotating sale/rent answers. Placed BEFORE
+  // isAskingHowItWorks and the commission gate so the more specific
+  // answers win (same priority rule as the commission gate).
+  // ========================================
+  if (isAskingAboutClientType(u)) {
+    return {
+      text: getRandomClientTypeResponse(isRent),
+      type: "NORMAL"
+    };
+  }
+
+  if (isAskingHowClientsVerified(u)) {
+    return {
+      text: getRandomClientVerificationResponse(isRent),
+      type: "NORMAL"
+    };
+  }
+
+  if (isAskingAboutMarketing(u)) {
+    return {
+      text: getRandomMarketingResponse(isRent),
+      type: "NORMAL"
+    };
+  }
+
+  if (isAskingAboutExclusivity(u)) {
+    return {
+      text: getRandomExclusivityResponse(isRent),
+      type: "NORMAL"
+    };
+  }
+
+  if (isAskingAboutContractTerms(u)) {
+    return {
+      text: getRandomContractTermsResponse(isRent),
+      type: "NORMAL"
+    };
+  }
+
+  if (isAskingAboutPaymentTiming(u)) {
+    return {
+      text: getRandomPaymentTimingResponse(isRent),
+      type: "NORMAL"
+    };
+  }
+
+  if (isAskingAboutNextStep(u)) {
+    return {
+      text: getRandomNextStepResponse(isRent),
+      type: "NORMAL"
+    };
+  }
+
+  if (isAskingAboutValuation(u)) {
+    return {
+      text: getRandomValuationResponse(isRent),
+      type: "NORMAL"
+    };
+  }
+
+  if (isAskingAboutDocuments(u)) {
+    return {
+      text: getRandomDocumentsResponse(isRent),
+      type: "NORMAL"
+    };
+  }
+
+  if (isAskingAboutDiscount(u)) {
+    return {
+      text: getRandomDiscountResponse(isRent),
+      type: "NORMAL"
+    };
+  }
+
+  if (isAskingAboutOfficeVisit(u)) {
+    return {
+      text: getRandomOfficeVisitResponse(isRent),
+      type: "NORMAL"
+    };
+  }
+
+  if (isAskingAboutWorkingHours(u)) {
+    return {
+      text: getRandomWorkingHoursResponse(isRent),
+      type: "NORMAL"
+    };
+  }
+
+  if (isAskingWhoHandlesProperty(u)) {
+    return {
+      text: getRandomWhoHandlesResponse(isRent),
       type: "NORMAL"
     };
   }
