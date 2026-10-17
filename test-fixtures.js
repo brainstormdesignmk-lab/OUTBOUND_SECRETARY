@@ -160,6 +160,49 @@ assertEqual(parseNumberWords("seeset"), 60, "B2/B3: 'seeset' → 60 (fixed!)");
 // B2: "seesetipet" = 65 (seeset=60 + i pet=5)
 assertEqual(parseNumberWords("seesetipet"), 65, "B2: 'seesetipet' → 65 (seeset=60 + i pet=5)");
 
+// TRUNCATED UNIT "cetri"/"четри" (reported, lead 3571074): the owner
+// answered the sqm question with "SEESET I CETRI M2" (шеесет и четири =
+// 64) and only the full "cetiri" matched, so 64 was read as just 60.
+// "cetri" is the Viber shorthand for "cetiri" (4, second "i" dropped) —
+// same truncation family as "ses"/"шес" (6).
+assertEqual(parseNumberWords("SEESET I CETRI M2"), 64, "CETRI1: 'SEESET I CETRI M2' → 64 (the reported sqm answer)");
+assertEqual(parseNumberWords("seeset i cetri kvadrati"), 64, "CETRI2: 'seeset i cetri kvadrati' → 64");
+assertEqual(parseNumberWords("шеесет и четри м2"), 64, "CETRI3: 'шеесет и четри м2' → 64 (Cyrillic truncated)");
+assertEqual(parseNumberWords("osumdeset i cetri"), 84, "CETRI4: 'osumdeset i cetri' → 84 (other tens + truncated unit)");
+assertEqual(parseNumberWords("cetri"), 4, "CETRI5: bare 'cetri' → 4 (exact map)");
+assertEqual(parseMacedonianNumber("cetri"), 4, "CETRI6: parseMacedonianNumber('cetri') → 4");
+assertEqual(parseMacedonianNumber("четри"), 4, "CETRI7: parseMacedonianNumber('четри') → 4");
+// Control: the full form and other units are untouched.
+assertEqual(parseNumberWords("seeset i cetiri"), 64, "CETRI8: 'seeset i cetiri' → 64 (full form unchanged)");
+assertEqual(parseNumberWords("seeset i pet"), 65, "CETRI9: 'seeset i pet' → 65 (other unit untouched)");
+
+// ============================================================
+// TEST GROUP: compressed 600 — "SESTO PEESE" (reported, lead 3571074)
+// ============================================================
+// The owner answered the monthlyRent question with "SESTO PEESE" (шесто
+// пеесе = colloquial 650 — the follow-up "650" confirmed it). The old parser
+// read it as сто+пеесе = 150: getStoPrefix saw "sesto" ending in "sto" and
+// blindly added 100, so Ana confirmed a WRONG rent ("Дали точната вредност
+// е 150?"). "sesto"/"шесто" is the Viber spelling of шестсто (600) — the
+// s-dropped compressed form (unlike "petsto" = pet+sto, which the root+sto
+// pattern already covered). Both spaced and merged forms must be 650, and the
+// bare 600 must never read as 100.
+assertEqual(parseNumberWords("SESTO PEESE"), 650, "SE600: 'SESTO PEESE' → 650 (the reported rent answer)");
+assertEqual(parseNumberWords("sesto peese"), 650, "SE600: lowercase 'sesto peese' → 650");
+assertEqual(parseNumberWords("шесто пеесе"), 650, "SE600: Cyrillic 'шесто пеесе' → 650");
+assertEqual(parseNumberWords("sestopeese"), 650, "SE600: merged 'sestopeese' → 650");
+assertEqual(parseNumberWords("sesto"), 600, "SE600: bare 'sesto' → 600 (шесто, NOT сто)");
+assertEqual(parseNumberWords("шесто"), 600, "SE600: bare 'шесто' → 600");
+assertEqual(parseNumberWords("seststo"), 600, "SE600: 'seststo' → 600 (full 600 unchanged)");
+assertEqual(parseMacedonianNumber("sesto"), 600, "SE600: parseMacedonianNumber('sesto') → 600");
+// Controls — the literal hundred + tens and the rest of the family stay intact
+assertEqual(parseNumberWords("sto peeset"), 150, "SE600: 'sto peeset' → 150 (literal 100+50 unaffected)");
+assertEqual(parseNumberWords("stopeeset"), 150, "SE600: 'stopeeset' → 150 (unchanged)");
+assertEqual(parseNumberWords("petsto peese"), 550, "SE600: 'petsto peese' → 550 (family control)");
+assertEqual(parseNumberWords("cetrsto peeset"), 450, "SE600: 'cetrsto peeset' → 450 (existing 400 family unaffected)");
+// The actual rent extraction path
+assertEqual(extractPrice("SESTO PEESE"), 650, "SE600: extractPrice('SESTO PEESE') → 650 (monthlyRent)");
+
 // ============================================================
 // TEST GROUP: extractPrice
 // ============================================================
@@ -261,6 +304,29 @@ assertEqual(parseYearBuilt("2000ta"), 2000, "'2000ta' → 2000");  // B11: Word-
   assertEqual(parseYearBuilt("osumdeset nekade"), 1985, "B18: bare 'osumdeset nekade' → 1985");
   assertEqual(parseYearBuilt("devedeset"), 1990, "B18: bare 'devedeset' (90s Latin) → 1990");
   assertEqual(parseYearBuilt("sedumdeset"), 1970, "B18: bare 'sedumdeset' (70s Latin) → 1970");
+  // B18b: ORDINAL-YEAR FAMILY (reported lead 5436709: "DEVEESTRETA" =
+  // девеес(ет) трета = "ninety-third" → 1993). Tens + FEMININE ORDINAL unit,
+  // merged (Viber truncates the tens) or spaced, optional connector. These are
+  // SPECIFIC years within the decade — the bare-decade blocks (девеесетта →
+  // 1990) must NOT swallow them, and the cardinal compound guard ("deveeset i
+  // tri" = QUANTITY → null) must NOT fire on ordinal units.
+  assertEqual(parseYearBuilt("DEVEESTRETA"), 1993, "B18b: 'DEVEESTRETA' (exact reported) → 1993");
+  assertEqual(parseYearBuilt("deveestreta"), 1993, "B18b: 'deveestreta' → 1993");
+  assertEqual(parseYearBuilt("девеестрета"), 1993, "B18b: 'девеестрета' (Cyrillic truncated) → 1993");
+  assertEqual(parseYearBuilt("девеесет трета"), 1993, "B18b: 'девеесет трета' (spaced) → 1993");
+  assertEqual(parseYearBuilt("deveeset treta"), 1993, "B18b: 'deveeset treta' → 1993");
+  assertEqual(parseYearBuilt("девеесеттрета"), 1993, "B18b: 'девеесеттрета' (merged full) → 1993");
+  assertEqual(parseYearBuilt("deveesettreta"), 1993, "B18b: 'deveesettreta' → 1993");
+  assertEqual(parseYearBuilt("devees treta"), 1993, "B18b: 'devees treta' → 1993");
+  assertEqual(parseYearBuilt("осумдесет петта"), 1985, "B18b: 'осумдесет петта' (80s family) → 1985");
+  assertEqual(parseYearBuilt("шеесет прва"), 1961, "B18b: 'шеесет прва' (60s family) → 1961");
+  assertEqual(parseYearBuilt("педесет втора"), 1952, "B18b: 'педесет втора' (50s family) → 1952");
+  // CONTROLS: bare decades keep their own mapping, cardinal compounds stay null
+  assertEqual(parseYearBuilt("девеесетта"), 1990, "B18b: bare 'девеесетта' still → 1990 (decade, not 93)");
+  assertEqual(parseYearBuilt("девеесети"), 1995, "B18b: bare 'девеесети' still → 1995 (decade -ти)");
+  assertEqual(parseYearBuilt("deveeset i tri"), null, "B18b: 'deveeset i tri' still → null (cardinal quantity)");
+  assertEqual(parseYearBuilt("осумдесет и пет квадрати"), null, "B18b: cardinal quantity stays null");
+  assertEqual(parseYearBuilt("osumdeset i ses"), null, "B18b: 'osumdeset i ses' still → null (86 quantity)");
 
   // B19: PURE-PHRASE / YEAR-CONTEXT GATE (reported) — a 2-digit number in a
   // MIXED message is a different field's answer. scanHistoryForField joins
@@ -570,6 +636,17 @@ assertEqual(countBedrooms("dve spalni i detska"), 2, "'dve spalni i detska' → 
 // carrying sqm/terrace/price/floor units is NOT a bedroom list.
 assertEqual(countBedrooms("seese i osum kvadrata so terasa golema"), null, "reported sqm phrase → null (no phantom 8)");
 assertEqual(countBedrooms("osum kvadrata i terasa"), null, "'osum kvadrata i terasa' → null (sqm unit)");
+// DIGIT-FALLBACK KVADRATA GUARD (reported, lead 3571074): "3 KVADRATA" — the
+// owner answered the terrace question with the m² size; only the PLURAL
+// "kvadrati|квадрати" was guarded in the digit fallback, so "3 KVADRATA"
+// slipped through extractFirstNumber and stored a phantom bedrooms=3. The
+// singular-genitive forms (kvadrata/квадрата) are a sqm unit, never a count.
+assertEqual(countBedrooms("3 KVADRATA"), null, "'3 KVADRATA' → null (terrace sqm, not bedrooms)");
+assertEqual(countBedrooms("3 КВАДРАТА"), null, "'3 КВАДРАТА' → null (Cyrillic terrace sqm)");
+assertEqual(countBedrooms("3 kv"), null, "'3 kv' → null (Latin kv sqm abbreviation)");
+assertEqual(countBedrooms("65 kvadrata"), null, "'65 kvadrata' → null (total sqm, not bedrooms)");
+// CONTROL: a genuine digit bedroom answer still counts (no sqm unit present)
+assertEqual(countBedrooms("3 spalni"), 3, "'3 spalni' → 3 (real answer untouched)");
 // CONTROL: a genuine multi-room list still counts (no sqm/terrace units present)
 assertEqual(countBedrooms("dve golemi i edna detska"), 3, "'dve golemi i edna detska' → 3 (guard untouched)");
 

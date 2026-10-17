@@ -921,6 +921,61 @@ function createSession({ nextField }) {
   assert('PT19c: name-like word without digits → stored as name', resp === null && session.collectedData.ownerName === 'Goranov', `got name=${JSON.stringify(session.collectedData.ownerName)}`);
 }
 
+// ========================================
+// 20. DOCUMENTATION-ISSUE GUARD at the NAME/ADDRESS prompts (reported lead
+//     5436709): "IMA HIPOTEKA" (the docs follow-up revealing a mortgage) is a
+//     DOCS ANSWER, never a name — the generic store used to crown
+//     "Ima Hipoteka" as the owner name. Same guard on the address branch.
+// ========================================
+{
+  const session = createSession({ nextField: 'ownerName' });
+  const resp = runComplexStatefulHandlers({
+    u: 'IMA HIPOTEKA',
+    userInput: 'IMA HIPOTEKA',
+    session,
+    nextField: 'ownerName',
+    hasScraperPhotos: false
+  });
+  assert('PT20: "IMA HIPOTEKA" at name prompt → name NOT stored', resp !== null && resp.type === 'QUESTION' && resp.nextField === 'ownerName' && session.collectedData.ownerName === undefined, `got name=${JSON.stringify(session.collectedData.ownerName)} resp=${JSON.stringify(resp)}`);
+}
+{
+  // Cyrillic variant at the ADDRESS prompt.
+  const session = createSession({ nextField: 'address' });
+  const resp = runComplexStatefulHandlers({
+    u: 'ИМА ХИПОТЕКА',
+    userInput: 'ИМА ХИПОТЕКА',
+    session,
+    nextField: 'address',
+    hasScraperPhotos: false
+  });
+  assert('PT20b: "ИМА ХИПОТЕКА" at address prompt → address NOT stored', resp !== null && resp.type === 'QUESTION' && resp.nextField === 'address' && session.collectedData.address === undefined, `got addr=${JSON.stringify(session.collectedData.address)} resp=${JSON.stringify(resp)}`);
+}
+{
+  // teret (lien) is a docs-issue too — never a name.
+  const session = createSession({ nextField: 'ownerName' });
+  const resp = runComplexStatefulHandlers({
+    u: 'ima teret',
+    userInput: 'ima teret',
+    session,
+    nextField: 'ownerName',
+    hasScraperPhotos: false
+  });
+  assert('PT20c: "ima teret" at name prompt → name NOT stored', resp !== null && resp.type === 'QUESTION' && resp.nextField === 'ownerName' && session.collectedData.ownerName === undefined, `got name=${JSON.stringify(session.collectedData.ownerName)}`);
+}
+{
+  // CONTROL: a plain name is still stored (the guard is narrow — docs-issue
+  // vocabulary only, never general words).
+  const session = createSession({ nextField: 'ownerName' });
+  const resp = runComplexStatefulHandlers({
+    u: 'Goran Petrov',
+    userInput: 'Goran Petrov',
+    session,
+    nextField: 'ownerName',
+    hasScraperPhotos: false
+  });
+  assert('PT20d: plain name still stored (guard is narrow)', resp === null && session.collectedData.ownerName === 'Goran Petrov', `got name=${JSON.stringify(session.collectedData.ownerName)}`);
+}
+
 console.log(`\n==================================================`);
 console.log(harness.failed > 0 ? `   ❌ Failed: ${harness.failed}` : `   ✅ All ${harness.passed} photo-talk-guard tests passed`);
 console.log(`   📋 Total: ${harness.passed + harness.failed}`);

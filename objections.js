@@ -290,6 +290,24 @@ function isAskingAboutRentRules(text) {
   // kirijata?", "kolku e depozitot?") carry no price and still match.
   if (/\d+\s*(?:evra|евра|eur|evro|евро|е\b|e\b)/i.test(text) && /kirij|кириј|plakj|плаќ|zema|зем/i.test(text)) return false;
   if (/\d{2,}/.test(text) && /kirij|кириј/i.test(text)) return false;
+  // TERMS-ACCEPTANCE GUARD (reported): the owner CONFIRMS the terms Ana
+  // just explained — "dobar e dogovorot", "dogovoreno", "dogovorot e vo
+  // red", "se dogovorivme" — a positive acceptance of the cooperation
+  // terms, NOT a question about rent rules. The bare "dogovor|договор|
+  // potpis|потпис" tokens below used to swallow these into the rent-rules
+  // re-explanation: the owner stays in PERSUASION and gets the terms AGAIN
+  // while the acceptance is never registered (same disease class as the
+  // standard-terms ack). A pure positive term-confirmation (term word +
+  // positive evaluation, no question, no negation) must fall through to the
+  // phase detector, where the hardcoded ACCEPTED gate registers the
+  // cooperation and enters DATA_COLLECTION. Questions ("kakov dogovor ke
+  // potpiseme?", "kolku e depozitot?") and negations ("dogovorot ne e
+  // dobar") still match below.
+  if (/dogovor|договор|potpis|потпис|uslov|услов|depozit|депозит/i.test(text) &&
+      /(?:dobar|добар|dobra|добра|dobro|добро|vo\s+red|во\s+ред|e\s+ok|е\s+ок|e\s+okej|е\s+океј|standard|стандард|dogovoreno|договорено|dogovorivme|договоривме|sogl|соглас|prifak|прифаќ|prihvatliv|прифатлив|redno|редно|sve\s+e\s+ok|сè\s+е\s+ок)/i.test(text) &&
+      !/[?؟]/.test(text) &&
+      !/(?:dali|дали|kolku|колку|kakov|каков|kakva|каква|kakvi|какви|kako|како|koga|кога|sto|што|kade|каде|moze\s+li|може\s+ли|ima\s+li|има\s+ли|dali\s+ima|дали\s+има)/i.test(text) &&
+      !/(?:^|\s)(?:ne|не|ama|ама|no|но|sepak|сепак|mislam|мислам|mozebi|можеби)(?:\s|$)/i.test(text)) return false;
   return /депозит|depozit|минимален период|minimalen period|минималниот период|minimalniot period|minimum stay|стандардно|standardno|uslovi za izdavanje|услови за издавање|uslovite za izdavanje|условите за издавање|kako rabotite|како работите|sorabotka za kirija|соработка за кирија|deposit|depozit|kirija|кирија|prv mesec|прв месец|dogovor|договор|potpis|потпис|kako funkcionira|како функционира|kako tece|како тече|standardno|стандардно|kako izdavate|како издавате|kako se izdava|како се издава/i.test(text);
 }
 
@@ -768,6 +786,623 @@ function isAskingAboutAgency(text) {
   return /agencija|агенциј|(?:^|[^a-zа-я])(?:firm|фирм)(?:a|i|а|и)?(?:ta|te|та|те)?(?:$|[^a-zа-я])|(?:^|[^a-zа-я])(?:kancelarij|канцелариј)(?:a|i|а|и)?(?:ta|te|та|те)?(?:$|[^a-zа-я])|biro|биро|vreme rabotite|време работите|imate iskustvo|имате искуство|kolku iskustvo|колку искуство|imame iskustvo|имаме искуство|golemo iskustvo|големо искуство|dolgotrajno iskustvo|долготрајно искуство|so iskustvo|со искуство|godini rabotite|години работите|kako se vika|како се вика|kako se vikate|како се викате|koja ste|која сте|koj ve vodi|кој ве води|vodi agencijata|води агенцијата|kade rabotite|каде работите|od kade rabotite|од каде работите|kade vi e|каде ви е|kade se naogja|каде се наоѓа|shto rabotite(?!\s+so\s+(provizija|провизија|procent|процент))|што работите(?!\s+со\s+(провизија|provizija|процент|procent))|shto e toa metropolis|што е тоа metropolis|sto e metropolis|што е метрополис|sto e metro polis|metropolis agencija|metropolis агенција|angažirate|ангажирате|kolku vraboteni|колку вработени|imate vraboteni|имате вработени|kolektiv|колектив|ime na agencijata|име на агенцијата/i.test(text);
 }
 
+// ========================================
+// OBJECTION EXPANSION — real owner questions that used to die at the LLM
+// gate (or worse: the property-gone close). Each family has a tight matcher
+// (both scripts, negative guards per this file's standards) + rotating
+// sale/rent response libraries. Wired into handlers/early-responses.js
+// (the property-verb family BEFORE the gone-close, the rest before the
+// how-it-works / commission gates).
+// ========================================
+
+// ========================================
+// CLIENT-TYPE RESPONSES — "KAKOV TIP NA KLIENTI NUDITE?" (what TYPE of
+// clients do you offer?) — the reported production question (lead 3571074
+// log): the 8b LLM ignored it with a canned pitch and the owner pressed.
+// The question is about client PROFILES/types, so the answer lists the
+// profiles — distinct from client QUALITY (проверени/озбилни), which is
+// handled by CLIENT_QUALITY_* above. All variants rotate randomly.
+// ========================================
+const CLIENT_TYPE_RESPONSES_SALE = [
+  'Нашите клиенти се проверени купувачи со различен профил — млади семејства, инвеститори и луѓе што бараат стан за живеење. Сите поминуваат проверка пред да закажеме посета. Дали ви звучи добро?',
+  'Нудиме сериозни и проверени купувачи — од млади парови до инвеститори. Секој заинтересиран се проверува пред да закажеме посета. Дали да продолжиме со соработката?',
+  'Нашите клиенти се озбилни купувачи со различни профили — семејства, инвеститори и луѓе што бараат дом. Сите се проверени пред посетата. Како ви звучи ова?'
+];
+
+const CLIENT_TYPE_RESPONSES_RENT = [
+  'Нашите клиенти се проверени закупци со различен профил — млади професионалци, семејства и студенти. Сите поминуваат проверка пред да закажеме посета. Дали ви звучи добро?',
+  'Нудиме сериозни и проверени закупци — од млади парови до семејства. Секој заинтересиран се проверува пред да закажеме посета. Дали да продолжиме со соработката?',
+  'Нашите клиенти се озбилни закупци со различни профили — професионалци, семејства и студенти. Сите се проверени пред посетата. Како ви звучи ова?'
+];
+
+function getRandomClientTypeResponse(isRent) {
+  const responses = isRent ? CLIENT_TYPE_RESPONSES_RENT : CLIENT_TYPE_RESPONSES_SALE;
+  return responses[Math.floor(Math.random() * responses.length)];
+}
+
+// ========================================
+// HELPER: Check if asking about the client TYPE/PROFILE — "KAKOV TIP NA
+// KLIENTI NUDITE ?", "каков профил на клиенти имате?", "kakov klient
+// nudite?" (what kind of client do you offer). Requires an explicit
+// type/profile word OR a "клиенти + нудите/имате" construction, so a bare
+// "клиенти" mention is never hijacked (isAskingAboutClients and the
+// client-quality gate own those). NOT a quality question — "kakvi se
+// klientite?" (what are the clients like) stays with client quality.
+// ========================================
+function isAskingAboutClientType(text) {
+  const u = String(text || '').toLowerCase();
+  return /(?:kakov|каков)\s+(?:tip|тип|profil|профил)\s+(?:na|на)?\s*(?:klient|клиент|kupuvac|купувач|zakupc|закупц)|(?:kakov|каков)\s+(?:klient|клиент|kupuvac|купувач|zakupc|закупц)[a-zа-я]*\s+(?:nudite|нудите|imate|имате)/i.test(u);
+}
+
+// ========================================
+// TIMELINE RESPONSES — "kolku vreme ke trae prodazbata?" (how long will
+// the sale take), "kolku brzo ke se prodade?", "koga ke se prodade mojot
+// stan?", "dali ke se prodade brzo?" (rent: izdavanje / izdade / najdeme
+// zakupac). Honest framing: no guaranteed date, typical ranges, dependent
+// on price/location. All variants rotate randomly.
+// ========================================
+const TIMELINE_RESPONSES_SALE = [
+  'Брзината зависи од имотот и цената, но со нашата база на клиенти повеќето станови се продаваат во рок од неколку недели до два месеци. Дали да почнеме со соработката?',
+  'Не можеме да гарантираме точен датум, но нашите клиенти во просек купуваат имот за 1-2 месеци. Сè зависи од локацијата и цената. Дали сте расположени да соработуваме?',
+  'Со нашата голема база на заинтересирани купувачи, просечното време на продажба е неколку недели. Дали да продолжиме со соработката?'
+];
+
+const TIMELINE_RESPONSES_RENT = [
+  'За издавање обично наоѓаме закупец во рок од неколку недели, во зависност од киријата и локацијата. Дали да почнеме со соработката?',
+  'Не можеме да гарантираме точен датум, но закупец најчесто наоѓаме за 2-3 недели. Сè зависи од киријата и локацијата. Дали сте расположени да соработуваме?',
+  'Со нашата база на заинтересирани закупци, просечното време на издавање е неколку недели. Дали да продолжиме со соработката?'
+];
+
+function getRandomTimelineResponse(isRent) {
+  const responses = isRent ? TIMELINE_RESPONSES_RENT : TIMELINE_RESPONSES_SALE;
+  return responses[Math.floor(Math.random() * responses.length)];
+}
+
+// ========================================
+// HELPER: Check if asking about the sale/rental TIMELINE. MUST run BEFORE
+// the property-gone close: "koga ke se prodade" / "dali ke se prodade" /
+// "koga ke se izdade" contain the bare "se prodade|се продаде" / "izdade"
+// alternatives of PROPERTY_GONE_RE, which would otherwise CLOSE the lead as
+// already-sold (reported-adjacent disease class: the gone-close fires on a
+// substring). Only future/hypothetical shapes match — a factual "veke
+// prodaden" (already sold) is untouched. Negative guards: "kolku vreme
+// rabotite" (agency tenure) is owned by the agency gate which runs earlier;
+// "kolku godini" (age) is owned by the age gate.
+// ========================================
+function isAskingAboutTimeline(text) {
+  const u = String(text || '').toLowerCase();
+  return /(?:kolku|колку)\s+(?:vreme|време|dolgo|долго)\s+(?:ke|ќе)?\s*(?:trae|трае|e\s+potrebno|е\s+потребно|treba|треба)|(?:kolku\s+brzo|колку\s+брзо)\s+(?:ke|ќе)\s+(?:se|се)?\s*(?:prodade|продаде|izdade|издаде|iznajmi|изнајми)|(?:koga|кога)\s+(?:ke|ќе)\s+(?:se|се)\s+(?:prodade|продаде|izdade|издаде|iznajmi|изнајми)|(?:koga|кога)\s+(?:ke|ќе)\s+(?:go|го)\s+(?:prodadam|продадам|izdadam|издадам)|(?:dali|дали)\s+(?:ke|ќе)\s+(?:se|се)\s+(?:prodade|продаде|izdade|издаде|iznajmi|изнајми)\s*(?:brzo|брзо)?|(?:kolku\s+vreme\s+ke\s+trae\s+prodazbata|колку\s+време\s+ќе\s+трае\s+продажбата|koga\s+ke\s+se\s+prodade\s+mojot\s+imot|кога\s+ќе\s+се\s+продаде\s+мојот\s+имот)/i.test(u);
+}
+
+// ========================================
+// WHAT-IF-NOT-SOLD RESPONSES — "STO AKO NE SE PRODADE ?" (what if it
+// doesn't sell?), "ako ne najdete klient?", "dali ke ostane neprodamen?".
+// The failure case: NO obligations unless the deal closes (sale) / no fee
+// unless the contract is signed (rent — the 50%/100% rule is paid on
+// signing day). All variants rotate randomly.
+// ========================================
+const WHAT_IF_NOT_SOLD_RESPONSES_SALE = [
+  'Ако имотот не се продаде, вие немате никакви обврски кон нас — провизијата се плаќа само при успешна продажба. Дали ви звучи фер?',
+  'Нема ризик за вас: ако не најдеме купувач, вие не плаќате ништо. Ние заработуваме само кога ќе се склучи продажбата. Дали да почнеме?',
+  'Ако имотот остане непродаден, нема давачки за вас — ние заработуваме само на успешна продажба. Дали ви звучи ова?'
+];
+
+const WHAT_IF_NOT_SOLD_RESPONSES_RENT = [
+  'Ако не најдеме закупец, вие немате обврска кон нас — провизијата се плаќа само на денот на потпишување на договорот. Дали ви звучи фер?',
+  'Нема ризик за вас: ако не најдеме закупец, вие не плаќате ништо. Ние заработуваме само кога ќе се потпише договорот. Дали да почнеме?',
+  'Ако станот остане неиздаден, нема давачки за вас — провизијата се плаќа само на денот на потпишување. Дали ви звучи ова?'
+];
+
+function getRandomWhatIfNotSoldResponse(isRent) {
+  const responses = isRent ? WHAT_IF_NOT_SOLD_RESPONSES_RENT : WHAT_IF_NOT_SOLD_RESPONSES_SALE;
+  return responses[Math.floor(Math.random() * responses.length)];
+}
+
+// ========================================
+// HELPER: Check if asking the FAILURE case — "sto ako ne se prodade?",
+// "ako ne najdete klient?", "dali ke ostane neprodamen?". MUST run BEFORE
+// the property-gone close (the bare "se prodade" alternative of
+// PROPERTY_GONE_RE matches INSIDE "STO AKO NE SE PRODADE?" and would close
+// the lead as already-sold — a live negotiation question must be answered,
+// never closed). Only HYPOTHETICAL shapes match (ako/sto ako/dali ke
+// ostane); a factual "veke prodaden" is untouched. Negative guard: "ne se
+// prodava" / "ne e prodaden" (still available) never match.
+// ========================================
+function isAskingWhatIfNotSold(text) {
+  const u = String(text || '').toLowerCase();
+  return /(?:ako|ако)\s+(?:ne|не)\s+(?:se|се)\s+(?:prodade|продаде|izdade|издаде|iznajmi|изнајми)|(?:sto\s+ako|што\s+ако)\s+(?:ne|не)\s+(?:se|се)?\s*(?:prodade|продаде|izdade|издаде|iznajmi|изнајми)|(?:ako|ако)\s+(?:ne|не)\s+(?:najdete|најдете|najdeme|најдеме)\s+(?:klient|клиент|kupuvac|купувач|zakupc|закупц)|(?:sto\s+ako|што\s+ако)\s+(?:ne|не)\s+(?:najdete|најдете|najdeme|најдеме)|(?:dali\s+ke\s+ostane\s+neprodaden|дали\s+ќе\s+остане\s+непродаден|dali\s+ke\s+ostane\s+neizdaden|дали\s+ќе\s+остане\s+неиздаден)/i.test(u);
+}
+
+// ========================================
+// MARKETING RESPONSES — "kade ke go objavite?" (where will you advertise
+// it), "koi portali koristite?", "kako ke go promovirate?", "imate li
+// sajt?" — how the property gets promoted. Sale/rent wording only differs
+// in the property noun; the channel list is the same. All variants rotate.
+// ========================================
+const MARKETING_RESPONSES_SALE = [
+  'Вашиот имот го објавуваме на нашите канали и на водечките портали за недвижности, со професионални фотографии и опис. Дали ви звучи добро?',
+  'Имотот се објавува на сите главни портали за недвижности во Македонија и на нашите социјални мрежи, со квалитетни фотографии. Дали да почнеме со соработката?',
+  'Промоцијата опфаќа објава на порталите, нашите социјални мрежи и директно претставување на заинтересирани клиенти. Дали ви звучи ова?'
+];
+
+const MARKETING_RESPONSES_RENT = [
+  'Вашиот стан го објавуваме на нашите канали и на водечките портали за недвижности, со професионални фотографии и опис. Дали ви звучи добро?',
+  'Станот се објавува на сите главни портали за недвижности во Македонија и на нашите социјални мрежи, со квалитетни фотографии. Дали да почнеме со соработката?',
+  'Промоцијата опфаќа објава на порталите, нашите социјални мрежи и директно претставување на заинтересирани закупци. Дали ви звучи ова?'
+];
+
+function getRandomMarketingResponse(isRent) {
+  const responses = isRent ? MARKETING_RESPONSES_RENT : MARKETING_RESPONSES_SALE;
+  return responses[Math.floor(Math.random() * responses.length)];
+}
+
+// ========================================
+// HELPER: Check if asking about ADVERTISING/promotion — "kade ke go
+// objavite?", "kade ke go oglasite?", "koi portali?", "kako ke go
+// promovirate?", "imate li sajt?", "kade ke bide objaven?" (both scripts).
+// Distinct from isAskingWhereToSendPhotos (that is the owner sending ANA
+// photos — "kade da vi pratam") and from isAskingHowItWorks (generic
+// workflow — this is specifically the channel/marketing question).
+// ========================================
+function isAskingAboutMarketing(text) {
+  const u = String(text || '').toLowerCase();
+  return /(?:kade|каде)\s+(?:ke|ќе)\s+(?:go|го)?\s*(?:objavite|објавите|oglasite|огласите|reklamirate|рекламирате|promovirate|промовирате)|(?:kako|како)\s+(?:ke|ќе)\s+(?:go|го)?\s*(?:promovirate|промовирате|reklamirate|рекламирате|objavite|објавите)|(?:koi\s+portali|кои\s+портали|na\s+koi\s+portali|на\s+кои\s+портали)|(?:imate\s+li\s+sajt|имате\s+ли\s+сајт|imate\s+sajt|имате\s+сајт)|(?:kade\s+ke\s+bide\s+objaven|каде\s+ќе\s+биде\s+објавен)/i.test(u);
+}
+
+// ========================================
+// EXCLUSIVITY RESPONSES — "dali moze i sam da go prodavam?" (can I also
+// sell it myself?), "dali e ekskluzivno?", "samo kaj vas?", "dali imam
+// pravo sam da go prodavam?" — the owner keeps their right to sell/rent the
+// property themselves; cooperation is NOT exclusive. All variants rotate.
+// ========================================
+const EXCLUSIVITY_RESPONSES_SALE = [
+  'Соработката не е ексклузивна — вие имате право сами да го продавате имотот во секое време. Ние додаваме вредност со нашите клиенти и промоција. Дали ви звучи фер?',
+  'Вие можете да го продавате имотот и сами, нема никаква ексклузивна обврска. Нашата предност е базата на клиенти и промоцијата. Дали да почнеме?',
+  'Нема ексклузивитет — соработуваме заедно, а вие останувате слободни сами да го продавате имотот. Дали сте расположени да соработуваме?'
+];
+
+const EXCLUSIVITY_RESPONSES_RENT = [
+  'Соработката не е ексклузивна — вие имате право сами да го издавате станот во секое време. Ние додаваме вредност со нашите клиенти и промоција. Дали ви звучи фер?',
+  'Вие можете да го издавате станот и сами, нема никаква ексклузивна обврска. Нашата предност е базата на клиенти и промоцијата. Дали да почнеме?',
+  'Нема ексклузивитет — соработуваме заедно, а вие останувате слободни сами да го издавате станот. Дали сте расположени да соработуваме?'
+];
+
+function getRandomExclusivityResponse(isRent) {
+  const responses = isRent ? EXCLUSIVITY_RESPONSES_RENT : EXCLUSIVITY_RESPONSES_SALE;
+  return responses[Math.floor(Math.random() * responses.length)];
+}
+
+// ========================================
+// HELPER: Check if asking about EXCLUSIVITY / the owner's own selling
+// rights — "dali moze i sam da go prodavam?", "ekskluzivno?", "samo kaj
+// vas?", "dali imam pravo sam da go prodavam?", "smeam li i na drugo
+// mesto?" (both scripts). Requires an explicit exclusivity word or a
+// self-selling right construction — a bare "sam da prodavam" (I'll sell it
+// myself as a refusal — "ke go prodadam sam") is owned by the refusal
+// guard / rejection ladder and never matched here (no "moze/i sam" right-
+// asking shape).
+// ========================================
+function isAskingAboutExclusivity(text) {
+  const u = String(text || '').toLowerCase();
+  // "можам/mozam" (first person) and "може/moze" both covered — the owner
+  // says "дали МОЖАМ и сам да го издавам?" (can I myself also rent it)
+  // as often as the impersonal "дали може и сам да го продавам?".
+  return /(?:ekskluziv|ексклузив)|(?:samo\s+kaj\s+vas|само\s+кај\s+вас)|(?:dali|дали)\s+(?:moze|mozam|може|можам)\s+(?:i|и)?\s*(?:sam|сам)\s+(?:da|да)\s+(?:go|го)?\s*(?:prodavam|продавам|izdadam|издадам|izdavam|издавам)|(?:dali\s+imam\s+pravo\s+(?:i\s+)?sam\s+da\s+go\s+(?:prodavam|продавам|izdadam|издадам|izdavam|издавам)|дали\s+имам\s+право\s+(?:и\s+)?сам\s+да\s+го\s+(?:продавам|издадам|издавам))|(?:dali\s+smeam\s+(?:i\s+)?sam\s+da\s+go\s+(?:prodavam|продавам)|дали\s+смеам\s+(?:и\s+)?сам\s+да\s+го\s+(?:продавам|издадам|издавам))|(?:moze\s+li\s+(?:i\s+)?na\s+drugo\s+mesto|може\s+ли\s+(?:и\s+)?на\s+друго\s+место)|(?:dali\s+ke\s+moze\s+da\s+go\s+prodavam\s+(?:i\s+)?sam|дали\s+ќе\s+може\s+да\s+го\s+продавам\s+(?:и\s+)?сам)/i.test(u);
+}
+
+// ========================================
+// CONTRACT-TERMS RESPONSES — "kakov dogovor ke potpiseme?" (what contract
+// will we sign), "kolku e dolg dogovorot?", "dali moze da se raskine
+// dogovorot?", "dali ima dogovor?" — the agency agreement. Sale: the
+// contract defines the clean-price / difference model. Rent: the contract
+// states the 50%/100% rule. All variants rotate randomly.
+// ========================================
+const CONTRACT_TERMS_RESPONSES_SALE = [
+  'Работиме со стандарден договор за агенциска соработка, во кој се дефинирани обврските и провизијата. Договорот е јасен и транспарентен. Дали имате некое прашање?',
+  'Потпишуваме стандарден агенциски договор во кој јасно стои дека вие ја добивате вашата чиста цена, а провизијата е разликата над неа. Дали ви е појасно?',
+  'Договорот е стандарден за агенциска соработка — ги дефинира правата и обврските на двете страни. Може да го прочитате пред потпишување. Дали ви звучи добро?'
+];
+
+const CONTRACT_TERMS_RESPONSES_RENT = [
+  'Работиме со стандарден договор за агенциска соработка, во кој се дефинирани обврските и провизијата — 50% од една месечна кирија (100% ако е над 1000 евра), платена на денот на потпишување. Дали имате некое прашање?',
+  'Потпишуваме стандарден агенциски договор во кој јасно стои провизијата за издавање — 50% од една месечна кирија (100% ако е над 1000 евра), платена на денот на потпишување. Дали ви е појасно?',
+  'Договорот е стандарден за агенциска соработка — ги дефинира правата и обврските на двете страни. Може да го прочитате пред потпишување. Дали ви звучи добро?'
+];
+
+function getRandomContractTermsResponse(isRent) {
+  const responses = isRent ? CONTRACT_TERMS_RESPONSES_RENT : CONTRACT_TERMS_RESPONSES_SALE;
+  return responses[Math.floor(Math.random() * responses.length)];
+}
+
+// ========================================
+// HELPER: Check if asking about the CONTRACT — "kakov dogovor?", "kolku e
+// dolg dogovorot?", "dali ima dogovor?", "dali moze da se raskine
+// dogovorot?", "kakov dokument potpisuvame?" (both scripts). Not the
+// cooperation-explainer ("kakva sorabotka" — owned by its own gate): this
+// is specifically the legal agreement the owner would sign.
+// ========================================
+function isAskingAboutContractTerms(text) {
+  const u = String(text || '').toLowerCase();
+  return /(?:kakov|каков)\s+(?:dogovor|договор)|(?:kolku\s+(?:e\s+)?dolg\s+dogovor|колку\s+(?:е\s+)?долг\s+договор)|(?:dali\s+(?:ima|има|potpisuvame|потпишуваме)\s+(?:dogovor|договор))|(?:kakov\s+dokument\s+potpisuvame|каков\s+документ\s+потпишуваме)|(?:dali\s+moze\s+da\s+se\s+raskine\s+dogovorot|дали\s+може\s+да\s+се\s+раскине\s+договорот|raskinuvanje\s+na\s+dogovor|раскинување\s+на\s+договор|moze\s+li\s+da\s+se\s+raskine|може\s+ли\s+да\s+се\s+раскине)/i.test(u);
+}
+
+// ========================================
+// PAYMENT-TIMING RESPONSES — "kako ke mi isplatite?" (how will you pay
+// me), "koga ke gi dobijam parite?", "koga ke mi ja isplatite cenata?" —
+// when the OWNER gets paid. Sale: buyer pays the full clean price at
+// notary signing. Rent: tenant pays first rent + deposit on signing day.
+// Distinct from owner-must-pay ("ke vi platam li nesto?" — what the owner
+// owes US) — this is the mirror: what the owner RECEIVES. All rotate.
+// ========================================
+const PAYMENT_TIMING_RESPONSES_SALE = [
+  'Цената ви ја исплаќа купувачот при потпишување на договорот пред нотар — вие ја добивате вашата чиста цена во целост. Дали ви е јасно?',
+  'Плаќањето се врши на денот на потпишување — купувачот ја плаќа цената, а вие ја добивате вашата чиста сума. Дали ви е појасно?',
+  'Парите ги добивате на денот на потпишување на договорот, директно од купувачот — вашата чиста цена во целост. Дали ви звучи добро?'
+];
+
+const PAYMENT_TIMING_RESPONSES_RENT = [
+  'За издавање, закупецот ја плаќа првата кирија и депозитот на денот на потпишување — вие ги добивате вашите пари веднаш. Дали ви е јасно?',
+  'Киријата и депозитот се плаќаат на денот на потпишување на договорот — вие ги добивате парите веднаш од закупецот. Дали ви е појасно?',
+  'Закупецот плаќа прва кирија и депозит на денот на потпишување, а киријата потоа ја примате месечно. Дали ви звучи добро?'
+];
+
+function getRandomPaymentTimingResponse(isRent) {
+  const responses = isRent ? PAYMENT_TIMING_RESPONSES_RENT : PAYMENT_TIMING_RESPONSES_SALE;
+  return responses[Math.floor(Math.random() * responses.length)];
+}
+
+// ========================================
+// HELPER: Check if asking how/when the OWNER gets paid — "kako ke mi
+// isplatite?", "koga ke mi gi isplatite parite?", "koga ke gi dobijam
+// parite?", "koga ke mi ja isplatite cenata?" (both scripts). The verb is
+// directed at US paying THEM (ke mi ... isplatite/dobijam/parite) — the
+// opposite direction of isAskingIfOwnerMustPay (ke vi platam li nesto —
+// they pay us), so the two never collide.
+// ========================================
+function isAskingAboutPaymentTiming(text) {
+  const u = String(text || '').toLowerCase();
+  return /(?:kako|како)\s+(?:ke|ќе)\s+(?:mi|ми)\s+(?:gi|ги)?\s*(?:isplatite|исплатите|platite|платите|davate|давате)|(?:koga|кога)\s+(?:ke|ќе)\s+(?:mi|ми)\s+(?:gi|ги)?\s*(?:isplatite|исплатите|dobijam|добијам|pristignat|пристигнат)|(?:kako\s+ke\s+gi\s+dobijam\s+parite|како\s+ќе\s+ги\s+добијам\s+парите|koga\s+ke\s+gi\s+dobijam\s+parite|кога\s+ќе\s+ги\s+добијам\s+парите|koga\s+ke\s+mi\s+ja\s+isplatite\s+cenata|кога\s+ќе\s+ми\s+ја\s+исплатите\s+цената|kako\s+ke\s+mi\s+ja\s+isplatite\s+cenata|како\s+ќе\s+ми\s+ја\s+исплатите\s+цената)/i.test(u);
+}
+
+// ========================================
+// NEXT-STEP RESPONSES — "sto e sledniot cekor?" (what's the next step),
+// "koga ke pocneme?", "kako ke odi ponatamu?", "sto ponatamu?" — the
+// process roadmap after the owner agrees to explore cooperation. All
+// variants rotate randomly.
+// ========================================
+const NEXT_STEP_RESPONSES_SALE = [
+  'Следниот чекор е да ги собереме основните податоци за имотот — цена, квадратура и локација — па го објавуваме и почнуваме со посети. Дали да почнеме сега?',
+  'Прво ги потврдуваме деталите за имотот, потоа го објавуваме на порталите и организираме посети со заинтересирани купувачи. Дали да почнеме?',
+  'Следно треба да ги дополниме податоците за имотот и да закажеме фотографирање. Потоа објава и посети. Дали да почнеме со соработката?'
+];
+
+const NEXT_STEP_RESPONSES_RENT = [
+  'Следниот чекор е да ги собереме основните податоци за станот — кирија, квадратура и локација — па го објавуваме и почнуваме со посети. Дали да почнеме сега?',
+  'Прво ги потврдуваме деталите за станот, потоа го објавуваме на порталите и организираме посети со заинтересирани закупци. Дали да почнеме?',
+  'Следно треба да ги дополниме податоците за станот и да закажеме фотографирање. Потоа објава и посети. Дали да почнеме со соработката?'
+];
+
+function getRandomNextStepResponse(isRent) {
+  const responses = isRent ? NEXT_STEP_RESPONSES_RENT : NEXT_STEP_RESPONSES_SALE;
+  return responses[Math.floor(Math.random() * responses.length)];
+}
+
+// ========================================
+// HELPER: Check if asking about the NEXT STEP / how the process continues
+// — "sto e sledniot cekor?", "sto ponatamu?", "kako ke odi ponatamu?",
+// "koga ke pocneme?" (both scripts). Distinct from isAskingHowItWorks
+// (generic workflow — "kako ke mi pomognete"): this is the owner asking
+// what happens NEXT, right now. The verb is pocneme/pocnuvame/sleduva/
+// ponatamu, never the help-verbs of the workflow gate.
+// ========================================
+function isAskingAboutNextStep(text) {
+  const u = String(text || '').toLowerCase();
+  return /(?:sto\s+e\s+sledniot\s+cekor|што\s+е\s+следниот\s+чекор|koj\s+e\s+sledniot\s+cekor|кој\s+е\s+следниот\s+чекор|sto\s+ponatamu|што\s+понатаму|sto\s+sleduva|што\s+следува|kako\s+ke\s+odi\s+ponatamu|како\s+ќе\s+оди\s+понатаму|kako\s+ponatamu|како\s+понатаму|koga\s+ke\s+pocneme|кога\s+ќе\s+почнеме|koga\s+pocnuvame|кога\s+почнуваме|od\s+kade\s+pocnuvame|од\s+каде\s+почнуваме)/i.test(u);
+}
+
+// ========================================
+// VALUATION RESPONSES — "kolku vredi mojot stan?" (how much is my
+// apartment worth), "kolku mozam da dobijam?", "dali moze procenka?" —
+// the owner asks for a property valuation. Honest framing: needs the
+// property data first, then a market-based estimate. All variants rotate.
+// ========================================
+const VALUATION_RESPONSES_SALE = [
+  'За точна проценка ни требаат податоци за имотот — квадратура, локација, кат и состојба. Ако ни ги дадете, ќе ви кажеме реална проценка на цената. Дали да почнеме?',
+  'Проценката зависи од локацијата, квадратурата и состојбата на имотот. Споделете ги основните податоци, па ќе ви дадеме реална цена. Дали да продолжиме?',
+  'Без да го видиме имотот не можеме да гарантираме цена, но со основните податоци ќе ви дадеме реална проценка според пазарот. Дали да почнеме со соработката?'
+];
+
+const VALUATION_RESPONSES_RENT = [
+  'За точна проценка на киријата ни требаат податоци за станот — квадратура, локација, кат и состојба. Ако ни ги дадете, ќе ви кажеме реална кирија. Дали да почнеме?',
+  'Проценката на киријата зависи од локацијата, квадратурата и состојбата на станот. Споделете ги основните податоци, па ќе ви дадеме реална цена. Дали да продолжиме?',
+  'Без да го видиме станот не можеме да гарантираме кирија, но со основните податоци ќе ви дадеме реална проценка според пазарот. Дали да почнеме со соработката?'
+];
+
+function getRandomValuationResponse(isRent) {
+  const responses = isRent ? VALUATION_RESPONSES_RENT : VALUATION_RESPONSES_SALE;
+  return responses[Math.floor(Math.random() * responses.length)];
+}
+
+// ========================================
+// HELPER: Check if asking for a PROPERTY VALUATION — "kolku vredi mojot
+// stan?", "kolkava e cenata na mojot imot?", "kolku moze da se dobie?",
+// "dali moze procenka?", "kolku bi se prodal?" (both scripts). Requires a
+// value/price verb or the procenka noun — never bare "kolku" (that family
+// is owned by percentage/age/rent-rules gates, all of which run before
+// this one in the router).
+// ========================================
+function isAskingAboutValuation(text) {
+  const u = String(text || '').toLowerCase();
+  // "можам/mozam" and "може/moze" both covered: "kolku mozam da dobijam
+  // za imotot?" (how much can I get) and "kolku moze da se dobie?".
+  return /(?:kolku|колку)\s+(?:vredi|вреди|vredn|вредн|bi\s+se\s+prodal|би\s+се\s+продал)|(?:kolkava|колкава)\s+(?:e\s+)?(?:cenata|цената)\s+(?:na|на)?\s*(?:mojot|мојот|mojata|мојата)?\s*(?:imot|имот|stan|стан)|(?:kolku|колку)\s+(?:moze|mozam|може|можам)\s+da\s+(?:se\s+dobie|dobijam|се\s+добие|добијам)|(?:dali\s+moze\s+procenka|дали\s+може\s+проценка|napravete\s+procenka|направете\s+проценка|imate\s+procenka|имате\s+проценка)/i.test(u);
+}
+
+// ========================================
+// DOCUMENTS RESPONSES — "koi dokumenti mi trebaat?" (what documents do I
+// need), "kakvi hartii treba?" — the paperwork the owner must provide.
+// Same answer for sale and rent (title deed + ID; the rest is handled by
+// the agency). All variants rotate randomly.
+// ========================================
+const DOCUMENTS_RESPONSES_SALE = [
+  'Потребни се имотен лист и лична карта, а доколку има — договор за градба или други документи за имотот. Сè останато го водиме ние. Дали имате уште прашања?',
+  'Главните документи се имотниот лист и личната карта. Ако имате дополнителни документи за имотот, добредојдени се, но не се задолжителни. Дали ви е јасно?',
+  'За почеток ни се доволни имотен лист и лична карта. Останатата документација ја прибираме заедно при потпишување. Дали да почнеме?'
+];
+
+const DOCUMENTS_RESPONSES_RENT = [
+  'Потребни се имотен лист и лична карта, а доколку има — договор за издавање од претходно или други документи за станот. Сè останато го водиме ние. Дали имате уште прашања?',
+  'Главните документи се имотниот лист и личната карта. Ако имате дополнителни документи за станот, добредојдени се, но не се задолжителни. Дали ви е јасно?',
+  'За почеток ни се доволни имотен лист и лична карта. Останатата документација ја прибираме заедно при потпишување. Дали да почнеме?'
+];
+
+function getRandomDocumentsResponse(isRent) {
+  const responses = isRent ? DOCUMENTS_RESPONSES_RENT : DOCUMENTS_RESPONSES_SALE;
+  return responses[Math.floor(Math.random() * responses.length)];
+}
+
+// ========================================
+// HELPER: Check if asking about the required DOCUMENTS — "koi dokumenti mi
+// trebaat?", "kakvi dokumenti?", "koi hartii?", "dali mi trebaat
+// dokumenti?" (both scripts). Never matches the refusal "ne mi treba"
+// (different direction — that asks whether the OWNER needs documents, and
+// the word is "dali mi trebaat", not "ne mi treba").
+// ========================================
+function isAskingAboutDocuments(text) {
+  const u = String(text || '').toLowerCase();
+  return /(?:koi|кои|kakvi|какви|sto|што)\s+(?:dokumenti|документи|hartii|хартии)|(?:dali\s+mi\s+trebaat\s+(?:dokumenti|документи)|дали\s+ми\s+требаат\s+(?:документи|dokumenti))/i.test(u);
+}
+
+// ========================================
+// DISCOUNT RESPONSES — "moze li pomala provizija?" (can the commission be
+// lower), "dali ima popust?", "dali moze da se dogovori provizijata?" —
+// the owner negotiates the fee down. SALE: the agency earns the DIFFERENCE
+// over the owner's clean price — the owner's share is never touched, so
+// there is nothing to discount off their pocket. RENT: the 50%/100% rule
+// is standard — never promise a discount, restate the rule. All rotate.
+// ========================================
+const DISCOUNT_RESPONSES_SALE = [
+  'Разбирам дека сакате пониска провизија, но нашата провизија е разликата над вашата барана цена — вие ја добивате вашата цена во целост. Дали ви звучи фер?',
+  'Нашата заработувачка е разликата меѓу вашата барана цена и постигнатата продажна цена — не земаме ништо од вашиот дел. Дали тоа ви одговара?',
+  'Провизијата не ви се наплаќа од вашиот дел — вие ја добивате вашата барана цена, а ние заработуваме над неа. Дали ви е појасно?'
+];
+
+const DISCOUNT_RESPONSES_RENT = [
+  'Разбирам. За издавање провизијата е стандардна — 50% од една месечна кирија (100% ако е над 1000 евра), платена само на денот на потпишување. Дали ви звучи фер?',
+  'Провизијата за издавање е стандардна: 50% од една месечна кирија (100% ако е над 1000 евра), на денот на потпишување на договорот. Дали ви е појасно?',
+  'За издавање провизијата е фиксна — 50% од една месечна кирија (100% ако е над 1000 евра) — и се плаќа само на денот на потпишување. Дали ви звучи ова?'
+];
+
+function getRandomDiscountResponse(isRent) {
+  const responses = isRent ? DISCOUNT_RESPONSES_RENT : DISCOUNT_RESPONSES_SALE;
+  return responses[Math.floor(Math.random() * responses.length)];
+}
+
+// ========================================
+// HELPER: Check if the owner is NEGOTIATING the fee down — "moze li pomala
+// provizija?", "dali moze popust?", "dali moze da se dogovori
+// provizijata?", "kolku e minimalnata provizija?" (both scripts). MUST run
+// BEFORE the commission gate (isAskingAboutCommission / rent-commission):
+// "pomala provizija" contains "provizija" and would otherwise get the
+// generic rule explanation. The answer acknowledges the ask but NEVER
+// promises a discount (the rent variants restate the standard rule).
+// ========================================
+function isAskingAboutDiscount(text) {
+  const u = String(text || '').toLowerCase();
+  return /(?:moze\s+li|може\s+ли|dali\s+moze|дали\s+може|dali\s+ima|дали\s+има)\s+(?:pomala|помала|poniska|пониска|popust|попуст)\s*(?:provizija|провизија|na\s+provizijata|на\s+провизијата)?|(?:moze\s+li\s+da\s+se\s+dogovori\s+provizijata|може\s+ли\s+да\s+се\s+договори\s+провизијата|dali\s+moze\s+da\s+se\s+dogovori\s+provizijata|дали\s+може\s+да\s+се\s+договори\s+провизијата)|(?:kolku\s+e\s+minimalnata\s+provizija|колку\s+е\s+минималната\s+провизија)|(?:pomala\s+provizija|помала\s+провизија)|(?:dali\s+moze\s+pomala|дали\s+може\s+помала)/i.test(u);
+}
+
+// ========================================
+// OFFICE-VISIT RESPONSES — "dali treba da dojdam kaj vas?" (do I need to
+// come to you), "dali mora da odam vo kancelarija?" — does the owner need
+// to visit the office in person. Answer: no — everything is handled over
+// phone/Viber, in-person only if they want. All variants rotate randomly.
+// ========================================
+const OFFICE_VISIT_RESPONSES_SALE = [
+  'Не мора да доаѓате во канцеларија — сè може да се договори преку телефон и Viber. Ако сакате, можеме да се видиме и лично. Дали ви одговара?',
+  'Сè се одвива преку телефон и Viber, не мора да доаѓате кај нас. Ако сакате лична средба, можеме да се договориме. Дали ви е појасно?',
+  'Нема потреба да доаѓате во канцеларијата — комуникацијата е на телефон и Viber, а документацијата ја водиме ние. Дали да почнеме?'
+];
+
+const OFFICE_VISIT_RESPONSES_RENT = [
+  'Не мора да доаѓате во канцеларија — сè може да се договори преку телефон и Viber. Ако сакате, можеме да се видиме и лично. Дали ви одговара?',
+  'Сè се одвива преку телефон и Viber, не мора да доаѓате кај нас. Ако сакате лична средба, можеме да се договориме. Дали ви е појасно?',
+  'Нема потреба да доаѓате во канцеларијата — комуникацијата е на телефон и Viber, а документацијата ја водиме ние. Дали да почнеме?'
+];
+
+function getRandomOfficeVisitResponse(isRent) {
+  const responses = isRent ? OFFICE_VISIT_RESPONSES_RENT : OFFICE_VISIT_RESPONSES_SALE;
+  return responses[Math.floor(Math.random() * responses.length)];
+}
+
+// ========================================
+// HELPER: Check if asking whether the OWNER must come to the office —
+// "dali treba da dojdam kaj vas?", "dali mora da odam vo kancelarija?",
+// "dali ke doagjam kaj vas?" (both scripts). NEGATIVE GUARD: the viewing
+// ("poseta/ogled") is at the property and is a different question — never
+// matched here (the owner does not attend tenant viewings).
+// ========================================
+function isAskingAboutOfficeVisit(text) {
+  const u = String(text || '').toLowerCase();
+  if (/poseta|посета|ogled|оглед/i.test(u)) return false;
+  return /(?:dali\s+treba\s+da\s+dojdam|дали\s+треба\s+да\s+дојдам|dali\s+moram\s+da\s+dojdam|дали\s+морам\s+да\s+дојдам|dali\s+treba\s+da\s+dojdam\s+kaj\s+vas|дали\s+треба\s+да\s+дојдам\s+кај\s+вас|kade\s+treba\s+da\s+dojdam|каде\s+треба\s+да\s+дојдам|dali\s+mora\s+da\s+odam\s+vo\s+kancelarija|дали\s+мора\s+да\s+одам\s+во\s+канцеларија|dali\s+treba\s+da\s+odam\s+kaj\s+vas\s+vo\s+kancelarija|дали\s+треба\s+да\s+одам\s+кај\s+вас\s+во\s+канцеларија|dali\s+ke\s+doagjam\s+kaj\s+vas|дали\s+ќе\s+доаѓам\s+кај\s+вас)/i.test(u);
+}
+
+// ========================================
+// WORKING-HOURS RESPONSES — "koe e rabotnoto vreme?" (what are the
+// working hours), "do kolku rabotite?", "koga rabotite?", "dali rabotite
+// vikend?" — agency availability. All variants rotate randomly.
+// ========================================
+const WORKING_HOURS_RESPONSES_SALE = [
+  'Работното време ни е секој ден од 9 до 17 часот, а на Viber сме достапни и надвор од него. Дали имате некое друго прашање?',
+  'Достапни сме секој работен ден од 9 до 17 часот, а пораките на Viber ги читаме и потоа. Дали да продолжиме со соработката?',
+  'Работиме секој ден во текот на работната недела, а на Viber одговараме брзо. Дали имате некое друго прашање?'
+];
+
+const WORKING_HOURS_RESPONSES_RENT = [
+  'Работното време ни е секој ден од 9 до 17 часот, а на Viber сме достапни и надвор од него. Дали имате некое друго прашање?',
+  'Достапни сме секој работен ден од 9 до 17 часот, а пораките на Viber ги читаме и потоа. Дали да продолжиме со соработката?',
+  'Работиме секој ден во текот на работната недела, а на Viber одговараме брзо. Дали имате некое друго прашање?'
+];
+
+function getRandomWorkingHoursResponse(isRent) {
+  const responses = isRent ? WORKING_HOURS_RESPONSES_RENT : WORKING_HOURS_RESPONSES_SALE;
+  return responses[Math.floor(Math.random() * responses.length)];
+}
+
+// ========================================
+// HELPER: Check if asking about the agency's WORKING HOURS — "koe e
+// rabotnoto vreme?", "do kolku rabotite?", "koga rabotite?", "dali
+// rabotite vikend?" (both scripts). Distinct from "kolku vreme rabotite?"
+// (agency TENURE — owned by the agency gate, which runs earlier) and from
+// "koga ke pocneme?" (process start — owned by the next-step gate, which
+// also runs earlier in the general block).
+// ========================================
+function isAskingAboutWorkingHours(text) {
+  const u = String(text || '').toLowerCase();
+  return /(?:koe\s+e\s+rabotnoto\s+vreme|кое\s+е\s+работното\s+време|kolku\s+do\s+kolku\s+rabotite|колку\s+до\s+колку\s+работите|do\s+kolku\s+rabotite|до\s+колку\s+работите|koga\s+rabotite|кога\s+работите|koga\s+ste\s+dostapni|кога\s+сте\s+достапни|dali\s+rabotite\s+vikend|дали\s+работите\s+викенд|rabotite\s+li\s+vikend|работите\s+ли\s+викенд)/i.test(u);
+}
+
+// ========================================
+// CLIENT-VERIFICATION RESPONSES — "kako gi proveruvate klientite?" (how
+// do you verify the clients), "kako znaete dali klientot e ozbilen?" — the
+// owner asks about the VERIFICATION PROCESS (distinct from client QUALITY
+// reassurance — "dali klientite vi se provereni?" — which is owned by
+// CLIENT_QUALITY_* above: here the owner asks HOW the vetting works). Sale:
+// financial capability to buy. Rent: ability to pay the rent. All rotate.
+// ========================================
+const CLIENT_VERIFICATION_RESPONSES_SALE = [
+  'Секој заинтересиран клиент поминува проверка — потврдуваме дека е сериозен и дека има финансиска можност, пред да закажеме посета. Дали ви звучи добро?',
+  'Ги проверуваме клиентите пред посета — нивната намера и финансиска подготвеност. Не доведуваме случајни луѓе. Дали ви е појасно?',
+  'Секој клиент се проверува пред да го донесеме на посета — сериозност, мотивација и можност за купување. Дали ви звучи ова?'
+];
+
+const CLIENT_VERIFICATION_RESPONSES_RENT = [
+  'Секој заинтересиран закупец поминува проверка — потврдуваме дека е сериозен и дека може да ја плаќа киријата, пред да закажеме посета. Дали ви звучи добро?',
+  'Ги проверуваме закупците пред посета — нивната намера и финансиска подготвеност. Не доведуваме случајни луѓе. Дали ви е појасно?',
+  'Секој закупец се проверува пред да го донесеме на посета — сериозност, мотивација и можност за плаќање на киријата. Дали ви звучи ова?'
+];
+
+function getRandomClientVerificationResponse(isRent) {
+  const responses = isRent ? CLIENT_VERIFICATION_RESPONSES_RENT : CLIENT_VERIFICATION_RESPONSES_SALE;
+  return responses[Math.floor(Math.random() * responses.length)];
+}
+
+// ========================================
+// HELPER: Check if asking HOW clients are verified — "kako gi proveruvate
+// klientite?", "kako proveruvate dali klientot e ozbilen?", "kako znaete
+// dali klientot e ozbilen?" (both scripts). The verb is proveruvate/
+// znaete (process) — NOT the quality adjectives (provereni/ozbilni) owned
+// by isAskingAboutClientQuality. Requires the verify-verb + a client word;
+// a bare "provereni klienti" statement stays with client quality.
+// ========================================
+function isAskingHowClientsVerified(text) {
+  const u = String(text || '').toLowerCase();
+  return /(?:kako|како)\s+(?:gi|ги)?\s*(?:proveruvate|проверувате|proverite|проверите|znaete|знаете)\s+(?:dali|дали)?\s*(?:klient|клиент|kupuvac|купувач|zakupc|закупц)|(?:kako\s+proveruvate\s+dali\s+klientot\s+e\s+ozbilen|како\s+проверувате\s+дали\s+клиентот\s+е\s+озбилен|kako\s+znaete\s+dali\s+klientot\s+e\s+ozbilen|како\s+знаете\s+дали\s+клиентот\s+е\s+озбилен|kako\s+gi\s+proveruvate\s+zainteresiranite|како\s+ги\s+проверувате\s+заинтересираните|kako\s+proveruvate\s+kupuvacot|како\s+проверувате\s+купувачот)/i.test(u);
+}
+
+// ========================================
+// WHO-HANDLES RESPONSES — "koj ke raboti so mojot imot?" (who will work
+// on my property), "koj ke go vodi mojot slucaj?", "koj ke se grizi za
+// mojot imot?" — which agent owns the case. Answer: a dedicated colleague
+// agent (consistent with the agent-visit answer — the case is handled by
+// the team, not only by Ana). All variants rotate randomly.
+// ========================================
+const WHO_HANDLES_RESPONSES_SALE = [
+  'За вашиот случај ќе се грижи посветен агент од нашиот тим, кој ќе ве контактира и ќе го води целиот процес. Дали имате уште прашања?',
+  'Еден од нашите агенти ќе биде задолжен за вашиот имот — ќе ве контактира, ќе ги организира посетите и ќе го води процесот. Дали ви звучи добро?',
+  'Вашиот случај го презема агент од нашиот тим — тој ќе ве контактира за деталите и ќе го води целиот процес. Дали да почнеме?'
+];
+
+const WHO_HANDLES_RESPONSES_RENT = [
+  'За вашиот случај ќе се грижи посветен агент од нашиот тим, кој ќе ве контактира и ќе го води целиот процес. Дали имате уште прашања?',
+  'Еден од нашите агенти ќе биде задолжен за вашиот стан — ќе ве контактира, ќе ги организира посетите и ќе го води процесот. Дали ви звучи добро?',
+  'Вашиот случај го презема агент од нашиот тим — тој ќе ве контактира за деталите и ќе го води целиот процес. Дали да почнеме?'
+];
+
+function getRandomWhoHandlesResponse(isRent) {
+  const responses = isRent ? WHO_HANDLES_RESPONSES_RENT : WHO_HANDLES_RESPONSES_SALE;
+  return responses[Math.floor(Math.random() * responses.length)];
+}
+
+// ========================================
+// STANDARD-TERMS ACK RESPONSES — the owner replies "standard" /
+// "standardna procedura" (accepting the commission/rent-rules explanation
+// Ana just gave) and it used to fall through every gate into the LLM,
+// which answered with a generic client pitch (reported: owner said
+// "standard" after the rent commission split explanation, got a canned
+// "draga mi e sto doznav..." line instead). The right reply confirms the
+// standard procedure AND reassures with the carefully-filtered clientele.
+// All variants rotate randomly (same as legal costs / agent visit).
+// ========================================
+const STANDARD_TERMS_RESPONSES_SALE = [
+  'Ова е стандардна процедура, со тоа што нашите купувачи се внимателно филтрирани пред посета. Дали сте расположени да почнеме со соработка?',
+  'Стандардна процедура, со тоа што секој наш клиент поминува проверка пред да дојде на посета. Дали да продолжиме со соработката?',
+  'Тоа е стандардната процедура — а нашите клиенти се внимателно проверени. Дали да почнеме со соработката?'
+];
+
+const STANDARD_TERMS_RESPONSES_RENT = [
+  'Ова е стандардна процедура, со тоа што нашите закупци се внимателно филтрирани пред посета. Дали сте расположени да почнеме со соработка?',
+  'Стандардна процедура, со тоа што секој наш клиент поминува проверка пред да дојде на посета. Дали да продолжиме со соработката?',
+  'Тоа е стандардната процедура — а нашите клиенти се внимателно проверени. Дали да почнеме со соработката?'
+];
+
+function getRandomStandardTermsResponse(isRent) {
+  const responses = isRent ? STANDARD_TERMS_RESPONSES_RENT : STANDARD_TERMS_RESPONSES_SALE;
+  return responses[Math.floor(Math.random() * responses.length)];
+}
+
+// ========================================
+// HELPER: Check if the owner ACKNOWLEDGES the standard terms — "standard",
+// "standardna procedura", "standardno e", "ok standard" (both scripts).
+// Whole-message anchored: it fires ONLY on a short ack centered on the
+// standard-word. A QUESTION about the terms ("dali e standardna
+// procedura?", "kako funkcionira standardno?") must NEVER match — those
+// have their own gates (isAskingHowCommissionWorks etc.). A NEGATION
+// ("ne e standard", "ne standardno") is also excluded — it's an objection.
+// ========================================
+function isStandardTermsAck(text) {
+  const u = String(text || '').trim().toLowerCase();
+  if (!u || u.length > 60) return false;
+  if (/[?؟]/.test(u)) return false;
+  if (/dali|дали|kolku|колку|kako|како|koga|кога|zosto|зошто|sto|што|kade|каде|moze|може/i.test(u)) return false;
+  if (/ne\s*(?:e|е)?\s*(?:standard|стандард)|не\s*(?:е)?\s*(?:standard|стандард)/i.test(u)) return false;
+  return /^(?:(?:ok|okej|океј|vo red|во ред|sve e|сè е|se e|се е|toa e|тоа е|taka e|така е|ova e|ова е|e|е)\s+)?(?:standard(?:na|no)?|стандард(?:на|но)?)(?:\s+(?:procedura|процедура))?(?:\s*(?:e|е))?(?:[.!?,]?\s*(?:ok|okej|океј))?[.!?,]?$/i.test(u);
+}
+
+// ========================================
+// HELPER: Check if asking WHO handles the property/case — "koj ke raboti
+// so mojot imot?", "koj ke go vodi mojot slucaj?", "koj agent ke raboti?"
+// (both scripts). Requires a case/property object (mojot imot/slucaj/stan)
+// or "koj agent" — a bare "koj ke raboti" (who will work) with no referent
+// never matches. Distinct from the who-pays/commission clitic patterns
+// (those need plakja verbs — never matched here).
+// ========================================
+function isAskingWhoHandlesProperty(text) {
+  const u = String(text || '').toLowerCase();
+  return /(?:koj|кој)\s+(?:agent|агент)|(?:koj|кој)\s+(?:ke|ќе)?\s*(?:raboti|работи|se\s+grizi|се\s+грижи|go\s+vodi|го\s+води|ja\s+vodi|ја\s+води)\s+(?:so|со)?\s*(?:mojot|мојот|mojata|мојата)?\s*(?:imot|имот|stan|стан|slucaj|случај)|(?:koj\s+ke\s+go\s+vodi\s+mojot\s+slucaj|кој\s+ќе\s+го\s+води\s+мојот\s+случај|koj\s+ke\s+se\s+grizi\s+za\s+mojot\s+imot|кој\s+ќе\s+се\s+грижи\s+за\s+мојот\s+имот)/i.test(u);
+}
+
 export {
   OBJECTION_RESPONSES,
   matchObjection,
@@ -813,5 +1448,69 @@ export {
   isAskingWhereToSendPhotos,
   isAskingAboutLegalCosts,
   isAskingWhoPaysForLegalCosts,
-  isAskingAboutAgency
+  isAskingAboutAgency,
+  CLIENT_TYPE_RESPONSES_SALE,
+  CLIENT_TYPE_RESPONSES_RENT,
+  getRandomClientTypeResponse,
+  isAskingAboutClientType,
+  TIMELINE_RESPONSES_SALE,
+  TIMELINE_RESPONSES_RENT,
+  getRandomTimelineResponse,
+  isAskingAboutTimeline,
+  WHAT_IF_NOT_SOLD_RESPONSES_SALE,
+  WHAT_IF_NOT_SOLD_RESPONSES_RENT,
+  getRandomWhatIfNotSoldResponse,
+  isAskingWhatIfNotSold,
+  MARKETING_RESPONSES_SALE,
+  MARKETING_RESPONSES_RENT,
+  getRandomMarketingResponse,
+  isAskingAboutMarketing,
+  EXCLUSIVITY_RESPONSES_SALE,
+  EXCLUSIVITY_RESPONSES_RENT,
+  getRandomExclusivityResponse,
+  isAskingAboutExclusivity,
+  CONTRACT_TERMS_RESPONSES_SALE,
+  CONTRACT_TERMS_RESPONSES_RENT,
+  getRandomContractTermsResponse,
+  isAskingAboutContractTerms,
+  PAYMENT_TIMING_RESPONSES_SALE,
+  PAYMENT_TIMING_RESPONSES_RENT,
+  getRandomPaymentTimingResponse,
+  isAskingAboutPaymentTiming,
+  NEXT_STEP_RESPONSES_SALE,
+  NEXT_STEP_RESPONSES_RENT,
+  getRandomNextStepResponse,
+  isAskingAboutNextStep,
+  VALUATION_RESPONSES_SALE,
+  VALUATION_RESPONSES_RENT,
+  getRandomValuationResponse,
+  isAskingAboutValuation,
+  DOCUMENTS_RESPONSES_SALE,
+  DOCUMENTS_RESPONSES_RENT,
+  getRandomDocumentsResponse,
+  isAskingAboutDocuments,
+  DISCOUNT_RESPONSES_SALE,
+  DISCOUNT_RESPONSES_RENT,
+  getRandomDiscountResponse,
+  isAskingAboutDiscount,
+  OFFICE_VISIT_RESPONSES_SALE,
+  OFFICE_VISIT_RESPONSES_RENT,
+  getRandomOfficeVisitResponse,
+  isAskingAboutOfficeVisit,
+  WORKING_HOURS_RESPONSES_SALE,
+  WORKING_HOURS_RESPONSES_RENT,
+  getRandomWorkingHoursResponse,
+  isAskingAboutWorkingHours,
+  CLIENT_VERIFICATION_RESPONSES_SALE,
+  CLIENT_VERIFICATION_RESPONSES_RENT,
+  getRandomClientVerificationResponse,
+  isAskingHowClientsVerified,
+  WHO_HANDLES_RESPONSES_SALE,
+  WHO_HANDLES_RESPONSES_RENT,
+  getRandomWhoHandlesResponse,
+  isAskingWhoHandlesProperty,
+  STANDARD_TERMS_RESPONSES_SALE,
+  STANDARD_TERMS_RESPONSES_RENT,
+  getRandomStandardTermsResponse,
+  isStandardTermsAck
 };

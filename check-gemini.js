@@ -12,7 +12,7 @@ try {
   process.exit(1);
 }
 
-const MODEL = process.env.ANA_GEMINI_MODEL || 'gemini-2.5-flash';
+const MODEL = process.env.ANA_GEMINI_MODEL || 'gemini-3.6-flash';
 const url = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent`;
 
 async function checkGemini() {
@@ -23,7 +23,7 @@ async function checkGemini() {
       url,
       {
         contents: [{ role: 'user', parts: [{ text: 'Кажи само: OK' }] }],
-        // gemini-2.5-flash is a THINKING model — a tiny output budget (10)
+        // Gemini Flash is a THINKING model — a tiny output budget (10)
         // burns entirely on reasoning and returns empty parts (observed:
         // finishReason MAX_TOKENS, parts undefined). 100 leaves headroom.
         generationConfig: { temperature: 0.0, maxOutputTokens: 100 }

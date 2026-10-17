@@ -24,7 +24,7 @@ const assert = harness.assert;
 // These replicate the exact logic from service.js
 // ========================================
 
-function handleTerrace(u, data) {
+function handleTerrace(u, data, nextField) {
   // Returns null (no early return) or { return: { text, type } } (early return = follow-up question)
   if (data.terraceSqm === undefined && data.hasTerrace === undefined) {
     // PENDING FOLLOW-UP (mirror of handlers/data-collection.js): process the
@@ -72,8 +72,17 @@ function handleTerrace(u, data) {
       data.terraceSqm = 0;
       return null;
     }        // NOTE: Must stay in sync with handlers/data-collection.js — only match terrace-specific words,
-        // not generic sqm words like 'kvadrati'/'m2' (those are for totalSqm)
-        if (/ima|има|terasa|тераса|terrace|teras|терас/i.test(u) || isPositive(u)) {
+        // not generic sqm words like 'kvadrati'/'m2' (those are for totalSqm).
+        // TERRACE QUESTION CURRENT (reported, lead 3571074): when the terrace
+        // question is the CURRENT workflow field (nextField === 'terraceSqm'),
+        // a number answer like "3 KVADRATA" (the m² size, sent after "IMA" in
+        // a grace batch) IS the terrace size — BUT ONLY when it differs from
+        // the collected totalSqm ("55 KVADRATA" with totalSqm=55 is the owner
+        // repeating the total, never a terrace). Mirrors the real handler.
+        const isTerraceQuestionCurrent = nextField === 'terraceSqm';
+        const totalSqmKnown = typeof data.totalSqm === 'number';
+        const differsFromTotal = totalSqmKnown && data.totalSqm !== (extractTerraceNumber(u) || 0);
+        if (/ima|има|terasa|тераса|terrace|teras|терас/i.test(u) || isPositive(u) || (isTerraceQuestionCurrent && differsFromTotal)) {
       const firstNum = extractTerraceNumber(u);
       if (firstNum !== null && firstNum > 0 && firstNum < 100) {
         data.hasTerrace = true;
@@ -380,6 +389,59 @@ console.log(`━━━━━━━━━━━━━━━━━━━━━━�
   const d = freshData();
   const result = handleTerrace("да, има тераса", d);
   assert("T14: 'да, има тераса' without size → follow-up", result !== null && result.type === "QUESTION", `got ${JSON.stringify(result)}`);
+})();
+
+// T15: Reported — "3 KVADRATA" as the CURRENT terrace-question answer (grace
+// batch: "IMA" was dropped and pendingFollowUp rolled back, so the number
+// lands in the normal flow). The terrace question is current AND the number
+// (3) differs from the collected totalSqm (65) → it is the m² size, NOT a
+// generic total-sqm phrase → collected first try.
+(() => {
+  const d = { totalSqm: 65 };
+  const result = handleTerrace("3 KVADRATA", d, 'terraceSqm');
+  assert("T15: '3 KVADRATA' with terrace question current → hasTerrace=true, sqm=3",
+    d.hasTerrace === true && d.terraceSqm === 3, `got hasTerrace=${d.hasTerrace}, sqm=${d.terraceSqm}`);
+  assert("T15: no follow-up re-ask", result === null, `got ${JSON.stringify(result)}`);
+})();
+
+// T16: Control — the SAME "3 KVADRATA" while ANOTHER field is current
+// (volunteered total-sqm phrase) must NOT become terrace (generic-sqm
+// rejection preserved — "55 kvadrati" volunteered is the total, not terrace).
+(() => {
+  const d = { totalSqm: 65 };
+  handleTerrace("3 KVADRATA", d, 'totalSqm');
+  assert("T16: '3 KVADRATA' with sqm question current → NOT terrace (volunteered generic sqm)",
+    d.hasTerrace === undefined && d.terraceSqm === undefined, `got hasTerrace=${d.hasTerrace}, sqm=${d.terraceSqm}`);
+})();
+
+// T17: Cyrillic sibling of T15 — "3 КВАДРАТА" while the terrace question is
+// current → collected as the terrace size.
+(() => {
+  const d = { totalSqm: 65 };
+  const result = handleTerrace("3 КВАДРАТА", d, 'terraceSqm');
+  assert("T17: '3 КВАДРАТА' with terrace question current → hasTerrace=true, sqm=3",
+    d.hasTerrace === true && d.terraceSqm === 3, `got hasTerrace=${d.hasTerrace}, sqm=${d.terraceSqm}`);
+  assert("T17: no follow-up re-ask", result === null, `got ${JSON.stringify(result)}`);
+})();
+
+// T18: Control — "55 KVADRATA" EQUALS the collected totalSqm (55) → the
+// owner is repeating the total, never a terrace (mirrors S2-T2). Must stay
+// unset so the terrace question is re-asked.
+(() => {
+  const d = { totalSqm: 55 };
+  handleTerrace("55 KVADRATA", d, 'terraceSqm');
+  assert("T18: '55 KVADRATA' == totalSqm → NOT terrace (owner repeating the total)",
+    d.hasTerrace === undefined && d.terraceSqm === undefined, `got hasTerrace=${d.hasTerrace}, sqm=${d.terraceSqm}`);
+})();
+
+// T19: Control — totalSqm unknown, terrace question current → a generic sqm
+// number is NOT crowned as terrace (conservative; the sqm question may have
+// been skipped, the number could be the total).
+(() => {
+  const d = freshData();
+  handleTerrace("3 KVADRATA", d, 'terraceSqm');
+  assert("T19: totalSqm unknown → generic sqm number NOT crowned as terrace",
+    d.hasTerrace === undefined && d.terraceSqm === undefined, `got hasTerrace=${d.hasTerrace}, sqm=${d.terraceSqm}`);
 })();
 
 // T15: Terrace with negative reply containing "parking" → still handles correctly

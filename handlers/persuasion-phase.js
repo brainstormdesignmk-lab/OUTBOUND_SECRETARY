@@ -109,7 +109,7 @@ export function detectPhase({ u, conv, session, isRent }) {
       if (trimmed.length > 50 || trimmed.split(/\s+/).length > 4) return false;
       if (/\?/.test(trimmed)) return false;
       if (/\b(?:ne|не|ama|ама|no|но|sepak|сепак|mislam|мислам|mozebi|можеbi|можеби)\b/i.test(trimmed)) return false;
-      return /^(?:moze|може|da|да|vazi|важи|ok|ок|okej|океј|super|супер|povelete|повелете|slobodno|слободно|ajde|ајде|dogovoreno|договорено|soglasuvam|согласувам|prifakjam|прифаќам|sorabotuvame|соработуваме|probaj|пробај|probajte|пробајте|da probame|да пробаме|moze slobodno|може слободно|se soglasuvam|се согласувам|ajde da probame|ајде да пробаме|moze da|може да|moze probame|може пробаме|ajde probame|ајде пробаме)(?:\s+(?:da|да|moze|може|slobodno|слободно|probame|пробаме|soglasuvam|согласувам))?$/i.test(trimmed);
+      return /^(?:moze|може|da|да|vazi|важи|ok|ок|okej|океј|super|супер|povelete|повелете|slobodno|слободно|ajde|ајде|dogovoreno|договорено|soglasuvam|согласувам|soglsen|согласен|soglsen sum|согласен сум|prifakjam|прифаќам|sorabotuvame|соработуваме|probaj|пробај|probajte|пробајте|da probame|да пробаме|moze slobodno|може слободно|se soglasuvam|се согласувам|ajde da probame|ајде да пробаме|moze da|може да|moze probame|може пробаме|ajde probame|ајде пробаме)(?:\s+(?:da|да|moze|може|slobodno|слободно|probame|пробаме|soglasuvam|согласувам|sum|сум))?$/i.test(trimmed);
     })();
 
     // FUTURE/HYPOTHETICAL COOPERATION GUARD (reported): if Ana's last message
@@ -256,13 +256,14 @@ export function detectPhase({ u, conv, session, isRent }) {
 }
 
 /**
- * TIER ROUTING MAP (unit-tested — the offline seam returns before the LLM
- * call, so the mapping is extracted to stay pinable): skeptical / soft
- * rejection turns (intent REJECTED) get the SMART tier (70b / flash) for
- * rebuttal quality; everything else is ROUTINE (8b / flash-lite).
+ * TIER ROUTING MAP (reverted — reported live: the 8b "routine" tier made
+ * persuasion replies sound much worse, e.g. a canned line for "KAKOV TIP
+ * NA KLIENTI NUDITE ?"). Every persuasion reply now uses the SMART model
+ * (70b / flash) — the 8b instant model belongs only to classification-type
+ * tasks (temperature/JSON), never to owner-facing replies.
  */
 export function tierForClassification(classification) {
-  return classification?.intent === 'REJECTED' ? 'rebuttal' : 'routine';
+  return 'rebuttal';
 }
 
 // ========================================
@@ -283,9 +284,100 @@ function pickVariants(list) {
   return list[Math.floor(Math.random() * list.length)];
 }
 
-export function buildDeterministicPersuasion(classification, isRent) {
+// ========================================
+// QUESTION-AWARE PERSUASION (LLM-free floor, upgrade #2)
+// The ladder used to answer every owner message with the same intent-based
+// line — a tail phrasing that slipped past the early-response gates (e.g.
+// "kolku klienti imate?", "dali imate mnogu klienti?", "sto ke pravite so
+// parite?") still got the generic cooperation ask. When the owner's
+// message names a topic, the topic pitch answers the ACTUAL question. Each
+// topic has rotating sale+rent variants (the rent side always states the
+// standard 50%/100% rule — never the sale "без провизија" line). The
+// topic pitch wins over the intent ladder: the concern it names is what
+// the owner is actually probing.
+// ========================================
+const PERSUASION_TOPIC_PITCHES = {
+  clients: {
+    sale: [
+      'Постојано имаме заинтересирани купувачи за вакви имоти, а секој од нив поминува проверка пред посета. Дали да почнеме со соработка?',
+      'Нашата база на клиенти е голема и проверена — редовно доведуваме заинтересирани купувачи на посета. Дали сте расположени да соработуваме?',
+      'Имаме голема база на заинтересирани клиенти и редовно организираме посети. Дали да продолжиме со соработката?'
+    ],
+    rent: [
+      'Постојано имаме заинтересирани закупци за вакви станови, а секој од нив поминува проверка пред посета. Дали да почнеме со соработка?',
+      'Нашата база на клиенти е голема и проверена — редовно доведуваме заинтересирани закупци на посета. Дали сте расположени да соработуваме?',
+      'Имаме голема база на заинтересирани клиенти и редовно организираме посети. Дали да продолжиме со соработката?'
+    ]
+  },
+  commission: {
+    sale: [
+      'Нашата заработувачка е разликата меѓу вашата барана цена и постигнатата продажна цена — вие ја добивате вашата цена во целост. Дали ви е појасно и да почнеме со соработката?',
+      'Ние заработуваме само кога имотот ќе се продаде, од разликата над вашата барана цена. Од вас не земаме ништо. Дали ви звучи фер и да почнеме со соработката?',
+      'Провизијата не се наплаќа од вашиот дел — вие ја добивате вашата чиста цена, а ние заработуваме над неа. Дали да продолжиме со соработката?'
+    ],
+    rent: [
+      'За издавање провизијата е стандардна: 50% од една месечна кирија (100% ако е над 1000 евра), платена на денот на потпишување. Дали ви е појасно и да почнеме со соработката?',
+      'Провизијата за издавање е 50% од една месечна кирија (100% ако е над 1000 евра) и се плаќа само на денот на потпишување на договорот. Дали ви звучи фер и да почнеме со соработката?',
+      'За издавање, вашата обврска е 50% од една месечна кирија (100% ако е над 1000 евра), на денот на потпишување. Дали да продолжиме со соработката?'
+    ]
+  },
+  trust: {
+    sale: [
+      'Разбирам. Затоа работиме транспарентно — вие ја добивате вашата барана цена, а ние заработуваме само ако имотот се продаде. Дали ви звучи фер и да почнеме со соработката?',
+      'Ве разбирам. Можете да проверите сè пред да се обврзете — договорот е јасен, а провизијата се плаќа само при успешна продажба. Дали би пробале?',
+      'Нема притисок. Работиме без никакви скриени давачки — вие ја добивате вашата цена, а ние заработуваме од разликата. Дали сте расположени да пробаме?'
+    ],
+    rent: [
+      'Разбирам. Затоа работиме транспарентно — провизијата е стандардна (50% од една месечна кирија, 100% ако е над 1000 евра) и се плаќа само на денот на потпишување. Дали ви звучи фер и да почнеме со соработката?',
+      'Ве разбирам. Можете да проверите сè пред да се обврзете — договорот е јасен, а провизијата се плаќа само на денот на потпишување. Дали би пробале?',
+      'Нема притисок. Работиме без никакви скриени давачки — провизијата е 50% од една месечна кирија (100% ако е над 1000 евра), на денот на потпишување. Дали сте расположени да пробаме?'
+    ]
+  },
+  speed: {
+    sale: [
+      'Со нашата база на заинтересирани купувачи, повеќето имоти се продаваат во рок од неколку недели до два месеци. Дали да почнеме?',
+      'Не можеме да гарантираме датум, но нашите клиенти во просек купуваат имот за 1-2 месеци. Дали сте расположени да соработуваме?',
+      'Брзината зависи од имотот и цената, но со нашата промоција огласот добива видливост веднаш. Дали да продолжиме со соработката?'
+    ],
+    rent: [
+      'Со нашата база на заинтересирани закупци, обично наоѓаме клиент во рок од неколку недели. Дали да почнеме?',
+      'Не можеме да гарантираме датум, но закупец најчесто наоѓаме за 2-3 недели. Дали сте расположени да соработуваме?',
+      'Брзината зависи од киријата и локацијата, но со нашата промоција огласот добива видливост веднаш. Дали да продолжиме со соработката?'
+    ]
+  }
+};
+
+// Topic detection for the ladder — CONSERVATIVE: fires only on phrasings
+// that actually REACHED the ladder (the well-known questions are already
+// swallowed by the early-response gates; this catches the tail — "kolku
+// klienti imate?", "sto ke pravite so parite?", "ne veruvam na agencii"
+// variants). ORDER MATTERS: trust (needs distrust + agency context) before
+// commission (money words) before clients (client words) — a message can
+// name several, and the most specific concern wins.
+export function detectPersuasionTopic(text) {
+  const u = String(text || '').toLowerCase();
+  if (/veruvam|верувам|doverb|доверб|izmam|измам|prevara|превара|lazni|лажни|skriveni|скриени/i.test(u) &&
+      /agenci|агенци|vi|ви|vas|вас/i.test(u)) return 'trust';
+  if (/provizij|провизиј|komisij|комисиј|pari|пари|%|procent|процент/i.test(u)) return 'commission';
+  if (/klient|клиент|kupuvac|купувач|kupci|купци|zakupc|закупц/i.test(u)) return 'clients';
+  if (/brzo|брзо|pobrzo|побрзо|kolku\s+vreme|колку\s+време|dolgo\s+ke|долго\s+ќе/i.test(u)) return 'speed';
+  return null;
+}
+
+export function buildDeterministicPersuasion(classification, isRent, userText = '') {
   const intent = classification?.intent;
   const confidence = classification?.confidence ?? 0;
+
+  // QUESTION-AWARE TOPIC PITCH: the owner's message names a topic the
+  // early gates missed — answer THAT topic (the concern it names is what
+  // the owner is actually probing), never the generic cooperation ask.
+  // Also wins over a soft-rejection intent: "ne veruvam na agencii" is a
+  // trust question first, a rejection second.
+  const topic = detectPersuasionTopic(userText);
+  if (topic) {
+    const lib = PERSUASION_TOPIC_PITCHES[topic];
+    return pickVariants(isRent ? lib.rent : lib.sale);
+  }
 
   // SOFT/SKEPTICAL REJECTION (conf < 0.8 — the firm rejections are already
   // handled deterministically in detectPhase: rebuttal → goodbye → cut).
@@ -365,7 +457,7 @@ export async function runPersuasion({ conv, userInput, classification, isRent })
   // observes the same shape a real persuasion response has.
   // ========================================
   if (process.env.ANA_OFFLINE_LLM === '1') {
-    return { text: buildDeterministicPersuasion(classification, isRent), type: 'NORMAL' };
+    return { text: buildDeterministicPersuasion(classification, isRent, userInput), type: 'NORMAL' };
   }
 
   const persuasionContext = buildPersuasionContext(classification);
@@ -379,14 +471,13 @@ export async function runPersuasion({ conv, userInput, classification, isRent })
   // line, NEVER "техничка грешка" and NEVER a human escalation caused by a
   // quota outage.
   //
-  // TIER ROUTING (smart split, approved): skeptical/soft-rejection turns
-  // (classification.intent === 'REJECTED') get the SMART tier (config.MODEL
-  // = 70b / GEMINI_MODEL = flash) — the model with the stronger rebuttal
-  // quality. Everything else (INTERESTED, gated ACCEPTED, unclassified)
-  // is ROUTINE (config.MODEL_LITE = 8b / GEMINI_MODEL_LITE = flash-lite).
-  // Groq's quota is PER-MODEL (observed 429 was "for model
-  // llama-3.3-70b-versatile ... TPD: Limit 100000"), so the two tiers draw
-  // from SEPARATE daily buckets on the same key ≈ 600K TPD combined.
+  // TIER ROUTING (REVERTED — reported live): the 8b "routine" tier made
+  // replies sound much worse, so EVERY reply uses the SMART model
+  // (config.MODEL = 70b / GEMINI_MODEL = flash). The 8b instant model is
+  // not in the reply path — it belongs only to classification-type tasks
+  // (temperature/JSON) where linguistic capability doesn't matter. Daily
+  // capacity comes from the multi-key pool + Gemini fallback, not a weaker
+  // model.
   const tier = tierForClassification(classification);
   let result;
   try {
@@ -409,7 +500,7 @@ export async function runPersuasion({ conv, userInput, classification, isRent })
     // alive with a deterministic persuasion line. This is the Lina pattern:
     // the LLM adds voice when it's up; the code-built reply is the floor.
     console.error(`[PERSUASION: LLM unavailable (${String(e.message).substring(0, 120)}) — deterministic floor reply]`);
-    return { text: buildDeterministicPersuasion(classification, isRent), type: 'NORMAL' };
+    return { text: buildDeterministicPersuasion(classification, isRent, userInput), type: 'NORMAL' };
   }
 
   let response = (result?.text || "").trim();

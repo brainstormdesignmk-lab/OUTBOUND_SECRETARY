@@ -861,6 +861,86 @@ assert('cap: follow-up cleared after default',
   `Got: ${JSON.stringify(session10d.collectedData.heatingFollowUp)}`);
 
 console.log('\n========================================');
+console.log('🧪 SCENARIO 10h: PARNO WINS OVER INVERTER (reported, lead 3571074)');
+console.log('========================================\n');
+
+// Reported: the owner mentioned BOTH parno and inverter (same or across
+// messages) and heating was crowned as "inverter" from the inverter-only
+// message — per the rule parno is ALWAYS the heating and inverter is the AC.
+// Expected:
+//   - "ima inverter, garaza, kompletno namesten" → heating=inverter crowned
+//     (parno not yet mentioned), ac=true, parking/furnished extracted;
+//   - then "ima parno" → the inverter crown is CORRECTED (heating reset) and
+//     the "Какво парно?" follow-up is asked — parno has the upper hand;
+//   - "gradsko" → heating=district; ac stays true (inverter = the AC);
+//   - a later inverter-only message must NEVER re-crown heating.
+
+const session10h = {
+  adMemory: { transactionType: 'rent', propertyType: 'apartment', propertyLabel: 'станот' },
+  collectedData: {
+    cooperationAccepted: true, transactionType: 'rent',
+    monthlyRent: 650, monthlyRentConfidence: 0.95,
+    availableFrom: 'immediate', availableFromConfidence: 0.95,
+    tenantPreferences: { preferred: ['students'], excluded: [], notes: '' }, tenantPreferencesConfidence: 0.95,
+    petsAllowed: true, petsAllowedConfidence: 0.95,
+    totalSqm: 42, totalSqmConfidence: 0.95,
+    hasTerrace: false, terraceSqm: 0
+  },
+  messages: [{ role: 'model', text: 'Одлично. Колку спални соби има станот?' }],
+  phone: '+38970123456'
+};
+
+// 1. Inverter-only message (no parno yet) → inverter crowned as heating
+const res10h1 = await generateResponse(session10h, "ima inverter, garaza, kompletno namesten");
+console.log(`  "ima inverter..." → heating=${JSON.stringify(session10h.collectedData.heating)} ac=${JSON.stringify(session10h.collectedData.ac)}`);
+assert('10h: inverter-only msg → heating=inverter (before parno is mentioned)',
+  session10h.collectedData.heating === 'inverter' && session10h.collectedData.heatingType === 'inverter',
+  `Got: ${JSON.stringify(session10h.collectedData.heating)}/${JSON.stringify(session10h.collectedData.heatingType)}`);
+assert('10h: ac=true from the same inverter msg', session10h.collectedData.ac === true, `Got: ${JSON.stringify(session10h.collectedData.ac)}`);
+
+// 2. Parno mentioned → the inverter crown must be corrected, follow-up asked
+const res10h2 = await generateResponse(session10h, "ima parno");
+console.log(`  "ima parno" → ${res10h2.type} — "${res10h2.text}"`);
+assert('10h: parno mention resets the inverter crown (heating unset)',
+  session10h.collectedData.heating === undefined && session10h.collectedData.heatingType === undefined,
+  `Got: ${JSON.stringify(session10h.collectedData.heating)}/${JSON.stringify(session10h.collectedData.heatingType)}`);
+assert('10h: "Какво парно?" follow-up asked (parno wins, needs its qualifier)',
+  res10h2.type === 'QUESTION' && /Какво парно/.test(res10h2.text || ''),
+  `Got: ${res10h2.type} — "${res10h2.text}"`);
+assert('10h: ac stays true (inverter is the AC)', session10h.collectedData.ac === true, `Got: ${JSON.stringify(session10h.collectedData.ac)}`);
+
+// 3. Follow-up resolved → district; a later inverter-only msg must not re-crown
+const res10h3 = await generateResponse(session10h, "gradsko");
+assert('10h: "gradsko" → heating=district',
+  session10h.collectedData.heating === 'district' && session10h.collectedData.heatingType === 'district',
+  `Got: ${JSON.stringify(session10h.collectedData.heating)}/${JSON.stringify(session10h.collectedData.heatingType)}`);
+const res10h4 = await generateResponse(session10h, "ima inverter klima");
+console.log(`  "ima inverter klima" → heating=${JSON.stringify(session10h.collectedData.heating)} ac=${JSON.stringify(session10h.collectedData.ac)}`);
+assert('10h: later inverter-only msg does NOT re-crown heating (stays district)',
+  session10h.collectedData.heating === 'district',
+  `Got: ${JSON.stringify(session10h.collectedData.heating)}`);
+
+// 4. Control — inverter IS the heating when parno was never mentioned
+const session10h2 = {
+  adMemory: { transactionType: 'rent', propertyType: 'apartment', propertyLabel: 'станот' },
+  collectedData: {
+    cooperationAccepted: true, transactionType: 'rent',
+    monthlyRent: 650, monthlyRentConfidence: 0.95,
+    availableFrom: 'immediate', availableFromConfidence: 0.95,
+    tenantPreferences: { preferred: ['students'], excluded: [], notes: '' }, tenantPreferencesConfidence: 0.95,
+    petsAllowed: true, petsAllowedConfidence: 0.95,
+    totalSqm: 42, totalSqmConfidence: 0.95,
+    hasTerrace: false, terraceSqm: 0
+  },
+  messages: [{ role: 'model', text: 'Одлично. Колку спални соби има станот?' }],
+  phone: '+38970123456'
+};
+await generateResponse(session10h2, "ima inverter");
+assert('10h-control: inverter IS heating when parno never mentioned',
+  session10h2.collectedData.heating === 'inverter',
+  `Got: ${JSON.stringify(session10h2.collectedData.heating)}`);
+
+console.log('\n========================================');
 console.log('🧪 SCENARIO 10c: "imaima terasi 2" — terrace COUNT is not the m² size (reported)');
 console.log('========================================\n');
 
@@ -942,6 +1022,121 @@ console.log(`  "5" (follow-up) → ${res10f2.type}; terraceSqm=${JSON.stringify(
 assert('control: real m² answer to the follow-up → terraceSqm=5',
   session10f.collectedData.hasTerrace === true && session10f.collectedData.terraceSqm === 5,
   `Got: hasTerrace=${JSON.stringify(session10f.collectedData.hasTerrace)}, sqm=${JSON.stringify(session10f.collectedData.terraceSqm)}`);
+
+console.log('\n========================================');
+console.log('🧪 SCENARIO 10i: "IMA" + "3 KVADRATA" grace batch — terrace collected on the FIRST try (reported lead 3571074)');
+console.log('========================================\n');
+
+// Reported: Ana asked "Дали има тераса и колку м2 е?" → owner answered
+// "IMA" then "3 KVADRATA" (3 m²) in one quickfire batch. TWO bugs:
+//   1. The engine's grace batch DROPS the intermediate "IMA" response (the
+//      terrace follow-up "Дали знаете колку квадрати е терасата?") and
+//      ROLLS BACK its pendingFollowUp — so "3 KVADRATA" arrives in the
+//      terrace NORMAL flow, where hasGenericSqm ("KVADRATA" contains "kv")
+//      used to reject it and the terrace was re-asked ("Само да потврдам,
+//      дали има тераса?").
+//   2. countBedrooms' digit fallback read "3 KVADRATA" as bedrooms=3 (only
+//      the plural "kvadrati|квадрати" was guarded, not "kvadrata").
+// Expected: terraceSqm=3 collected on the FIRST try, NO bedrooms phantom,
+// flow advances to bedrooms question — no re-ask.
+const session10i = {
+  adMemory: { transactionType: 'rent', propertyType: 'apartment', propertyLabel: 'станот', propertyId: '3571074' },
+  collectedData: {
+    cooperationAccepted: true,
+    transactionType: 'rent',
+    monthlyRent: 650, monthlyRentConfidence: 0.95,
+    availableFrom: 'immediate', availableFromConfidence: 0.95,
+    tenantPreferences: { preferred: ['students'], excluded: [], notes: 'x' },
+    tenantPreferencesConfidence: 0.95,
+    petsAllowed: false, petsAllowedConfidence: 0.95,
+    totalSqm: 65, totalSqmConfidence: 0.95
+  },
+  messages: [{ role: 'model', text: 'Одлично, уште последниве информации и завршуваме. Дали има тераса и колку м2 е?' }],
+  questionAttempts: { terraceSqm: 1 },
+  pendingFollowUp: null,
+  pendingConfirmation: null,
+  phone: '+38970123456'
+};
+
+// Message 1 of the batch — "IMA". The engine processes it, sets
+// pendingFollowUp='terraceSqm' (the follow-up question), but because it is an
+// INTERMEDIATE batch message its response is dropped and question state is
+// restored — simulate exactly what _restoreQuestionState does.
+const res10i1 = await generateResponse(session10i, 'IMA');
+console.log(`  "IMA" (intermediate, dropped) → ${res10i1.type} — "${res10i1.text}"`);
+assert('intermediate "IMA" sets the terrace follow-up',
+  res10i1.type === 'QUESTION' && /квадрати/.test(res10i1.text || ''),
+  `Got: ${res10i1.type} — "${res10i1.text}"`);
+session10i.pendingFollowUp = null;  // _restoreQuestionState rollback
+
+// Message 2 of the batch — "3 KVADRATA" (the LAST message → response sent).
+const res10i2 = await generateResponse(session10i, '3 KVADRATA');
+console.log(`  "3 KVADRATA" (last) → ${res10i2.type} — "${res10i2.text}"`);
+assert('"3 KVADRATA" collected as terraceSqm=3 on the FIRST try (no re-ask)',
+  session10i.collectedData.hasTerrace === true && session10i.collectedData.terraceSqm === 3,
+  `Got: hasTerrace=${JSON.stringify(session10i.collectedData.hasTerrace)}, sqm=${JSON.stringify(session10i.collectedData.terraceSqm)}`);
+assert('NO phantom bedrooms from "3 KVADRATA"',
+  session10i.collectedData.bedrooms === undefined,
+  `Got: bedrooms=${JSON.stringify(session10i.collectedData.bedrooms)}`);
+assert('no terrace re-ask (flow advanced to the next field)',
+  res10i2.type === 'QUESTION' && !/тераса|потврдам/i.test(res10i2.text || ''),
+  `Got: ${res10i2.type} — "${res10i2.text}"`);
+assert('flow advanced to the bedrooms question',
+  /спални/.test(res10i2.text || ''),
+  `Got: ${res10i2.type} — "${res10i2.text}"`);
+
+console.log('\n========================================');
+console.log('🧪 SCENARIO 10j: "DEVEESTRETA" (tens + feminine ordinal = 1993) — yearBuilt collected on the first try (reported lead 5436709)');
+console.log('========================================\n');
+
+// The owner answered the yearBuilt confirmatory re-ask with "DEVEESTRETA"
+// (девеес(ет) трета = "ninety-third" → 1993). It must be collected at HIGH on
+// the FIRST try — no skip, no re-ask — and the "трета"→3 must NOT phantom
+// into bedrooms/floor/totalFloors (the ORDINAL_YEAR_CONTEXT_RE guard).
+const session10j = {
+  adMemory: { transactionType: 'sale', propertyType: 'apartment', propertyLabel: 'станот', propertyId: '5436709' },
+  collectedData: {
+    cooperationAccepted: true,
+    transactionType: 'sale',
+    cleanPrice: 98000, cleanPriceConfidence: 0.95,
+    totalSqm: 55, totalSqmConfidence: 0.95,
+    terraceSqm: 0, terraceSqmConfidence: 0.95,
+    bedrooms: 2, bedroomsConfidence: 0.95,
+    floor: 3, floorConfidence: 0.95,
+    totalFloors: 10, totalFloorsConfidence: 0.95,
+    elevator: true, elevatorConfidence: 0.95,
+    heating: 'district', heatingConfidence: 0.95,
+    ac: true, acConfidence: 0.95,
+    parking: true, parkingConfidence: 0.95,
+    orientation: 'jug', orientationConfidence: 0.95,
+    furnished: true, furnishedConfidence: 0.95
+  },
+  messages: [{ role: 'model', text: 'Во ред. Само да потврдам, која година е граден?' }],
+  questionAttempts: { yearBuilt: 1 },
+  pendingConfirmation: null,
+  phone: '+38970987654'
+};
+
+const res10j = await generateResponse(session10j, 'DEVEESTRETA');
+console.log(`  "DEVEESTRETA" → ${res10j.type} — "${(res10j.text || '').slice(0, 120)}"`);
+assert('"DEVEESTRETA" collected as yearBuilt=1993 (no skip, no re-ask)',
+  session10j.collectedData.yearBuilt === 1993 && session10j.collectedData.yearBuiltConfidence === 0.95,
+  `Got: yearBuilt=${JSON.stringify(session10j.collectedData.yearBuilt)} conf=${JSON.stringify(session10j.collectedData.yearBuiltConfidence)}`);
+assert('NO yearBuilt skip marker (max-attempts not hit)',
+  session10j.collectedData.yearBuiltSkipped === undefined,
+  `Got: ${JSON.stringify(session10j.collectedData.yearBuiltSkipped)}`);
+assert('NO bedrooms phantom from "трета"',
+  session10j.collectedData.bedrooms === 2,
+  `Got: bedrooms=${JSON.stringify(session10j.collectedData.bedrooms)}`);
+assert('NO floor phantom from "трета"',
+  session10j.collectedData.floor === 3,
+  `Got: floor=${JSON.stringify(session10j.collectedData.floor)}`);
+assert('NO totalFloors phantom from "трета"',
+  session10j.collectedData.totalFloors === 10,
+  `Got: totalFloors=${JSON.stringify(session10j.collectedData.totalFloors)}`);
+assert('flow advanced past yearBuilt (no re-ask)',
+  res10j.type === 'QUESTION' && !/година|граден|потврдам/i.test(res10j.text || ''),
+  `Got: ${res10j.type} — "${res10j.text}"`);
 
 console.log('\n========================================');
 console.log('🧪 SCENARIO 11: "TI KAZAV NA VTORI" (ordinal floor must be HIGH confidence)');

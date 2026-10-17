@@ -194,6 +194,51 @@ function createSession() {
 }
 
 // ========================================
+// 3b. Short-POSITIVE AGREEMENT FAMILY — "soglsen sum" / "soglsen" / "Согласен"
+// (reported audit): these clear Macedonian agreement answers used to fall
+// through to the persuasion ladder (LLM) — only "soglasuvam"/"se soglasuvam"
+// were admitted. All forms must enter DATA_COLLECTION on the first go; the
+// negations must never.
+// ========================================
+for (const ack of ['soglsen sum', 'Согласен сум', 'soglsen', 'согласен']) {
+  const session = createSession();
+  const res = await generateResponse(session, ack);
+  assert(`agreement "${ack}" accepted (cooperationAccepted=true)`, session.collectedData.cooperationAccepted === true, 'not accepted');
+  assert(`agreement "${ack}" → DATA_COLLECTION (mirrored)`, session.phase === 'DATA_COLLECTION', `got "${session.phase}"`);
+  assert(`agreement "${ack}" → a question, not the LLM ladder`, res.type === 'QUESTION' || res.type === 'NORMAL', `got ${res.type}`);
+}
+for (const neg of ['ne sum soglsen', 'не сум согласен', 'soglsen, ama ne sega']) {
+  const session = createSession();
+  await generateResponse(session, neg);
+  assert(`negation "${neg}" NOT accepted`, session.collectedData.cooperationAccepted === false, 'was accepted!');
+  assert(`negation "${neg}" stays PERSUASION`, session.phase === 'PERSUASION', `got "${session.phase}"`);
+}
+
+// ========================================
+// 3c. TERMS-ACCEPTANCE GUARD — "dobar e dogovorot" / "dogovoreno" (reported
+// audit): these acknowledgments used to match isAskingAboutRentRules via the
+// bare token "dogovor" and Ana re-explained the terms instead of accepting —
+// cooperation never registered. Now they must accept and enter DATA_COLLECTION
+// (rent + sale), while genuine term QUESTIONS still hit the rent-rules gate.
+// ========================================
+for (const tt of ['rent', 'sale']) {
+  for (const ack of ['dobar e dogovorot', 'dogovoreno', 'Договорот е добар', 'soglsen sum so dogovorot']) {
+    const session = createSession();
+    session.adMemory.transactionType = tt;
+    session.collectedData.transactionType = tt;
+    const res = await generateResponse(session, ack);
+    assert(`terms-ack "${ack}" [${tt}] accepted`, session.collectedData.cooperationAccepted === true, 'not accepted');
+    assert(`terms-ack "${ack}" [${tt}] → DATA_COLLECTION`, session.phase === 'DATA_COLLECTION', `got "${session.phase}"`);
+    assert(`terms-ack "${ack}" [${tt}] → a question, not re-explained terms`, (res.type === 'QUESTION' || res.type === 'NORMAL') && !/провизија|50%|дел|услови/i.test(res.text || ''), `got [${res.type}] "${(res.text || '').slice(0, 80)}"`);
+  }
+}
+for (const q of ['kako e so dogovorot?', 'dali moze da se dogovorime okolu cena?', 'dali provizijata e 50%?']) {
+  const session = createSession();
+  await generateResponse(session, q);
+  assert(`terms-question "${q}" NOT accepted (stays PERSUASION)`, session.collectedData.cooperationAccepted === false, 'was accepted!');
+}
+
+// ========================================
 // 4. Persistence round-trip preserves phase + default
 // ========================================
 {

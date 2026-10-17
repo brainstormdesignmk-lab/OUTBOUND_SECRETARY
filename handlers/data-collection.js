@@ -9,7 +9,7 @@
 //   4. History scan + close flow + field question flow (with re-ask phrasings)
 // ========================================
 import { getNextMissingField, getQuestion, TENANT_PREF_QUESTIONS, AVAILABLE_FROM_QUESTIONS, PETS_ALLOWED_QUESTIONS } from '../workflow.js';
-import { runGlobalExtraction, assessConfidence, confidenceToNumeric, scanHistoryForField, isExplicitPriceCorrection, isTenantMerge } from '../data-collector.js';
+import { runGlobalExtraction, assessConfidence, confidenceToNumeric, scanHistoryForField, isExplicitPriceCorrection, isTenantMerge, isDocumentationIssue, isBinaryCorrectionSignal } from '../data-collector.js';
 
 // ========================================
 // ROTATING QUESTION VARIANTS BY FIELD — the single source of truth for
@@ -91,8 +91,26 @@ import { submitPropertyToHermes } from '../hermes-client.js';
 // statement and must never trigger the acknowledgment (mirrors the "?"
 // exclusion the short-positive logic uses elsewhere).
 // ========================================
+// AMBIGUOUS POSSESSION-ANSWER GUARD (reported lead 5436709): in DATA
+// COLLECTION, a bare possession answer ("DA IMAM" to "Дали имате чист
+// имотен лист?", "GO IMAM" to "Дали има лифт?") answers the CURRENT FIELD
+// question — it is NOT an availability statement, even though "da imam"/"go
+// imam" are in the shared AVAILABILITY_POSITIVE_RE vocabulary (they were
+// added for the PERSUASION greeting, where "Дали е се уште достапен?" →
+// "da imam" IS a legit availability half-answer). Without this guard, a
+// docs/possession answer in a grace batch made the data-collection flow
+// prepend "Одлично, значи сè уште е достапен!" to the next field question
+// (reported: the address question — user: "NOT NEEDED, we are collecting info
+// because it is available"). Unambiguous availability statements ("uste go
+// imam", "seuste e dostapen", "ne sum go izdal", "ke bide sloboden") still
+// ack — anchored whole-message forms only, so a "uste"/"ne sum"/"ke bide"
+// prefix or suffix never matches the bare possession pattern.
+const AMBIGUOUS_POSSESSION_RE = /^(?:da|да)?\s*(?:go|го|ja|ја|gi|ги)?\s*(?:imam|имам|ima|има)\s*[.!?,;]?$/i;
+function isAmbiguousPossessionAnswer(text) {
+  return AMBIGUOUS_POSSESSION_RE.test(String(text || '').trim());
+}
 function confirmsAvailability(text) {
-  return isAvailabilityConfirmation(text) && !/\?/.test(text);
+  return isAvailabilityConfirmation(text) && !/\?/.test(text) && !isAmbiguousPossessionAnswer(text);
 }
 
 // ========================================
@@ -397,7 +415,16 @@ export function runGlobalExtractionPass({ u, userInput, session, nextField }) {
     const isCorrection = isPriceKey && typeof existingVal === 'number' && typeof value === 'number' &&
                          Math.abs(existingVal - value) >= 1 && isExplicitPriceCorrection(u);
     const isTenantMergeNow = key === 'tenantPreferences' && isTenantMerge(u);
-    if (existingVal === undefined || existingVal === null || isCorrection || isTenantMergeNow) {
+    // BINARY CORRECTION (documentationClean reported lead 5436709; audit
+    // extended it to ALL binary fields — petsAllowed/renovated/elevator/ac/
+    // parking/furnished): a follow-up negative statement ("IMA HIPOTEKA",
+    // "NEMA LIFT", "NE E RENOVIRAN") flips a premature bare-yes true to
+    // false — the handler-level mirror of the extractor's correction gate
+    // (extractors already returned the update; this is the FINAL storage
+    // gate). Fires only on a genuine field-specific negative signal against
+    // a stored positive; a stored false never flips (no flip-flop).
+    const isBinaryCorrectionNow = existingVal === true && value === false && isBinaryCorrectionSignal(key, u);
+    if (existingVal === undefined || existingVal === null || isCorrection || isTenantMergeNow || isBinaryCorrectionNow) {
       session.collectedData[key] = value;
       // A corrected price is the owner's explicit statement → store at HIGH;
       // fresh fills keep the assessed score (0.95 HIGH / 0.60 volunteered).
@@ -598,6 +625,32 @@ export function runComplexStatefulHandlers({ u, userInput, session, nextField, h
   // that flow (a business space has heating too).
   const isCommercialLead = session.adMemory?.propertyType === 'commercial' || session.collectedData?.propertyType === 'commercial';
 
+  // PARNO WINS OVER INVERTER (reported, lead 3571074): the owner mentioned
+  // both parno and inverter (same or across messages) and heating was crowned
+  // as "inverter" from an inverter-only message — per the rule parno is
+  // ALWAYS the heating and inverter is the AC. Computed HERE at the top of the
+  // handler chain so the conversation-level flag (heatingParnoMentioned) is
+  // set even when an earlier handler (terrace "ima X" detection, ...)
+  // consumes the message before the heating section runs. extractHeating
+  // reads the same flag, so a later inverter-only message can never crown
+  // heating. An explicit parno negation ("nema parno, samo inverter") clears
+  // the flag so a genuine inverter heating answer stays possible.
+  const parnoMentioned = /(?:^|[^a-zа-я])(?:parno|парно)(?:$|[^a-zа-я])/i.test(u) && !/nema parno|нема парно|nemame parno|немаме парно|nemaat parno|немаат парно|bez parno|без парно|ne e parno|не е парно/i.test(u);
+  if (!isLandLead && parnoMentioned) {
+    session.collectedData.heatingParnoMentioned = true;
+    // CORRECT a previously crowned inverter heating (from an inverter-only
+    // message): parno has the upper hand, inverter becomes the AC.
+    if (session.collectedData.heating === 'inverter' || session.collectedData.heatingType === 'inverter') {
+      delete session.collectedData.heating;
+      delete session.collectedData.heatingType;
+      delete session.collectedData.heatingConfidence;
+      delete session.collectedData.heatingTypeConfidence;
+      console.log('[HEATING: parno mention wins over previously crowned inverter — inverter is the AC]');
+    }
+  } else if (!isLandLead && /nema parno|нема парно|nemame parno|немаме парно|nemaat parno|немаат парно|bez parno|без парно|ne e parno|не е парно|parno nema|парно нема/i.test(u)) {
+    delete session.collectedData.heatingParnoMentioned;
+  }
+
   // === floor — POTKROVJE DEFERRAL (reported) ===
   // The attic (поткровје) sits ABOVE the last floor: floor = totalFloors + 1.
   // extractFloor computes it directly when totalFloors is known (collected or
@@ -694,7 +747,25 @@ export function runComplexStatefulHandlers({ u, userInput, session, nextField, h
         // number fallback parsed "edna"→1 and stored a phantom
         // terraceSqm=1 (corrupting the listing data).
         const hasPriceContext = /iljadi|илјади|evra|евра|eur|evro|евро|kirija|кирија|depozit|депозит|kavcija|кавција|кауција|odnapred|однапред/i.test(u);
-        if ((hasTerraceContext || (!hasGenericSqm && !hasPriceContext))) {
+        // TERRACE QUESTION CURRENT (reported, lead 3571074): the owner
+        // answered "Дали има тераса и колку м2 е?" with "IMA" + "3
+        // KVADRATA" in one grace batch. The batch DROPS the intermediate
+        // "IMA" response and rolls pendingFollowUp back to null, so "3
+        // KVADRATA" lands here in the NORMAL flow — where hasGenericSqm
+        // ("KVADRATA" contains "kv") used to reject it and the terrace was
+        // re-asked. When the terrace question is the CURRENT workflow field,
+        // a number with a generic sqm unit IS the terrace answer — BUT ONLY
+        // when it differs from the already-collected totalSqm: "3 KVADRATA"
+        // with totalSqm=65 is the terrace; "55 KVADRATA" with totalSqm=55 is
+        // the owner repeating the total (or answering the sqm question late),
+        // never a terrace (S2-T2 pins this). The total-sqm rejection also
+        // stays for the VOLUNTEERED case ("55 kvadrati" while another field
+        // is current = total, not terrace). Price context still blocks
+        // ("3 KIRIJA" is payment terms, never a terrace).
+        const isTerraceQuestionCurrent = nextField === 'terraceSqm';
+        const totalSqmKnown = typeof session.collectedData.totalSqm === 'number';
+        const differsFromTotal = totalSqmKnown && session.collectedData.totalSqm !== firstNum;
+        if ((hasTerraceContext || (isTerraceQuestionCurrent && differsFromTotal && !hasPriceContext) || (!hasGenericSqm && !hasPriceContext))) {
           session.collectedData.hasTerrace = true;
           session.collectedData.terraceSqm = firstNum;
           console.log(`[TERRACE: ${firstNum}m2]`);
@@ -743,8 +814,10 @@ export function runComplexStatefulHandlers({ u, userInput, session, nextField, h
   // reported lead 5536052): bare "parno" must be a standalone word —
   // "SPARNO E DENES" (sultry weather, спарно) contains "parno" but is not
   // a heating mention. Cyrillic-aware boundary (JS \b is ASCII-only).
-  const parnoMentioned = /(?:^|[^a-zа-я])(?:parno|парно)(?:$|[^a-zа-я])/i.test(u) && !/nema parno|нема парно|nemame parno|немаме парно|nemaat parno|немаат парно|bez parno|без парно|ne e parno|не е парно/i.test(u);
-  // (isLandLead skips this entire branch — see the LAND GUARD at the top.)
+  // (parnoMentioned + the heatingParnoMentioned flag are computed at the TOP
+  // of this function — the terrace handler may consume the message before
+  // this section runs, but the parno-wins-over-inverter flag must already be
+  // set. isLandLead skips this section — see the LAND GUARD at the top.)
   if (!isLandLead && (nextField === 'heating' || session.collectedData.heatingFollowUp ||
       (parnoMentioned && !session.collectedData.heating))) {
     if (/gradsko|градско|граѓско|dalinsko|dalecno|далечно|toplovod|beg|(?:^|[^a-zа-я])(?:centralno|централно|central)(?:$|[^a-zа-я])/i.test(u)) {
@@ -769,7 +842,7 @@ export function runComplexStatefulHandlers({ u, userInput, session, nextField, h
         text: "Какво парно? Градско или сопствено?",
         type: "QUESTION"
       };
-    } else if ((/(?:^|[^a-zа-я])(?:klima|клима)(?:ta|та)?(?:$|[^a-zа-я])/i.test(u) || /inverter|инвертер|invertor|инвертор|klima inverter|клима инвертер|термопумпа|toplotna|топлотна|na klima|на клима|se gream|се греам/i.test(u) || (/(?:^|[^a-zа-я])(?:split|сплит)(?:$|[^a-zа-я])/i.test(u) && !/(?:^|[^a-zа-я])(?:od|од|vo|во|na|на|do|до|za|за)\s+(?:split|сплит)(?:$|[^a-zа-я])/i.test(u))) && !parnoMentioned) {
+    } else if ((/(?:^|[^a-zа-я])(?:klima|клима)(?:ta|та)?(?:$|[^a-zа-я])/i.test(u) || /inverter|инвертер|invertor|инвертор|klima inverter|клима инвертер|термопумпа|toplotna|топлотна|na klima|на клима|se gream|се греам/i.test(u) || (/(?:^|[^a-zа-я])(?:split|сплит)(?:$|[^a-zа-я])/i.test(u) && !/(?:^|[^a-zа-я])(?:od|од|vo|во|na|на|do|до|za|за)\s+(?:split|сплит)(?:$|[^a-zа-я])/i.test(u))) && !parnoMentioned && !session.collectedData.heatingParnoMentioned) {
       session.collectedData.heating = "electric";
       session.collectedData.heatingType = "inverter";
       session.collectedData.heatingFollowUp = false;
@@ -1132,6 +1205,23 @@ export function runComplexStatefulHandlers({ u, userInput, session, nextField, h
         };
       }
     }
+    // DOCUMENTATION-ISSUE GUARD (reported lead 5436709): a message carrying a
+    // documentation problem ("IMA HIPOTEKA", "ima teret", "nema legalizacija")
+    // is a DOCS ANSWER, never a name — the owner is following up on the
+    // documentation question, not telling us their name. Without the guard the
+    // generic store below crowns "Ima Hipoteka" as the owner name (and the
+    // premature documentationClean=true from "DA IMAM" is never corrected).
+    // Refuse the store: the extraction pass already applied the documentation
+    // correction (flipped true → false + issue); here we just make sure the
+    // docs-issue message never becomes the name, and re-ask the name question.
+    if (isDocumentationIssue(userInput)) {
+      console.log(`[OWNER NAME: documentation-issue content — NOT stored as name, docs corrected, re-asking]`);
+      return {
+        text: 'Само да потврдам, како да ве запишам?',
+        type: "QUESTION",
+        nextField: 'ownerName'
+      };
+    }
     if (userInput.trim().length > 0) {
       let cleaned = userInput.trim();
       // Strip known Macedonian conversational prefixes (Latin and Cyrillic)
@@ -1177,9 +1267,20 @@ export function runComplexStatefulHandlers({ u, userInput, session, nextField, h
   }
 
   // === address (gated — must be asked explicitly) ===
-  // PURE PHOTO-TALK GUARD — same as ownerName: "NA OVOJ BROJ TREBA" / a
-  // bare phone number is a photo-delivery arrangement, never an address.
+  // DOCUMENTATION-ISSUE GUARD — same as ownerName (reported lead 5436709):
+  // "IMA HIPOTEKA" at the address prompt is a docs answer, never an address.
+  // Refuse the store and re-ask the address question.
   if (nextField === 'address') {
+    if (isDocumentationIssue(userInput)) {
+      console.log(`[ADDRESS: documentation-issue content — NOT stored as address, re-asking]`);
+      return {
+        text: 'Само да потврдам, која е точната адреса?',
+        type: "QUESTION",
+        nextField: 'address'
+      };
+    }
+    // PURE PHOTO-TALK GUARD — same as ownerName: "NA OVOJ BROJ TREBA" / a
+    // bare phone number is a photo-delivery arrangement, never an address.
     if (isPurePhotoTalk(userInput)) {
       ensurePhotoDeliveryPending(session);
       console.log(`[ADDRESS: pure photo-talk — NOT stored, photos=VIBER_PENDING, re-asking]`);
@@ -1419,14 +1520,31 @@ export function runDataCollectionFlow({ u, userInput, session, adMemory, hasScra
     let prefix = "";
     if (fieldCount <= 1) {
       prefix = "Одлично. Ќе ми бидат потребни неколку информации за внес на вашата недвижност во системот. ";
-    } else if (fieldCount <= 3) {
-      prefix = filler + " ";
-    } else if (fieldCount <= 6) {
-      prefix = filler + " ";
-    } else if (fieldCount <= 10) {
+    } else if (fieldCount >= 7 && fieldCount <= 10 && !session.prasanjaIntroShown) {
+      // FIRST AND ONLY "Уште неколку прашања" (reported: BOTH прашања
+      // prefixes repeated on EVERY collecting-phase question — "Уште неколку
+      // прашања" on fieldCount 7-10, then "последниве информации" on every
+      // later question). This one fires EXACTLY ONCE, at the first question
+      // in the usual 7-10 zone (rent flow: the pets question). From there the
+      // QUESTION-POSITION counters below take over (fixed fieldCount
+      // thresholds can't track positions — each answer advances fieldCount
+      // by 1-2 keys, so a threshold-based "последниве" would land 1-2
+      // questions after the intro instead of the required 3):
+      //   - the next 3 questions → plain fillers, NO прашања prefix;
+      //   - the question after those → "последниве информации" ONCE;
+      //   - everything after → plain fillers till the end.
       prefix = filler + " Уште неколку прашања. ";
-    } else {
+      session.prasanjaIntroShown = true;
+      session.prasanjaPlainCount = 0;
+    } else if (session.prasanjaIntroShown && !session.prasanjaFinalShown && (session.prasanjaPlainCount || 0) < 3) {
+      prefix = filler + " ";
+      session.prasanjaPlainCount = (session.prasanjaPlainCount || 0) + 1;
+    } else if (session.prasanjaIntroShown && !session.prasanjaFinalShown) {
       prefix = "Одлично, уште последниве информации и завршуваме. ";
+      session.prasanjaFinalShown = true;
+      session.prasanjaPlainCount = (session.prasanjaPlainCount || 0) + 1;
+    } else {
+      prefix = filler + " ";
     }
 
     const propertyLabel = known.propertyType === 'apartment' ? 'станот' :

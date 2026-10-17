@@ -230,9 +230,9 @@ const payload = buildGeminiPayload(
     { role: 'assistant', content: 'Здраво.' },
     { role: 'user', content: 'DA' }
   ],
-  { model: 'gemini-2.5-flash', temperature: 0.2, top_p: 0.75, max_tokens: 150 }
+  { model: 'gemini-3.6-flash', temperature: 0.2, top_p: 0.75, max_tokens: 150 }
 );
-assert('G2a: URL targets the configured model', payload.url.includes('/models/gemini-2.5-flash:generateContent'), `got ${payload.url}`);
+assert('G2a: URL targets the configured model', payload.url.includes('/models/gemini-3.6-flash:generateContent'), `got ${payload.url}`);
 assert('G2b: system message → systemInstruction', payload.body.systemInstruction?.parts?.[0]?.text === 'Ти си Ана.', `got ${JSON.stringify(payload.body.systemInstruction)}`);
 assert('G2c: system message NOT duplicated into contents', payload.body.contents.length === 3, `got ${payload.body.contents.length}`);
 assert('G2d: assistant role mapped to model', payload.body.contents[1].role === 'model', `got ${payload.body.contents[1]?.role}`);
@@ -278,7 +278,7 @@ assert('G3d: undefined/0 budgets fall back to the floor',
 // End-to-end: the floor feeds buildGeminiPayload's maxOutputTokens
 const floored = buildGeminiPayload(
   [{ role: 'user', content: 'x' }],
-  { model: 'gemini-2.5-flash', temperature: 0.2, top_p: 0.75, max_tokens: persuasionBudget }
+  { model: 'gemini-3.6-flash', temperature: 0.2, top_p: 0.75, max_tokens: persuasionBudget }
 );
 assert('G3e: payload maxOutputTokens uses the floored budget',
   floored.body.generationConfig.maxOutputTokens === persuasionBudget,
@@ -379,6 +379,57 @@ assert('I6: unclassified fallback — generic cooperation ask',
   `got ${JSON.stringify(fbLine)}`);
 
 // ============================================================
+console.log('\n========================================');
+console.log('🧪 J: question-aware ladder — topic pitches win over the generic ask');
+console.log('========================================\n');
+
+// Tail phrasings that slip past the early-response gates must get the
+// topic answer, NOT the generic cooperation ask.
+
+// clients topic (sale + rent)
+const clSale = buildDeterministicPersuasion({ intent: 'INTERESTED', confidence: 0.7 }, false, 'kolku klienti imate?');
+assert('J1: clients topic (sale) — client answer, not the generic ask',
+  /клиенти|купувачи/.test(clSale) && /\?/.test(clSale),
+  `got ${JSON.stringify(clSale)}`);
+const clRent = buildDeterministicPersuasion({ intent: 'INTERESTED', confidence: 0.7 }, true, 'dali imate mnogu klienti?');
+assert('J2: clients topic (rent) — tenant answer (закупци), no "без провизија"',
+  /закупци|клиенти/.test(clRent) && !/без провизија/.test(clRent),
+  `got ${JSON.stringify(clRent)}`);
+
+// commission topic (sale — difference line; rent — 50% rule)
+const coSale = buildDeterministicPersuasion({ intent: 'INTERESTED', confidence: 0.7 }, false, 'sto ke pravite so parite?');
+assert('J3: commission topic (sale) — difference over clean price',
+  /разликат|барана цена|чиста цена|вашиот дел|заработуваме над неа/i.test(coSale),
+  `got ${JSON.stringify(coSale)}`);
+const coRent = buildDeterministicPersuasion({ intent: 'INTERESTED', confidence: 0.7 }, true, 'sto ke pravite so provizijata?');
+assert('J4: commission topic (rent) — standard 50% rule, never the sale line',
+  /50% од една месечна кирија/.test(coRent) && !/без провизија|разликат|барана цена/.test(coRent),
+  `got ${JSON.stringify(coRent)}`);
+
+// trust topic (wins over a soft-rejection intent)
+const trSale = buildDeterministicPersuasion({ intent: 'REJECTED', confidence: 0.6 }, false, 'ne veruvam na agencii');
+assert('J5: trust topic — transparency answer, not the generic rebuttal',
+  /транспарентно|проверите|скриени/.test(trSale),
+  `got ${JSON.stringify(trSale)}`);
+const trRent = buildDeterministicPersuasion({ intent: 'REJECTED', confidence: 0.6 }, true, 'ne vi veruvam');
+assert('J6: trust topic (rent) — no sale-only "не зема ништо" claim',
+  !/не зема ништо|немате никакви обврски|без провизија/.test(trRent),
+  `got ${JSON.stringify(trRent)}`);
+
+// speed topic
+const sp = buildDeterministicPersuasion({ intent: 'INTERESTED', confidence: 0.7 }, false, 'kolku brzo ke se prodade?');
+assert('J7: speed topic — timeline answer',
+  /неколку недели|2-3 недели|месеци|брзин/i.test(sp),
+  `got ${JSON.stringify(sp)}`);
+
+// topic pitch beats the generic ask even when it has a client word in it
+const topicVariants = new Set();
+for (let i = 0; i < 20; i++) {
+  topicVariants.add(buildDeterministicPersuasion({ intent: 'INTERESTED', confidence: 0.7 }, false, 'kolku klienti imate?'));
+}
+assert(`J8: clients topic varies across calls (${topicVariants.size} distinct)`, topicVariants.size >= 2);
+
+// ============================================================
 // PART J — runPersuasion LLM-free floor: every provider DOWN (or no keys
 // at all) → the owner gets the deterministic ladder, NEVER the
 // "техничка грешка" fallback. (ANA_OFFLINE_LLM is unset so the real
@@ -407,50 +458,48 @@ assert('J2: never the technical-error line to an owner',
   `got ${JSON.stringify(floor)}`);
 process.env.ANA_OFFLINE_LLM = '1'; // restore — the rest of the suite expects the offline seam
 
-// TIER ROUTING MAP (the offline seam returns before the LLM call, so the
-// classification → tier mapping is pinned directly): skeptical/soft-rejection
-// turns get the SMART tier (70b/flash), everything else the ROUTINE tier
-// (8b/flash-lite).
+// TIER ROUTING MAP (REVERTED — reported live: the 8b "routine" tier made
+// replies sound much worse). The map is pinned directly so the revert can't
+// silently creep back: EVERY intent (skeptical or not) gets the SMART tier
+// (70b/flash) — the 8b instant model is not in the reply path at all.
 assert('G5: REJECTED intent → rebuttal tier (smart model)',
   tierForClassification({ intent: 'REJECTED', confidence: 0.6 }) === 'rebuttal',
   `got ${tierForClassification({ intent: 'REJECTED', confidence: 0.6 })}`);
-assert('G6: INTERESTED → routine tier',
-  tierForClassification({ intent: 'INTERESTED', confidence: 0.7 }) === 'routine',
+assert('G6: INTERESTED → rebuttal tier (revert: no more routine 8b)',
+  tierForClassification({ intent: 'INTERESTED', confidence: 0.7 }) === 'rebuttal',
   `got ${tierForClassification({ intent: 'INTERESTED', confidence: 0.7 })}`);
-assert('G7: gated ACCEPTED → routine tier',
-  tierForClassification({ intent: 'ACCEPTED', confidence: 0.8 }) === 'routine',
+assert('G7: gated ACCEPTED → rebuttal tier (revert)',
+  tierForClassification({ intent: 'ACCEPTED', confidence: 0.8 }) === 'rebuttal',
   `got ${tierForClassification({ intent: 'ACCEPTED', confidence: 0.8 })}`);
-assert('G8: unclassified → routine tier',
-  tierForClassification(null) === 'routine' && tierForClassification(undefined) === 'routine',
+assert('G8: unclassified → rebuttal tier (revert)',
+  tierForClassification(null) === 'rebuttal' && tierForClassification(undefined) === 'rebuttal',
   `got ${tierForClassification(null)}`);
 
 // ============================================================
-// PART H — TIERED KEY/MODEL POOL (user-approved rotation: 8b routine +
-// 70b rebuttals, model rotation inside one key, Gemini multi-project keys)
+// PART H — MULTI-KEY POOL (single reply model — the 8b routine tier was
+// reverted from the reply path; every entry carries the SMART model)
 // ============================================================
 console.log('\n========================================');
-console.log('🧪 H: tiered key/model pool — tier routing, model rotation, multi-key, cooldown');
+console.log('🧪 H: multi-key pool — one smart entry per key, multi-key, cooldown');
 console.log('========================================\n');
 
-// Config reads env at MODULE LOAD, so tier models come from the committed
-// defaults (70b rebuttal / 8b routine / flash smart / flash-lite routine).
-// Key LISTS are read at call time (keyList) — settable here.
+// Config reads env at MODULE LOAD, so models come from the committed
+// defaults (70b versatile / flash). Key LISTS are read at call time
+// (keyList) — settable here.
 
 // --- H1: pool composition from env ---
 process.env.GROQ_API_KEYS = 'gsk-a,gsk-b';
 process.env.GEMINI_API_KEYS = 'AIza-1';
 const pool = buildKeyPool({ fresh: true });
-assert('H1a: 2 groq keys × 2 tiers + 1 gemini key × 2 tiers = 6 entries',
-  pool.length === 6, `got ${pool.length}: ${pool.map(e => e.provider + '/' + e.tier).join(', ')}`);
-const groqReb = pool.find(e => e.provider === 'groq' && e.tier === 'rebuttal');
-const groqRou = pool.find(e => e.provider === 'groq' && e.tier === 'routine');
-const gemReb = pool.find(e => e.provider === 'gemini' && e.tier === 'rebuttal');
-const gemRou = pool.find(e => e.provider === 'gemini' && e.tier === 'routine');
-assert('H1b: groq rebuttal tier → MODEL (70b)', groqReb.model === 'llama-3.3-70b-versatile', `got ${groqReb.model}`);
-assert('H1c: groq routine tier → MODEL_LITE (8b)', groqRou.model === 'llama-3.1-8b-instant', `got ${groqRou.model}`);
-assert('H1d: gemini rebuttal tier → GEMINI_MODEL (flash)', gemReb.model === 'gemini-2.5-flash', `got ${gemReb.model}`);
-assert('H1e: gemini routine tier → GEMINI_MODEL_LITE (flash-lite)', gemRou.model === 'gemini-2.5-flash-lite', `got ${gemRou.model}`);
-assert('H1f: both groq keys present', pool.filter(e => e.provider === 'groq').length === 4 &&
+assert('H1a: 2 groq keys + 1 gemini key = 3 entries (one smart model each)',
+  pool.length === 3, `got ${pool.length}: ${pool.map(e => e.provider).join(', ')}`);
+const groqE = pool.find(e => e.provider === 'groq');
+const gemE = pool.find(e => e.provider === 'gemini');
+assert('H1b: groq entry → MODEL (qwen3.8)', groqE.model === 'qwen/qwen3.8-27b', `got ${groqE.model}`);
+assert('H1c: gemini entry → GEMINI_MODEL (flash)', gemE.model === 'gemini-3.6-flash', `got ${gemE.model}`);
+assert('H1d: no lite/8b entry exists (revert — instant is not in the reply path)',
+  !pool.some(e => /instant|flash-lite/.test(e.model)), `got ${pool.map(e => e.model).join(', ')}`);
+assert('H1e: both groq keys present', pool.filter(e => e.provider === 'groq').length === 2 &&
   new Set(pool.filter(e => e.provider === 'groq').map(e => e.key)).size === 2,
   'expected 2 distinct groq keys');
 
@@ -460,11 +509,11 @@ delete process.env.GROQ_API_KEYS;
 delete process.env.GEMINI_API_KEYS;
 delete process.env.GEMINI_API_KEY;
 const poolSingle = buildKeyPool({ fresh: true });
-assert('H1g: single GROQ_API_KEY → 2 entries (both tiers, one key)',
-  poolSingle.length === 2 && poolSingle[0].key === 'gsk-single' && poolSingle[1].key === 'gsk-single',
+assert('H1f: single GROQ_API_KEY → 1 entry (smart model, one key)',
+  poolSingle.length === 1 && poolSingle[0].key === 'gsk-single',
   `got ${poolSingle.map(e => e.key).join(',')}`);
 
-// --- H2: tier routing picks the right model FIRST ---
+// --- H2: the smart model is what every reply uses ---
 resetKeyPoolCache();
 process.env.GROQ_API_KEYS = 'gsk-a';
 delete process.env.GROQ_API_KEY;
@@ -473,31 +522,27 @@ const routeFns = {
   groq: async (params, o) => { seen.push(o.model); return { text: 'ok ' + o.model }; },
   gemini: async () => { seen.push('gemini'); return { text: 'g' }; }
 };
-res = await generateCompletion({ messages: [] }, { tier: 'routine', pool: { fresh: true, fns: routeFns } });
-assert('H2a: routine tier tries MODEL_LITE (8b) first', seen[0] === 'llama-3.1-8b-instant', `got ${seen[0]}`);
-assert('H2b: routine reply returned', /^ok /.test(res.text), `got ${JSON.stringify(res.text)}`);
+res = await generateCompletion({ messages: [] }, { pool: { fresh: true, fns: routeFns } });
+assert('H2a: the ONLY groq model tried is MODEL (qwen3.8)', seen[0] === 'qwen/qwen3.8-27b', `got ${seen[0]}`);
+assert('H2b: smart reply returned', /^ok /.test(res.text), `got ${JSON.stringify(res.text)}`);
 
-seen = [];
-res = await generateCompletion({ messages: [] }, { tier: 'rebuttal', pool: { fresh: true, fns: routeFns } });
-assert('H2c: rebuttal tier tries MODEL (70b) first', seen[0] === 'llama-3.3-70b-versatile', `got ${seen[0]}`);
-
-// --- H3: MODEL ROTATION inside one key — routine 429 → rebuttal model on
-// the SAME key serves, Gemini never touched ---
+// --- H3: SMART model 429 on the only groq key → Gemini fallback serves
+// (the per-key model rotation of the old split is gone; the fallback
+// provider is the capacity hedge now) ---
 resetKeyPoolCache();
 process.env.GROQ_API_KEYS = 'gsk-only';
+process.env.GEMINI_API_KEYS = 'AIza-h3'; // gemini fallback needed for H3's cascade
 seen = [];
 const rotFns = {
   groq: async (params, o) => {
     seen.push(o.model);
-    if (o.model === 'llama-3.1-8b-instant') throw tpd429Error(); // routine 8b exhausted
-    return { text: 'smart saved it' };                          // rebuttal 70b has its own bucket
+    throw tpd429Error(); // the one smart entry exhausted → cascade
   },
-  gemini: async () => { seen.push('gemini'); return { text: 'g' }; }
+  gemini: async () => { seen.push('gemini'); return { text: 'gemini saved it' }; }
 };
-res = await generateCompletion({ messages: [] }, { tier: 'routine', pool: { fresh: true, fns: rotFns } });
-assert('H3a: routine 429 → same key rebuttal model serves (per-model buckets)',
-  res.text === 'smart saved it', `got ${JSON.stringify(res.text)}`);
-assert('H3b: gemini fallback NOT reached', !seen.includes('gemini'), `got ${JSON.stringify(seen)}`);
+res = await generateCompletion({ messages: [] }, { pool: { fresh: true, fns: rotFns } });
+assert('H3a: smart groq 429 → Gemini fallback serves', res.text === 'gemini saved it', `got ${JSON.stringify(res.text)}`);
+assert('H3b: groq smart model tried first', seen[0] === 'qwen/qwen3.8-27b', `got ${JSON.stringify(seen)}`);
 
 // --- H4: MULTI-KEY rotation — key1 429 → key2 serves ---
 resetKeyPoolCache();
@@ -511,7 +556,7 @@ const multiFns = {
   },
   gemini: async () => { seen.push('gemini'); return { text: 'g' }; }
 };
-res = await generateCompletion({ messages: [] }, { tier: 'routine', pool: { fresh: true, fns: multiFns } });
+res = await generateCompletion({ messages: [] }, { pool: { fresh: true, fns: multiFns } });
 assert('H4a: key1 429 → key2 serves', res.text === 'key2 wins', `got ${JSON.stringify(res.text)}`);
 assert('H4b: key2 tried after key1',
   seen.indexOf('gsk-a') !== -1 && seen.indexOf('gsk-a') < seen.indexOf('gsk-b'),
@@ -532,21 +577,21 @@ let poolErr = null;
 // FIRST call builds + CACHES the pool (no fresh) and attempts every entry
 // (all fresh) — each 429 parks its entry; the LAST error surfaces.
 try {
-  await generateCompletion({ messages: [] }, { tier: 'routine', pool: { fns: parkFns } });
+  await generateCompletion({ messages: [] }, { pool: { fns: parkFns } });
 } catch (e) {
   poolErr = e;
 }
 assert('H5a: first call — every fresh entry attempted, last 429 thrown',
   poolErr !== null && /429|too many requests|rate limit/i.test(poolErr.message), `got ${poolErr?.message}`);
 assert('H5b: entries attempted exactly once (429 = no retries, then parked)',
-  exhausted === 4, `got ${exhausted}`);
+  exhausted === 2, `got ${exhausted}`);  // 1 groq + 1 gemini entry (no lite tier anymore)
 
 // Second call within the cooldown window: the CACHED pool's entries are all
 // parked (cooldown persisted) → zero attempts, clear parked error.
 exhausted = 0;
 let poolErr2 = null;
 try {
-  await generateCompletion({ messages: [] }, { tier: 'routine', pool: { fns: parkFns } });
+  await generateCompletion({ messages: [] }, { pool: { fns: parkFns } });
 } catch (e) {
   poolErr2 = e;
 }
@@ -561,7 +606,7 @@ delete process.env.GEMINI_API_KEYS;
 delete process.env.GEMINI_API_KEY;
 let noKeyErr = null;
 try {
-  await generateCompletion({ messages: [] }, { tier: 'routine', pool: { fresh: true } });
+  await generateCompletion({ messages: [] }, { pool: { fresh: true } });
 } catch (e) {
   noKeyErr = e;
 }

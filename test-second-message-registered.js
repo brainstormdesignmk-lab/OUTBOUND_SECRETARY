@@ -325,6 +325,231 @@ assert('F2: phase entered DATA_COLLECTION',
   `phase=${e5.getSession('3571074').phase}`);
 
 // ============================================================
+// PART G — reported lead 5436709: docs follow-up "IMA HIPOTEKA" must NOT
+// become the owner name, must CORRECT documentationClean, and the address
+// question must NOT carry the availability ack (a docs answer "DA IMAM" is
+// not an availability statement).
+// ============================================================
+console.log('\n========================================');
+console.log('🧪 G: docs follow-up "IMA HIPOTEKA" → correction, never name, no ack');
+console.log('========================================\n');
+
+const G_SESSION = {
+  adMemory: { transactionType: 'sale', propertyType: 'apartment', propertyLabel: 'станот', sourcePortal: 'test', adUrl: 'https://test.com/ad', photoUrls: [] },
+  collectedData: {
+    cooperationAccepted: true, transactionType: 'sale', propertyType: 'apartment',
+    cleanPrice: 98000, cleanPriceConfidence: 0.95,
+    totalSqm: 55, totalSqmConfidence: 0.95,
+    terraceSqm: 0, terraceSqmConfidence: 0.95,
+    bedrooms: 2, bedroomsConfidence: 0.95,
+    floor: 3, floorConfidence: 0.95,
+    totalFloors: 10, totalFloorsConfidence: 0.95,
+    elevator: true, elevatorConfidence: 0.95,
+    heating: 'district', heatingConfidence: 0.95,
+    ac: true, acConfidence: 0.95,
+    parking: true, parkingConfidence: 0.95,
+    orientation: 'jug', orientationConfidence: 0.95,
+    furnished: true, furnishedConfidence: 0.95,
+    yearBuilt: 2015, yearBuiltConfidence: 0.95,
+    renovated: true, renovatedConfidence: 0.95,
+    renovationYear: 2020, renovationYearConfidence: 0.95
+  },
+  messages: [{ role: 'model', text: 'Во ред. Дали имате чист имотен лист?' }],
+  phone: '+38970999999'
+};
+
+// Turn 1: "DA IMAM" → docs clean (bare yes), then Turn 2: "IMA HIPOTEKA"
+const g1 = await generateResponse(G_SESSION, 'DA IMAM');
+assert('G1: "DA IMAM" → documentationClean=true (bare yes)',
+  G_SESSION.collectedData.documentationClean === true, `got ${G_SESSION.collectedData.documentationClean}`);
+const g2 = await generateResponse(G_SESSION, 'IMA HIPOTEKA');
+assert('G2: "IMA HIPOTEKA" CORRECTS documentationClean → false',
+  G_SESSION.collectedData.documentationClean === false, `got ${G_SESSION.collectedData.documentationClean}`);
+assert('G2b: correction records the issue',
+  G_SESSION.collectedData.documentationIssues === 'hipoteka', `got ${JSON.stringify(G_SESSION.collectedData.documentationIssues)}`);
+assert('G2c: "IMA HIPOTEKA" NEVER becomes the owner name',
+  G_SESSION.collectedData.ownerName === undefined, `got ${JSON.stringify(G_SESSION.collectedData.ownerName)}`);
+assert('G2d: the name is re-asked, not skipped',
+  g2 && g2.type === 'QUESTION' && g2.nextField === 'ownerName', `got ${JSON.stringify(g2 && { type: g2.type, nextField: g2.nextField })}`);
+
+// Now the owner gives the name, then the address question must NOT carry the
+// availability ack (a docs answer "DA IMAM" is not an availability statement).
+const g3 = await generateResponse(G_SESSION, 'Goran Petrov');
+assert('G3: name stored', G_SESSION.collectedData.ownerName === 'Goran Petrov', `got ${JSON.stringify(G_SESSION.collectedData.ownerName)}`);
+assert('G3b: address question WITHOUT the availability ack',
+  g3 && g3.type === 'QUESTION' && g3.nextField === 'address' && !/сè уште е достапен/.test(g3.text || ''),
+  `got ${JSON.stringify(g3 && g3.text)}`);
+assert('G3c: availability NOT marked acknowledged by a docs answer',
+  G_SESSION.availabilityAcknowledged !== true, `flag=${G_SESSION.availabilityAcknowledged}`);
+
+// Grace-batch variant: BOTH messages in one window — the docs correction
+// still lands and no availability ack leaks into the next question.
+const G_SESSION2 = JSON.parse(JSON.stringify(G_SESSION));
+G_SESSION2.messages = [{ role: 'model', text: 'Во ред. Дали имате чист имотен лист?' }];
+G_SESSION2.collectedData.documentationClean = undefined;
+delete G_SESSION2.collectedData.documentationClean;
+delete G_SESSION2.collectedData.documentationIssues;
+delete G_SESSION2.collectedData.ownerName;
+G_SESSION2.messages.push({ role: 'user', text: 'DA IMAM' });
+G_SESSION2.messages.push({ role: 'user', text: 'IMA HIPOTEKA' });
+const gb = await generateResponse(G_SESSION2, 'IMA HIPOTEKA');
+assert('G4: batch [DA IMAM, IMA HIPOTEKA] → docs corrected to false',
+  G_SESSION2.collectedData.documentationClean === false, `got ${G_SESSION2.collectedData.documentationClean}`);
+assert('G4b: batch → name NEVER stored',
+  G_SESSION2.collectedData.ownerName === undefined, `got ${JSON.stringify(G_SESSION2.collectedData.ownerName)}`);
+assert('G4c: batch reply is the name question, no availability ack',
+  gb && gb.type === 'QUESTION' && gb.nextField === 'ownerName' && !/сè уште е достапен/.test(gb.text || ''),
+  `got ${JSON.stringify(gb && gb.text)}`);
+
+// DIRECT-ANSWER variant (verification request): "IMA HIPOTEKA" as the FIRST
+// and ONLY answer to the docs question — no prior "DA IMAM". The issue must
+// be extracted directly (STEP-1 group pass) at HIGH, and the flow moves on.
+const G_DIRECT = JSON.parse(JSON.stringify(G_SESSION));
+G_DIRECT.messages = [{ role: 'model', text: 'Во ред. Дали имате чист имотен лист?' }];
+// G_SESSION was mutated by earlier PART G turns (g3 stored ownerName), so
+// strip it — the direct-answer session must be pristine (docs → name next).
+delete G_DIRECT.collectedData.ownerName;
+delete G_DIRECT.collectedData.ownerNameConfidence;
+delete G_DIRECT.collectedData.documentationClean;
+delete G_DIRECT.collectedData.documentationIssues;
+delete G_DIRECT.collectedData.documentationCleanConfidence;
+const gd = await generateResponse(G_DIRECT, 'IMA HIPOTEKA');
+assert('G6: direct "IMA HIPOTEKA" (no prior DA IMAM) → documentationClean=false',
+  G_DIRECT.collectedData.documentationClean === false, `got ${G_DIRECT.collectedData.documentationClean}`);
+assert('G6b: direct answer records the issue',
+  G_DIRECT.collectedData.documentationIssues === 'hipoteka', `got ${JSON.stringify(G_DIRECT.collectedData.documentationIssues)}`);
+assert('G6c: direct answer stored at HIGH (no confirmation re-ask)',
+  G_DIRECT.collectedData.documentationCleanConfidence === 0.95, `got ${G_DIRECT.collectedData.documentationCleanConfidence}`);
+assert('G6d: direct answer never becomes the name; flow moved to ownerName',
+  gd && gd.type === 'QUESTION' && gd.nextField === 'ownerName' && G_DIRECT.collectedData.ownerName === undefined,
+  `got ${JSON.stringify(gd && { type: gd.type, nextField: gd.nextField })}`);
+
+// CONTROL: the genuine availability statement STILL acks once (pinned A2)
+const G_SESSION3 = JSON.parse(JSON.stringify(G_SESSION));
+G_SESSION3.messages = [{ role: 'model', text: 'Во ред. Дали имате чист имотен лист?' }];
+G_SESSION3.collectedData.documentationClean = undefined;
+delete G_SESSION3.collectedData.documentationClean;
+const g4 = await generateResponse(G_SESSION3, 'uste ne sum go prodal');
+assert('G5: genuine availability statement still acks',
+  /сè уште е достапен/.test(g4.text || ''), `got ${JSON.stringify((g4.text || '').slice(0, 80))}`);
+
+// ============================================================
+// PART H — binary correction audit (mirror of DCC for ALL binary fields):
+// the owner answers a binary question with a bare "DA" (→ true), then the
+// NEXT message reveals the real state ("NEMA LIFT", "NE E RENOVIRAN",
+// "PRAZEN E") — the stored true must be corrected to false mid-collection
+// (the same late-correction dead-end documentationClean had, now fixed for
+// every binary field).
+// ============================================================
+console.log('\n========================================');
+console.log('🧪 H: late binary corrections — bare-yes then negative follow-up');
+console.log('========================================\n');
+
+// Base H session: ALL earlier-order fields already filled, so the NEXT missing
+// field is whichever binary field the test targets (bare-yes "DA" maps to the
+// current question via getNextMissingField, not the last message text).
+function makeHSession() {
+  return {
+    adMemory: { transactionType: 'sale', propertyType: 'apartment', propertyLabel: 'станот', sourcePortal: 'test', adUrl: 'https://test.com/ad', photoUrls: [] },
+    collectedData: {
+      cooperationAccepted: true, transactionType: 'sale', propertyType: 'apartment',
+      cleanPrice: 98000, cleanPriceConfidence: 0.95,
+      totalSqm: 55, totalSqmConfidence: 0.95,
+      terraceSqm: 0, terraceSqmConfidence: 0.95,
+      bedrooms: 2, bedroomsConfidence: 0.95,
+      floor: 3, floorConfidence: 0.95,
+      totalFloors: 10, totalFloorsConfidence: 0.95,
+      elevator: true, elevatorConfidence: 0.95,
+      heating: 'district', heatingConfidence: 0.95,
+      ac: true, acConfidence: 0.95,
+      parking: true, parkingConfidence: 0.95,
+      orientation: 'jug', orientationConfidence: 0.95,
+      furnished: true, furnishedConfidence: 0.95,
+      yearBuilt: 2015, yearBuiltConfidence: 0.95,
+      renovated: true, renovatedConfidence: 0.95,
+      renovationYear: 2020, renovationYearConfidence: 0.95
+    },
+    messages: [{ role: 'model', text: 'Во ред. Дали има лифт во зградата?' }],
+    phone: '+38970888888'
+  };
+}
+
+// Elevator: bare-yes "DA" → true, then "NEMA LIFT" corrects it.
+const H_SESSION = makeHSession();
+delete H_SESSION.collectedData.elevator;
+delete H_SESSION.collectedData.elevatorConfidence;
+const h1 = await generateResponse(H_SESSION, 'DA');
+assert('H1: "DA" to elevator question → elevator=true (bare yes)',
+  H_SESSION.collectedData.elevator === true, `got ${H_SESSION.collectedData.elevator}`);
+const h2 = await generateResponse(H_SESSION, 'NEMA LIFT');
+assert('H2: "NEMA LIFT" CORRECTS elevator=true → false',
+  H_SESSION.collectedData.elevator === false, `got ${H_SESSION.collectedData.elevator}`);
+
+// Renovated: bare-yes "DA" → true, then "NE E RENOVIRAN" corrects + clears year.
+const H_SESSION2 = makeHSession();
+delete H_SESSION2.collectedData.renovated;
+delete H_SESSION2.collectedData.renovatedConfidence;
+delete H_SESSION2.collectedData.renovationYear;
+delete H_SESSION2.collectedData.renovationYearConfidence;
+H_SESSION2.messages = [{ role: 'model', text: 'Дали е реновиран?' }];
+const h3 = await generateResponse(H_SESSION2, 'DA');
+assert('H3: "DA" to renovated question → renovated=true',
+  H_SESSION2.collectedData.renovated === true, `got ${H_SESSION2.collectedData.renovated}`);
+const h4 = await generateResponse(H_SESSION2, 'NE E RENOVIRAN');
+assert('H4: "NE E RENOVIRAN" CORRECTS renovated=true → false',
+  H_SESSION2.collectedData.renovated === false, `got ${H_SESSION2.collectedData.renovated}`);
+
+// Furnished: bare-yes "DA" → true, then "PRAZEN E" corrects + sets level empty.
+const H_SESSION3 = makeHSession();
+delete H_SESSION3.collectedData.furnished;
+delete H_SESSION3.collectedData.furnishedConfidence;
+H_SESSION3.messages = [{ role: 'model', text: 'Дали е наместен?' }];
+const h5 = await generateResponse(H_SESSION3, 'DA');
+assert('H5: "DA" to furnished question → furnished=true',
+  H_SESSION3.collectedData.furnished === true, `got ${H_SESSION3.collectedData.furnished}`);
+const h6 = await generateResponse(H_SESSION3, 'PRAZEN E');
+assert('H6: "PRAZEN E" CORRECTS furnished=true → false',
+  H_SESSION3.collectedData.furnished === false, `got ${H_SESSION3.collectedData.furnished}`);
+
+// AC: bare-yes "DA" → true, then "NEMA KLIMA" corrects.
+const H_SESSION4 = makeHSession();
+delete H_SESSION4.collectedData.ac;
+delete H_SESSION4.collectedData.acConfidence;
+H_SESSION4.messages = [{ role: 'model', text: 'Дали има клима?' }];
+const h7 = await generateResponse(H_SESSION4, 'DA');
+assert('H7: "DA" to ac question → ac=true',
+  H_SESSION4.collectedData.ac === true, `got ${H_SESSION4.collectedData.ac}`);
+const h8 = await generateResponse(H_SESSION4, 'NEMA KLIMA');
+assert('H8: "NEMA KLIMA" CORRECTS ac=true → false',
+  H_SESSION4.collectedData.ac === false, `got ${H_SESSION4.collectedData.ac}`);
+
+// Parking: bare-yes "DA" → true, then "NEMA PARKING" corrects.
+const H_SESSION5 = makeHSession();
+delete H_SESSION5.collectedData.parking;
+delete H_SESSION5.collectedData.parkingConfidence;
+delete H_SESSION5.collectedData.parkingType;
+H_SESSION5.messages = [{ role: 'model', text: 'Каков е паркингот? Гаража, приватен или јавен?' }];
+const h9 = await generateResponse(H_SESSION5, 'DA');
+assert('H9: "DA" to parking question → parking=true',
+  H_SESSION5.collectedData.parking === true, `got ${H_SESSION5.collectedData.parking}`);
+const h10 = await generateResponse(H_SESSION5, 'NEMA PARKING');
+assert('H10: "NEMA PARKING" CORRECTS parking=true → false',
+  H_SESSION5.collectedData.parking === false, `got ${H_SESSION5.collectedData.parking}`);
+
+// CONTROL: a stored false (owner already said "NE") is never flipped by a
+// later negative — no flip-flop in the same field.
+const H_SESSION6 = makeHSession();
+delete H_SESSION6.collectedData.elevator;
+delete H_SESSION6.collectedData.elevatorConfidence;
+H_SESSION6.messages = [{ role: 'model', text: 'Во ред. Дали има лифт во зградата?' }];
+const h11 = await generateResponse(H_SESSION6, 'NE');
+assert('H11: "NE" to elevator question → elevator=false',
+  H_SESSION6.collectedData.elevator === false, `got ${H_SESSION6.collectedData.elevator}`);
+const h12 = await generateResponse(H_SESSION6, 'NEMA LIFT');
+assert('H12: stored elevator=false stays false (no flip-flop)',
+  H_SESSION6.collectedData.elevator === false, `got ${H_SESSION6.collectedData.elevator}`);
+
+// ============================================================
 // SUMMARY
 // ============================================================
 harness.summary('SECOND-MESSAGE-REGISTERED TESTS');
